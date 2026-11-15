@@ -15,6 +15,7 @@ data class WatchlistEntity(
     val releaseDate: String = "",
     val voteAverage: Double = 0.0,
     val genres: String = "", // Comma-separated
+    val certification: String = "",
     val vidlyId: String = "",
     val addedAt: Long = System.currentTimeMillis()
 )
@@ -31,6 +32,7 @@ data class ContinueWatchingEntity(
     val releaseDate: String = "",
     val voteAverage: Double = 0.0,
     val genres: String = "",
+    val certification: String = "",
     val numberOfSeasons: Int = 1,
     val episodesPerSeason: Int = 10,
     val season: Int = 1,
@@ -44,16 +46,17 @@ data class ContinueWatchingEntity(
 
 @Entity(tableName = "custom_media")
 data class CustomMediaEntity(
-    @PrimaryKey val id: String,
-    val title: String,
-    val overview: String,
-    val posterPath: String,
+    @PrimaryKey val id: String = "",
+    val title: String = "",
+    val overview: String = "",
+    val posterPath: String = "",
     val backdropPath: String = "",
     val mediaType: String = "movie",
     val releaseDate: String = "",
     val voteAverage: Double = 8.0,
     val genres: String = "Action, Drama",
-    val vidlyId: String,
+    val certification: String = "",
+    val vidlyId: String = "",
     val tmdbId: Long? = null,
     val trailerYoutubeKey: String? = null,
     val numberOfSeasons: Int = 1,
@@ -64,8 +67,8 @@ data class CustomMediaEntity(
 @Entity(tableName = "announcements")
 data class AdminAnnouncementEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val title: String,
-    val message: String,
+    val title: String = "",
+    val message: String = "",
     val type: String = "INFO", // "INFO", "WARNING", "UPDATE"
     val active: Boolean = true,
     val createdAt: Long = System.currentTimeMillis()
@@ -91,14 +94,14 @@ data class AdConfigEntity(
     val requiredStaySeconds: Int = 30,
     val cooldownHours: Int = 6,
     val lastCompletedAtMillis: Long = 0L,
+    val cooldownResetAtMillis: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "admin_security")
 data class AdminSecurityEntity(
     @PrimaryKey val id: Int = 1,
-    val passcodeHash: String,
+    val passcodeHash: String = "",
     val isDefault: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis()
 )
-

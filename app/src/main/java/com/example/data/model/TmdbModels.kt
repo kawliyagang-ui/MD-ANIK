@@ -97,3 +97,68 @@ data class TmdbVideoDto(
     val site: String,
     val type: String
 )
+
+@JsonClass(generateAdapter = true)
+data class TmdbReleaseDateEntryDto(
+    val certification: String? = null,
+    val type: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbCountryReleaseDatesDto(
+    @param:Json(name = "iso_3166_1") val iso31661: String = "",
+    @param:Json(name = "release_dates") val releaseDates: List<TmdbReleaseDateEntryDto> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbMovieReleaseDatesResponse(
+    val id: Long = 0L,
+    val results: List<TmdbCountryReleaseDatesDto> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbTvRatingEntryDto(
+    @param:Json(name = "iso_3166_1") val iso31661: String = "",
+    val rating: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbTvContentRatingsResponse(
+    val id: Long = 0L,
+    val results: List<TmdbTvRatingEntryDto> = emptyList()
+)
+
+fun TmdbMovieReleaseDatesResponse.extractBestCertification(): String {
+    val preferredCountries = listOf("US", "GB", "CA", "AU", "IN")
+    for (country in preferredCountries) {
+        val cert = results
+            .firstOrNull { it.iso31661.equals(country, ignoreCase = true) }
+            ?.releaseDates
+            ?.firstOrNull { !it.certification.isNullOrBlank() }
+            ?.certification
+            ?.trim()
+        if (!cert.isNullOrBlank()) return cert
+    }
+    return results
+        .asSequence()
+        .flatMap { it.releaseDates.asSequence() }
+        .mapNotNull { it.certification?.trim() }
+        .firstOrNull { it.isNotBlank() }
+        .orEmpty()
+}
+
+fun TmdbTvContentRatingsResponse.extractBestCertification(): String {
+    val preferredCountries = listOf("US", "GB", "CA", "AU", "IN")
+    for (country in preferredCountries) {
+        val rating = results
+            .firstOrNull { it.iso31661.equals(country, ignoreCase = true) }
+            ?.rating
+            ?.trim()
+        if (!rating.isNullOrBlank()) return rating
+    }
+    return results
+        .asSequence()
+        .mapNotNull { it.rating?.trim() }
+        .firstOrNull { it.isNotBlank() }
+        .orEmpty()
+}

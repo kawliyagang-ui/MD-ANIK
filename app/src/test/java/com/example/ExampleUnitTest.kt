@@ -733,7 +733,150 @@ class ExampleUnitTest {
             )
         )
     }
+
+    @Test
+    fun testFirestoreSyncMappersRoundtripAndAdCooldownReset() {
+        val custom = CustomMediaEntity(
+            id = "custom_123",
+            title = "Inception",
+            overview = "Dream heist",
+            posterPath = "https://image.tmdb.org/t/p/w500/inception.jpg",
+            backdropPath = "https://image.tmdb.org/t/p/w1280/inception_bg.jpg",
+            mediaType = "movie",
+            releaseDate = "2010",
+            voteAverage = 8.8,
+            genres = "Action, Sci-Fi",
+            certification = "PG-13",
+            vidlyId = "27205",
+            tmdbId = 27205L,
+            numberOfSeasons = 1,
+            episodesPerSeason = 1,
+            createdAt = 1_700_000_000_000L
+        )
+        val customMap = CatalogSyncMappers.customMediaToMap(custom)
+        val decodedCustom = CatalogSyncMappers.customMediaFromMap("custom_123", customMap)!!
+        assertEquals("Inception", decodedCustom.title)
+        assertEquals("PG-13", decodedCustom.certification)
+        assertEquals(27205L, decodedCustom.tmdbId)
+        assertEquals(8.8, decodedCustom.voteAverage, 0.01)
+
+        val announcement = AdminAnnouncementEntity(
+            id = 4242,
+            title = "Server Upgrade",
+            message = "All 4K mirrors active",
+            type = "UPDATE",
+            active = true,
+            createdAt = 1_700_000_001_000L
+        )
+        val annMap = CatalogSyncMappers.announcementToMap(announcement)
+        val decodedAnn = CatalogSyncMappers.announcementFromMap("ann_4242", annMap)!!
+        assertEquals(4242, decodedAnn.id)
+        assertEquals("Server Upgrade", decodedAnn.title)
+        assertEquals("UPDATE", decodedAnn.type)
+        assertTrue(decodedAnn.active)
+
+        // Remote AdConfig preserves user's local completion timestamp unless admin reset is newer
+        val localAd = AdConfigEntity(
+            id = 1,
+            isEnabled = true,
+            adUrl = "https://ad.example.com",
+            lastCompletedAtMillis = 2_000L,
+            cooldownResetAtMillis = 1_000L
+        )
+        val remoteConfigWithoutReset = CatalogSyncMappers.adConfigToMap(
+            AdConfigEntity(
+                isEnabled = true,
+                adUrl = "https://ad.new.example.com",
+                headline = "Updated Headline",
+                cooldownResetAtMillis = 1_000L,
+                updatedAt = 3_000L
+            )
+        )
+        val mergedPreserved = CatalogSyncMappers.adConfigFromMap(remoteConfigWithoutReset, localAd)!!
+        assertEquals("Updated Headline", mergedPreserved.headline)
+        assertEquals(2_000L, mergedPreserved.lastCompletedAtMillis)
+
+        // When admin triggers Reset 6h Timer (cooldownResetAtMillis > local lastCompletedAtMillis), local timer resets to 0
+        val remoteConfigWithReset = CatalogSyncMappers.adConfigToMap(
+            AdConfigEntity(
+                isEnabled = true,
+                adUrl = "https://ad.new.example.com",
+                cooldownResetAtMillis = 5_000L,
+                updatedAt = 5_000L
+            )
+        )
+        val mergedReset = CatalogSyncMappers.adConfigFromMap(remoteConfigWithReset, localAd)!!
+        assertEquals(0L, mergedReset.lastCompletedAtMillis)
+    }
+
+    @Test
+    fun testCatalogOverridePolicyAppliesCertificationAndEditsToMatchingTmdbItems() {
+        val tmdbTrendingItem = MediaItem(
+            id = "27205",
+            tmdbId = 27205L,
+            title = "Inception",
+            overview = "Original TMDB overview",
+            posterPath = "/orig.jpg",
+            mediaType = "movie",
+            releaseDate = "2010-07-16",
+            voteAverage = 8.4,
+            genres = listOf("Action", "Sci-Fi"),
+            certification = "",
+            vidlyId = "27205"
+        )
+        val adminEditedOverride = CustomMediaEntity(
+            id = "custom_inception",
+            tmdbId = 27205L,
+            title = "Inception (Director's Cut)",
+            overview = "Edited in Admin Gateway",
+            posterPath = "https://image.tmdb.org/t/p/w500/orig.jpg",
+            mediaType = "movie",
+            releaseDate = "2010",
+            voteAverage = 9.2,
+            genres = "Action, Sci-Fi, Mystery",
+            certification = "PG-13",
+            vidlyId = "27205"
+        ).toMediaItem()
+
+        val overlaid = CatalogOverridePolicy.applyAdminOverrides(
+            items = listOf(tmdbTrendingItem),
+            customMedia = listOf(adminEditedOverride)
+        )
+        assertEquals(1, overlaid.size)
+        assertEquals("Inception (Director's Cut)", overlaid.first().title)
+        assertEquals("PG-13", overlaid.first().certification)
+        assertEquals(9.2, overlaid.first().voteAverage, 0.01)
+        assertTrue(overlaid.first().genres.contains("Mystery"))
+    }
+
+    @Test
+    fun testTmdbCertificationExtractionPrefersUsFallback() {
+        val movieResp = TmdbMovieReleaseDatesResponse(
+            id = 27205L,
+            results = listOf(
+                TmdbCountryReleaseDatesDto(
+                    iso31661 = "GB",
+                    releaseDates = listOf(TmdbReleaseDateEntryDto(certification = "12A"))
+                ),
+                TmdbCountryReleaseDatesDto(
+                    iso31661 = "US",
+                    releaseDates = listOf(TmdbReleaseDateEntryDto(certification = "PG-13"))
+                )
+            )
+        )
+        assertEquals("PG-13", movieResp.extractBestCertification())
+
+        val tvResp = TmdbTvContentRatingsResponse(
+            id = 1399L,
+            results = listOf(
+                TmdbTvRatingEntryDto(iso31661 = "DE", rating = "16"),
+                TmdbTvRatingEntryDto(iso31661 = "US", rating = "TV-MA")
+            )
+        )
+        assertEquals("TV-MA", tvResp.extractBestCertification())
+    }
 }
+
 
 
 

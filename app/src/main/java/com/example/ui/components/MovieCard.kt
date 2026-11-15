@@ -241,6 +241,22 @@ fun MovieCard(
         )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (media.certification.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .border(0.75.dp, colors.gold.copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = media.certification,
+                        color = colors.gold,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.width(5.dp))
+            }
             val year = media.releaseDate.take(4)
             if (year.isNotBlank()) {
                 Text(

@@ -1,7 +1,9 @@
 package com.example.data.remote
 
+import com.example.data.model.TmdbMovieReleaseDatesResponse
 import com.example.data.model.TmdbPageResponse
 import com.example.data.model.TmdbSeasonDetailsDto
+import com.example.data.model.TmdbTvContentRatingsResponse
 import com.example.data.model.TmdbTvDetailsDto
 import com.example.data.model.TmdbVideosResponse
 import retrofit2.http.GET
@@ -59,4 +61,16 @@ interface TmdbApiService {
         @Path("tv_id") tvId: Long,
         @Query("api_key") apiKey: String
     ): TmdbVideosResponse
+
+    @GET("movie/{movie_id}/release_dates")
+    suspend fun getMovieReleaseDates(
+        @Path("movie_id") movieId: Long,
+        @Query("api_key") apiKey: String
+    ): TmdbMovieReleaseDatesResponse
+
+    @GET("tv/{tv_id}/content_ratings")
+    suspend fun getTvContentRatings(
+        @Path("tv_id") tvId: Long,
+        @Query("api_key") apiKey: String
+    ): TmdbTvContentRatingsResponse
 }

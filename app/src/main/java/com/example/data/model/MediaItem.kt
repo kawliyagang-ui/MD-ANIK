@@ -36,6 +36,7 @@ data class MediaItem(
     val releaseDate: String = "",
     val voteAverage: Double = 0.0,
     val genres: List<String> = emptyList(),
+    val certification: String = "",
     val vidlyId: String = "",
     val isCustom: Boolean = false,
     val trailerYoutubeKey: String? = null,
@@ -169,6 +170,7 @@ fun CustomMediaEntity.toMediaItem(): MediaItem {
         releaseDate = releaseDate,
         voteAverage = voteAverage,
         genres = genres.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        certification = certification.trim(),
         vidlyId = vidlyId,
         isCustom = true,
         trailerYoutubeKey = trailerYoutubeKey,
@@ -190,6 +192,7 @@ fun WatchlistEntity.toMediaItem(): MediaItem {
         releaseDate = releaseDate,
         voteAverage = voteAverage,
         genres = genres.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        certification = certification.trim(),
         vidlyId = vidlyId,
         isCustom = false
     )
@@ -208,6 +211,7 @@ fun ContinueWatchingEntity.toMediaItem(): MediaItem {
         releaseDate = releaseDate,
         voteAverage = voteAverage,
         genres = genres.split(",").map { it.trim() }.filter { it.isNotBlank() },
+        certification = certification.trim(),
         vidlyId = vidlyId,
         isCustom = id.startsWith("custom_"),
         numberOfSeasons = numberOfSeasons.coerceAtLeast(1),
@@ -225,6 +229,7 @@ fun MediaItem.mergeWithCatalog(catalogMatch: MediaItem?): MediaItem {
         releaseDate = catalogMatch.releaseDate.ifBlank { releaseDate },
         voteAverage = if (catalogMatch.voteAverage > 0.0) catalogMatch.voteAverage else voteAverage,
         genres = catalogMatch.genres.ifEmpty { genres },
+        certification = catalogMatch.certification.ifBlank { certification },
         vidlyId = catalogMatch.vidlyId.ifBlank { vidlyId },
         numberOfSeasons = maxOf(catalogMatch.numberOfSeasons, numberOfSeasons),
         episodesPerSeason = if (catalogMatch.seasons.isNotEmpty()) catalogMatch.episodesPerSeason else episodesPerSeason

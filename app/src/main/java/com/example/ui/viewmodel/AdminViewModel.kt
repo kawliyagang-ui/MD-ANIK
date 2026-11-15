@@ -7,6 +7,7 @@ import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdGatePolicy
 import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.AdminSecurityPolicy
+import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.PasswordChangeValidation
@@ -36,7 +37,7 @@ data class AdminUiState(
     val isUsingDefaultPasscode: Boolean = true,
     val authError: String? = null,
     val currentTab: AdminTab = AdminTab.ANALYTICS,
-    
+
     // Add/Edit Content Form
     val formId: String = "",
     val formTmdbId: Long? = null,
@@ -48,10 +49,13 @@ data class AdminUiState(
     val formReleaseYear: String = "",
     val formVoteAverage: String = "",
     val formGenres: String = "",
+    val formCertification: String = "",
+    val isFetchingCertification: Boolean = false,
     val formVidlyId: String = "",
     val formSeasons: String = "1",
     val formEpisodes: String = "10",
     val isEditing: Boolean = false,
+    val isSavingContent: Boolean = false,
     val formStatusMessage: String? = null,
     val isFormSuccess: Boolean = false,
 
@@ -67,12 +71,17 @@ data class AdminUiState(
     val liveTmdbCount: Int = 0,
     val isTmdbConnected: Boolean? = null,
     val isCheckingTmdb: Boolean = false,
+    val isSyncingCloud: Boolean = false,
 
     // Announcement Form
+    val editingAnnouncementId: Int? = null,
+    val editingAnnouncementCreatedAt: Long? = null,
+    val editingAnnouncementActive: Boolean = true,
     val announcementTitle: String = "",
     val announcementMessage: String = "",
     val announcementType: String = "INFO", // "INFO", "WARNING", "UPDATE"
     val announcementStatusMessage: String? = null,
+    val isAnnouncementError: Boolean = false,
 
     // Adsterra Pop-under Ad Gate Config
     val adIsEnabled: Boolean = false,
@@ -85,6 +94,7 @@ data class AdminUiState(
     val adRequiredStaySeconds: String = "30",
     val adCooldownHours: String = "6",
     val adLastCompletedAtMillis: Long = 0L,
+    val adCooldownResetAtMillis: Long = 0L,
     val adStatusMessage: String? = null,
     val isAdStatusSuccess: Boolean = true,
 
@@ -100,6 +110,8 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AdminUiState())
     val uiState: StateFlow<AdminUiState> = _uiState.asStateFlow()
+
+    val cloudSyncStatus: StateFlow<CloudSyncStatus> = repository.cloudSyncStatus
 
     val customMediaList: StateFlow<List<CustomMediaEntity>> = repository.customMedia
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -117,6 +129,7 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
     val continueWatchingCount: StateFlow<Int> = _continueWatchingCount.asStateFlow()
 
     private var hasInitializedAdForm = false
+    private var lastObservedAdUpdatedAt = 0L
     private var storedPasscodeHash: String =
         AdminSecurityPolicy.hashPasscode(AdminSecurityPolicy.DEFAULT_PASSCODE)
 
@@ -141,12 +154,14 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
 
     fun refreshSystemHealth() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isCheckingTmdb = true)
+            _uiState.value = _uiState.value.copy(isCheckingTmdb = true, isSyncingCloud = true)
+            repository.syncFromCloudNow()
             val (connected, count) = repository.checkTmdbHealth()
             _uiState.value = _uiState.value.copy(
                 isTmdbConnected = connected,
                 liveTmdbCount = count,
-                isCheckingTmdb = false
+                isCheckingTmdb = false,
+                isSyncingCloud = false
             )
         }
     }
@@ -169,8 +184,11 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
         viewModelScope.launch {
             repository.adConfig.collect { config ->
                 if (config != null) {
-                    if (!hasInitializedAdForm) {
+                    val shouldApplyRemoteFields = !hasInitializedAdForm ||
+                        config.updatedAt > lastObservedAdUpdatedAt
+                    if (shouldApplyRemoteFields) {
                         hasInitializedAdForm = true
+                        lastObservedAdUpdatedAt = config.updatedAt
                         _uiState.value = _uiState.value.copy(
                             adIsEnabled = config.isEnabled,
                             adFormat = config.adFormat,
@@ -181,11 +199,13 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
                             adCtaText = config.ctaText,
                             adRequiredStaySeconds = config.requiredStaySeconds.toString(),
                             adCooldownHours = config.cooldownHours.toString(),
-                            adLastCompletedAtMillis = config.lastCompletedAtMillis
+                            adLastCompletedAtMillis = config.lastCompletedAtMillis,
+                            adCooldownResetAtMillis = config.cooldownResetAtMillis
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
-                            adLastCompletedAtMillis = config.lastCompletedAtMillis
+                            adLastCompletedAtMillis = config.lastCompletedAtMillis,
+                            adCooldownResetAtMillis = config.cooldownResetAtMillis
                         )
                     }
                 }
@@ -223,6 +243,7 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             currentTab = tab,
             formStatusMessage = null,
             adStatusMessage = null,
+            announcementStatusMessage = null,
             passwordStatusMessage = null
         )
     }
@@ -238,7 +259,6 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
         _uiState.value = _uiState.value.copy(tmdbSearchQuery = query, tmdbSearchError = null)
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTmdbSearching = true, tmdbSearchError = null)
-            // Persist the searched movie title in Room database (maintains top 5)
             repository.saveTmdbSearch(query)
             val result = repository.searchTitles(query)
             result.fold(
@@ -264,12 +284,23 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
 
     fun selectTmdbPreview(item: MediaItem?) {
         _uiState.value = _uiState.value.copy(selectedTmdbPreview = item)
-        if (item != null && item.mediaType == "tv" && item.seasons.isEmpty()) {
-            viewModelScope.launch {
-                val enriched = repository.fetchEnrichedTvSeries(item)
-                if (_uiState.value.selectedTmdbPreview?.id == item.id) {
-                    _uiState.value = _uiState.value.copy(selectedTmdbPreview = enriched)
+        if (item == null) return
+
+        val resolvedId = item.resolvedTmdbId()
+        viewModelScope.launch {
+            var updated = if (item.mediaType == "tv" && item.seasons.isEmpty()) {
+                repository.fetchEnrichedTvSeries(item)
+            } else {
+                item
+            }
+            if (updated.certification.isBlank() && resolvedId != null) {
+                val cert = repository.fetchCertification(resolvedId, updated.mediaType)
+                if (cert.isNotBlank()) {
+                    updated = updated.copy(certification = cert)
                 }
+            }
+            if (_uiState.value.selectedTmdbPreview?.id == item.id) {
+                _uiState.value = _uiState.value.copy(selectedTmdbPreview = updated)
             }
         }
     }
@@ -287,8 +318,15 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
     }
 
     fun autoFillFromTmdb(item: MediaItem) {
+        val existingCustom = customMediaList.value.firstOrNull {
+            it.id == item.id || (item.resolvedTmdbId() != null && it.tmdbId == item.resolvedTmdbId() && it.mediaType == item.mediaType)
+        }
+        val resolvedId = item.resolvedTmdbId()
+        val initialCert = existingCustom?.certification?.takeIf { it.isNotBlank() } ?: item.certification
         _uiState.value = _uiState.value.copy(
-            formTmdbId = item.tmdbId,
+            formId = existingCustom?.id ?: "",
+            isEditing = existingCustom != null,
+            formTmdbId = item.tmdbId ?: existingCustom?.tmdbId,
             formTitle = item.title,
             formOverview = item.overview,
             formPosterUrl = item.fullPosterUrl,
@@ -297,13 +335,29 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formReleaseYear = item.releaseDate.take(4),
             formVoteAverage = String.format(Locale.US, "%.1f", item.voteAverage),
             formGenres = item.genres.joinToString(", "),
-            formVidlyId = item.streamId,
-            formSeasons = item.numberOfSeasons.toString(),
-            formEpisodes = item.episodesPerSeason.toString(),
+            formCertification = initialCert,
+            isFetchingCertification = initialCert.isBlank() && resolvedId != null,
+            formVidlyId = existingCustom?.vidlyId?.takeIf { it.isNotBlank() } ?: item.streamId,
+            formSeasons = (existingCustom?.numberOfSeasons ?: item.numberOfSeasons).toString(),
+            formEpisodes = (existingCustom?.episodesPerSeason ?: item.episodesPerSeason).toString(),
             selectedTmdbPreview = null,
             formStatusMessage = "✓ Auto-filled details from TMDb for \"${item.title}\"!",
             isFormSuccess = true
         )
+
+        if (initialCert.isBlank() && resolvedId != null) {
+            viewModelScope.launch {
+                val cert = repository.fetchCertification(resolvedId, item.mediaType)
+                if (_uiState.value.formTitle == item.title && _uiState.value.formCertification.isBlank()) {
+                    _uiState.value = _uiState.value.copy(
+                        formCertification = cert,
+                        isFetchingCertification = false
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(isFetchingCertification = false)
+                }
+            }
+        }
     }
 
     // Form inputs
@@ -315,6 +369,7 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
     fun updateReleaseYear(v: String) { _uiState.value = _uiState.value.copy(formReleaseYear = v) }
     fun updateVoteAverage(v: String) { _uiState.value = _uiState.value.copy(formVoteAverage = v) }
     fun updateGenres(v: String) { _uiState.value = _uiState.value.copy(formGenres = v) }
+    fun updateCertification(v: String) { _uiState.value = _uiState.value.copy(formCertification = v) }
     fun updateVidlyId(v: String) { _uiState.value = _uiState.value.copy(formVidlyId = v) }
     fun updateSeasons(v: String) { _uiState.value = _uiState.value.copy(formSeasons = v) }
     fun updateEpisodes(v: String) { _uiState.value = _uiState.value.copy(formEpisodes = v) }
@@ -331,6 +386,8 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formReleaseYear = "",
             formVoteAverage = "",
             formGenres = "",
+            formCertification = "",
+            isFetchingCertification = false,
             formVidlyId = "",
             formSeasons = "1",
             formEpisodes = "10",
@@ -350,6 +407,7 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
         }
 
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingContent = true)
             val entity = CustomMediaEntity(
                 id = if (s.isEditing && s.formId.isNotBlank()) s.formId else "custom_${UUID.randomUUID().toString().take(8)}",
                 title = s.formTitle.trim(),
@@ -360,26 +418,38 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
                 releaseDate = s.formReleaseYear.trim(),
                 voteAverage = s.formVoteAverage.replace(",", ".").toDoubleOrNull() ?: 0.0,
                 genres = s.formGenres.trim(),
+                certification = s.formCertification.trim().uppercase(Locale.US),
                 vidlyId = s.formVidlyId.trim(),
                 tmdbId = s.formTmdbId ?: s.formVidlyId.trim().toLongOrNull(),
-                numberOfSeasons = s.formSeasons.toIntOrNull() ?: 1,
-                episodesPerSeason = s.formEpisodes.toIntOrNull() ?: 10
+                numberOfSeasons = (s.formSeasons.toIntOrNull() ?: 1).coerceAtLeast(1),
+                episodesPerSeason = (s.formEpisodes.toIntOrNull() ?: 10).coerceAtLeast(1)
             )
 
-            if (s.isEditing) {
+            val result = if (s.isEditing) {
                 repository.updateCustomMedia(entity)
-                _uiState.value = _uiState.value.copy(
-                    formStatusMessage = "Successfully updated \"${entity.title}\"!",
-                    isFormSuccess = true
-                )
             } else {
                 repository.insertCustomMedia(entity)
-                _uiState.value = _uiState.value.copy(
-                    formStatusMessage = "Successfully added \"${entity.title}\" to Cinetra catalog!",
-                    isFormSuccess = true
-                )
             }
-            clearForm(keepStatusMessage = true)
+
+            val actionVerb = if (s.isEditing) "updated" else "added"
+            val certSuffix = if (entity.certification.isNotBlank()) " [${entity.certification}]" else ""
+            result.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        isSavingContent = false,
+                        formStatusMessage = "✓ Successfully $actionVerb \"${entity.title}\"$certSuffix & synced to Main App!",
+                        isFormSuccess = true
+                    )
+                    clearForm(keepStatusMessage = true)
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        isSavingContent = false,
+                        formStatusMessage = "Saved locally, but cloud sync failed: ${err.localizedMessage ?: "Network/permission error"}",
+                        isFormSuccess = false
+                    )
+                }
+            )
         }
     }
 
@@ -395,55 +465,157 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formReleaseYear = item.releaseDate,
             formVoteAverage = item.voteAverage.toString(),
             formGenres = item.genres,
+            formCertification = item.certification,
             formVidlyId = item.vidlyId,
             formSeasons = item.numberOfSeasons.toString(),
             formEpisodes = item.episodesPerSeason.toString(),
             isEditing = true,
             currentTab = AdminTab.ADD_CONTENT,
-            formStatusMessage = "Editing \"${item.title}\""
+            formStatusMessage = "Editing \"${item.title}\"",
+            isFormSuccess = true
         )
     }
 
     fun deleteContent(id: String) {
         viewModelScope.launch {
-            repository.deleteCustomMedia(id)
+            val res = repository.deleteCustomMedia(id)
+            res.onFailure { err ->
+                _uiState.value = _uiState.value.copy(
+                    formStatusMessage = "Cloud delete failed: ${err.localizedMessage ?: "Error"}",
+                    isFormSuccess = false
+                )
+            }
         }
     }
 
     // Announcement actions
-    fun updateAnnouncementTitle(v: String) { _uiState.value = _uiState.value.copy(announcementTitle = v) }
-    fun updateAnnouncementMessage(v: String) { _uiState.value = _uiState.value.copy(announcementMessage = v) }
+    fun updateAnnouncementTitle(v: String) { _uiState.value = _uiState.value.copy(announcementTitle = v, announcementStatusMessage = null) }
+    fun updateAnnouncementMessage(v: String) { _uiState.value = _uiState.value.copy(announcementMessage = v, announcementStatusMessage = null) }
     fun updateAnnouncementType(v: String) { _uiState.value = _uiState.value.copy(announcementType = v) }
+
+    fun startEditAnnouncement(item: AdminAnnouncementEntity) {
+        _uiState.value = _uiState.value.copy(
+            editingAnnouncementId = item.id,
+            editingAnnouncementCreatedAt = item.createdAt,
+            editingAnnouncementActive = item.active,
+            announcementTitle = item.title,
+            announcementMessage = item.message,
+            announcementType = item.type,
+            announcementStatusMessage = "Editing announcement \"${item.title}\"",
+            isAnnouncementError = false
+        )
+    }
+
+    fun cancelEditAnnouncement() {
+        _uiState.value = _uiState.value.copy(
+            editingAnnouncementId = null,
+            editingAnnouncementCreatedAt = null,
+            editingAnnouncementActive = true,
+            announcementTitle = "",
+            announcementMessage = "",
+            announcementType = "INFO",
+            announcementStatusMessage = null,
+            isAnnouncementError = false
+        )
+    }
 
     fun saveAnnouncement() {
         val s = _uiState.value
         if (s.announcementTitle.isBlank() || s.announcementMessage.isBlank()) {
-            _uiState.value = s.copy(announcementStatusMessage = "Please enter both Title and Message.")
+            _uiState.value = s.copy(
+                announcementStatusMessage = "Please enter both Title and Message.",
+                isAnnouncementError = true
+            )
             return
         }
         viewModelScope.launch {
-            repository.insertAnnouncement(
-                title = s.announcementTitle.trim(),
-                message = s.announcementMessage.trim(),
-                type = s.announcementType
-            )
-            _uiState.value = _uiState.value.copy(
-                announcementTitle = "",
-                announcementMessage = "",
-                announcementStatusMessage = "✓ Announcement published to user home screen!"
+            val editId = s.editingAnnouncementId
+            val result = if (editId != null) {
+                repository.updateAnnouncement(
+                    AdminAnnouncementEntity(
+                        id = editId,
+                        title = s.announcementTitle.trim(),
+                        message = s.announcementMessage.trim(),
+                        type = s.announcementType,
+                        active = s.editingAnnouncementActive,
+                        createdAt = s.editingAnnouncementCreatedAt ?: System.currentTimeMillis()
+                    )
+                )
+            } else {
+                repository.insertAnnouncement(
+                    title = s.announcementTitle.trim(),
+                    message = s.announcementMessage.trim(),
+                    type = s.announcementType
+                )
+            }
+
+            result.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        editingAnnouncementId = null,
+                        editingAnnouncementCreatedAt = null,
+                        editingAnnouncementActive = true,
+                        announcementTitle = "",
+                        announcementMessage = "",
+                        announcementStatusMessage = if (editId != null) {
+                            "✓ Announcement updated & synced to Main App!"
+                        } else {
+                            "✓ Announcement published & synced to Main App!"
+                        },
+                        isAnnouncementError = false
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        announcementStatusMessage = "Saved locally, but cloud sync failed: ${err.localizedMessage ?: "Error"}",
+                        isAnnouncementError = true
+                    )
+                }
             )
         }
     }
 
     fun toggleAnnouncementActive(id: Int, active: Boolean) {
         viewModelScope.launch {
-            repository.toggleAnnouncementActive(id, active)
+            val res = repository.toggleAnnouncementActive(id, active)
+            res.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        announcementStatusMessage = if (active) {
+                            "✓ Announcement enabled & synced to Main App."
+                        } else {
+                            "✓ Announcement paused & synced to Main App."
+                        },
+                        isAnnouncementError = false
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        announcementStatusMessage = "Cloud sync failed: ${err.localizedMessage ?: "Error"}",
+                        isAnnouncementError = true
+                    )
+                }
+            )
         }
     }
 
     fun deleteAnnouncement(id: Int) {
         viewModelScope.launch {
-            repository.deleteAnnouncement(id)
+            val res = repository.deleteAnnouncement(id)
+            res.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        announcementStatusMessage = "✓ Announcement deleted from Main App.",
+                        isAnnouncementError = false
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        announcementStatusMessage = "Cloud delete failed: ${err.localizedMessage ?: "Error"}",
+                        isAnnouncementError = true
+                    )
+                }
+            )
         }
     }
 
@@ -508,6 +680,7 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
         val cooldownHours = (s.adCooldownHours.toIntOrNull() ?: AdGatePolicy.DEFAULT_COOLDOWN_HOURS)
             .coerceIn(1, 168)
 
+        val now = System.currentTimeMillis()
         val entity = AdConfigEntity(
             id = 1,
             isEnabled = s.adIsEnabled,
@@ -523,32 +696,54 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             requiredStaySeconds = staySeconds,
             cooldownHours = cooldownHours,
             lastCompletedAtMillis = s.adLastCompletedAtMillis,
-            updatedAt = System.currentTimeMillis()
+            cooldownResetAtMillis = s.adCooldownResetAtMillis,
+            updatedAt = now
         )
 
+        lastObservedAdUpdatedAt = now
         viewModelScope.launch {
-            repository.saveAdConfig(entity)
-            _uiState.value = _uiState.value.copy(
-                adUrl = entity.adUrl,
-                adRequiredStaySeconds = staySeconds.toString(),
-                adCooldownHours = cooldownHours.toString(),
-                adStatusMessage = if (entity.isEnabled) {
-                    "✓ Saved! Adsterra ${entity.adFormat} gate enabled (${staySeconds}s stay, every ${cooldownHours}h)."
-                } else {
-                    "✓ Saved! Adsterra ad gate configuration updated (currently disabled)."
+            val result = repository.saveAdConfig(entity)
+            result.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        adUrl = entity.adUrl,
+                        adRequiredStaySeconds = staySeconds.toString(),
+                        adCooldownHours = cooldownHours.toString(),
+                        adStatusMessage = if (entity.isEnabled) {
+                            "✓ Saved & synced! Adsterra ${entity.adFormat} gate enabled (${staySeconds}s stay, every ${cooldownHours}h)."
+                        } else {
+                            "✓ Saved & synced! Adsterra ad gate disabled on Main App."
+                        },
+                        isAdStatusSuccess = true
+                    )
                 },
-                isAdStatusSuccess = true
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        adStatusMessage = "Saved locally, but cloud sync failed: ${err.localizedMessage ?: "Error"}",
+                        isAdStatusSuccess = false
+                    )
+                }
             )
         }
     }
 
     fun resetAdCooldown() {
         viewModelScope.launch {
-            repository.resetAdCooldown()
-            _uiState.value = _uiState.value.copy(
-                adLastCompletedAtMillis = 0L,
-                adStatusMessage = "✓ 6-hour timer reset! The pop-up ad will appear immediately on next main app open.",
-                isAdStatusSuccess = true
+            val res = repository.resetAdCooldown()
+            res.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        adLastCompletedAtMillis = 0L,
+                        adStatusMessage = "✓ Cooldown reset & synced! Pop-up ad will trigger on Main App.",
+                        isAdStatusSuccess = true
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        adStatusMessage = "Local timer reset, but cloud sync failed: ${err.localizedMessage ?: "Error"}",
+                        isAdStatusSuccess = false
+                    )
+                }
             )
         }
     }

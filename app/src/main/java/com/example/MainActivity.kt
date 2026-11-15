@@ -113,7 +113,7 @@ fun CinetraApp() {
     val context = LocalContext.current
     val repository = remember(context) {
         val database = AppDatabase.getDatabase(context.applicationContext)
-        MovieRepository(database.mediaDao())
+        MovieRepository(database.mediaDao(), context.applicationContext)
     }
     val userPreferences = remember(context) {
         UserPreferences(context.applicationContext)
@@ -140,6 +140,7 @@ fun CinetraApp() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                movieViewModel.refreshFromCloud()
                 movieViewModel.refreshAdGateCheck()
             }
         }

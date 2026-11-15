@@ -59,7 +59,7 @@ fun CinetraAdminApp(
     val context = LocalContext.current
     val repository = remember(context) {
         val database = AppDatabase.getDatabase(context.applicationContext)
-        MovieRepository(database.mediaDao())
+        MovieRepository(database.mediaDao(), context.applicationContext)
     }
     val userPreferences = remember(context) {
         UserPreferences(context.applicationContext)
@@ -73,6 +73,7 @@ fun CinetraAdminApp(
     )
 
     val adminState by adminViewModel.uiState.collectAsState()
+    val cloudSyncStatus by adminViewModel.cloudSyncStatus.collectAsState()
     val customMediaList by adminViewModel.customMediaList.collectAsState()
     val announcementsList by adminViewModel.announcementsList.collectAsState()
     val watchlistCount by adminViewModel.watchlistCount.collectAsState()
@@ -122,6 +123,7 @@ fun CinetraAdminApp(
                     AdminScreen(
                         viewModel = adminViewModel,
                         adminState = adminState,
+                        cloudSyncStatus = cloudSyncStatus,
                         customMediaList = customMediaList,
                         announcementsList = announcementsList,
                         totalCatalogCount = adminState.liveTmdbCount + customMediaList.size,

@@ -8,6 +8,7 @@ import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdGatePolicy
 import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.CatalogBatchPolicy
+import com.example.data.model.CatalogOverridePolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.EpisodeInfo
@@ -137,6 +138,11 @@ class MovieViewModel(
     private var hasLoadedAdConfig: Boolean = false
     private var searchJob: Job? = null
 
+    private var rawTrending: List<MediaItem> = emptyList()
+    private var rawPopularMovies: List<MediaItem> = emptyList()
+    private var rawTopRatedTv: List<MediaItem> = emptyList()
+    private var rawSearchResults: List<MediaItem> = emptyList()
+
     private var trendingFeed = FeedPaginationState()
     private var moviesFeed = FeedPaginationState()
     private var tvFeed = FeedPaginationState()
@@ -145,11 +151,18 @@ class MovieViewModel(
     init {
         viewModelScope.launch {
             repository.initSeedDataIfEmpty()
+            repository.syncFromCloudNow()
         }
         observeUserPreferences()
         observeAdConfig()
-        loadHomeData()
         observeCustomMedia()
+        loadHomeData()
+    }
+
+    fun refreshFromCloud() {
+        viewModelScope.launch {
+            repository.syncFromCloudNow()
+        }
     }
 
     private fun observeUserPreferences() {
@@ -206,9 +219,28 @@ class MovieViewModel(
     private fun observeCustomMedia() {
         viewModelScope.launch {
             repository.customMedia.collect { list ->
-                _uiState.value = _uiState.value.copy(
-                    customMedia = list.map { it.toMediaItem() }
-                )
+                val mappedCustom = list.map { it.toMediaItem() }
+                _uiState.update { current ->
+                    val updatedTrending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, mappedCustom)
+                    val updatedPopular = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, mappedCustom)
+                    val updatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, mappedCustom)
+                    val updatedSearch = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, mappedCustom)
+                    val updatedSelected = current.selectedMedia?.let {
+                        CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
+                    }
+                    val updatedPlaying = current.playingMedia?.let {
+                        CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
+                    }
+                    current.copy(
+                        customMedia = mappedCustom,
+                        trending = updatedTrending,
+                        popularMovies = updatedPopular,
+                        topRatedTv = updatedTv,
+                        searchResults = updatedSearch,
+                        selectedMedia = updatedSelected,
+                        playingMedia = updatedPlaying
+                    )
+                }
             }
         }
     }
@@ -289,6 +321,10 @@ class MovieViewModel(
                 val popularItems = popularBatch?.items?.take(targetBatchSize).orEmpty()
                 val tvItems = tvBatch?.items?.take(targetBatchSize).orEmpty()
 
+                if (trendingItems.isNotEmpty()) rawTrending = trendingItems
+                if (popularItems.isNotEmpty()) rawPopularMovies = popularItems
+                if (tvItems.isNotEmpty()) rawTopRatedTv = tvItems
+
                 if (trendingBatch != null) {
                     trendingFeed = FeedPaginationState(
                         nextPage = trendingBatch.lastFetchedPage + 1,
@@ -315,10 +351,11 @@ class MovieViewModel(
                 }
 
                 _uiState.update { state ->
+                    val overrides = state.customMedia
                     state.copy(
-                        trending = trendingItems.ifEmpty { state.trending },
-                        popularMovies = popularItems.ifEmpty { state.popularMovies },
-                        topRatedTv = tvItems.ifEmpty { state.topRatedTv },
+                        trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                        popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, overrides),
+                        topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
                         trendingTotalResults = trendingBatch?.totalResults ?: state.trendingTotalResults,
                         popularMoviesTotalResults = popularBatch?.totalResults ?: state.popularMoviesTotalResults,
                         topRatedTvTotalResults = tvBatch?.totalResults ?: state.topRatedTvTotalResults,
@@ -374,23 +411,24 @@ class MovieViewModel(
         if (state.isLoadingMoreTrending || !trendingFeed.hasMore()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMoreTrending = true) }
-            val previousSize = state.trending.size
-            val (updated, newFeed) = consumeNextBatch(
-                existingVisible = _uiState.value.trending,
+            val previousSize = rawTrending.size
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawTrending,
                 currentFeed = trendingFeed,
                 batchSize = _uiState.value.batchSize,
                 fetcher = { page, needed -> repository.getTrendingBatch(page, needed) }
             )
+            rawTrending = updatedRaw
             trendingFeed = newFeed
-            _uiState.update {
-                it.copy(
-                    trending = updated,
-                    trendingTotalResults = maxOf(newFeed.totalResults, updated.size),
+            _uiState.update { current ->
+                current.copy(
+                    trending = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    trendingTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
                     hasMoreTrending = newFeed.hasMore(),
                     isLoadingMoreTrending = false
                 )
             }
-            val newlyAddedTv = updated.drop(previousSize)
+            val newlyAddedTv = updatedRaw.drop(previousSize)
                 .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
                 .take(20)
             if (newlyAddedTv.isNotEmpty()) {
@@ -404,17 +442,18 @@ class MovieViewModel(
         if (state.isLoadingMoreMovies || !moviesFeed.hasMore()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMoreMovies = true) }
-            val (updated, newFeed) = consumeNextBatch(
-                existingVisible = _uiState.value.popularMovies,
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawPopularMovies,
                 currentFeed = moviesFeed,
                 batchSize = _uiState.value.batchSize,
                 fetcher = { page, needed -> repository.getPopularMoviesBatch(page, needed) }
             )
+            rawPopularMovies = updatedRaw
             moviesFeed = newFeed
-            _uiState.update {
-                it.copy(
-                    popularMovies = updated,
-                    popularMoviesTotalResults = maxOf(newFeed.totalResults, updated.size),
+            _uiState.update { current ->
+                current.copy(
+                    popularMovies = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    popularMoviesTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
                     hasMorePopularMovies = newFeed.hasMore(),
                     isLoadingMoreMovies = false
                 )
@@ -427,23 +466,24 @@ class MovieViewModel(
         if (state.isLoadingMoreTv || !tvFeed.hasMore()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMoreTv = true) }
-            val previousSize = state.topRatedTv.size
-            val (updated, newFeed) = consumeNextBatch(
-                existingVisible = _uiState.value.topRatedTv,
+            val previousSize = rawTopRatedTv.size
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawTopRatedTv,
                 currentFeed = tvFeed,
                 batchSize = _uiState.value.batchSize,
                 fetcher = { page, needed -> repository.getTopRatedTvBatch(page, needed) }
             )
+            rawTopRatedTv = updatedRaw
             tvFeed = newFeed
-            _uiState.update {
-                it.copy(
-                    topRatedTv = updated,
-                    topRatedTvTotalResults = maxOf(newFeed.totalResults, updated.size),
+            _uiState.update { current ->
+                current.copy(
+                    topRatedTv = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    topRatedTvTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
                     hasMoreTopRatedTv = newFeed.hasMore(),
                     isLoadingMoreTv = false
                 )
             }
-            val newlyAddedTv = updated.drop(previousSize)
+            val newlyAddedTv = updatedRaw.drop(previousSize)
                 .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
                 .take(20)
             if (newlyAddedTv.isNotEmpty()) {
@@ -485,6 +525,7 @@ class MovieViewModel(
     fun onSearchQueryChange(query: String) {
         searchJob?.cancel()
         if (query.isBlank()) {
+            rawSearchResults = emptyList()
             searchFeed = FeedPaginationState()
             _uiState.update {
                 it.copy(
@@ -525,15 +566,16 @@ class MovieViewModel(
             result.fold(
                 onSuccess = { batch ->
                     val initialItems = batch.items.take(targetBatch)
+                    rawSearchResults = initialItems
                     searchFeed = FeedPaginationState(
                         nextPage = batch.lastFetchedPage + 1,
                         totalPages = batch.totalPages,
                         totalResults = batch.totalResults,
                         buffer = batch.items.drop(initialItems.size)
                     )
-                    _uiState.update {
-                        it.copy(
-                            searchResults = initialItems,
+                    _uiState.update { current ->
+                        current.copy(
+                            searchResults = CatalogOverridePolicy.applyAdminOverrides(initialItems, current.customMedia),
                             searchTotalResults = maxOf(batch.totalResults, initialItems.size),
                             hasMoreSearch = searchFeed.hasMore(),
                             isSearching = false,
@@ -548,6 +590,7 @@ class MovieViewModel(
                     }
                 },
                 onFailure = { err ->
+                    rawSearchResults = emptyList()
                     searchFeed = FeedPaginationState()
                     _uiState.update {
                         it.copy(
@@ -570,23 +613,24 @@ class MovieViewModel(
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMoreSearch = true) }
-            val previousSize = _uiState.value.searchResults.size
-            val (updated, newFeed) = consumeNextBatch(
-                existingVisible = _uiState.value.searchResults,
+            val previousSize = rawSearchResults.size
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawSearchResults,
                 currentFeed = searchFeed,
                 batchSize = _uiState.value.batchSize,
                 fetcher = { page, needed -> repository.searchTitlesBatch(trimmedQuery, page, needed) }
             )
+            rawSearchResults = updatedRaw
             searchFeed = newFeed
-            _uiState.update {
-                it.copy(
-                    searchResults = updated,
-                    searchTotalResults = maxOf(newFeed.totalResults, updated.size),
+            _uiState.update { current ->
+                current.copy(
+                    searchResults = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    searchTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
                     hasMoreSearch = newFeed.hasMore(),
                     isLoadingMoreSearch = false
                 )
             }
-            val newlyAddedTv = updated.drop(previousSize)
+            val newlyAddedTv = updatedRaw.drop(previousSize)
                 .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
                 .take(15)
             if (newlyAddedTv.isNotEmpty()) {
@@ -674,16 +718,17 @@ class MovieViewModel(
     }
 
     fun openDetails(media: MediaItem) {
-        _uiState.update { it.copy(selectedMedia = media) }
-        navigateTo(Screen.Details(media))
-        // Fetch trailer in background
-        val resolvedId = media.resolvedTmdbId()
-        if (resolvedId != null && media.trailerYoutubeKey == null) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        _uiState.update { it.copy(selectedMedia = resolvedMedia) }
+        navigateTo(Screen.Details(resolvedMedia))
+
+        val resolvedId = resolvedMedia.resolvedTmdbId()
+        if (resolvedId != null && resolvedMedia.trailerYoutubeKey == null) {
             viewModelScope.launch {
-                val key = repository.fetchTrailerYoutubeKey(resolvedId, media.mediaType)
+                val key = repository.fetchTrailerYoutubeKey(resolvedId, resolvedMedia.mediaType)
                 if (key != null) {
                     val currentSelected = _uiState.value.selectedMedia
-                    if (currentSelected?.id == media.id) {
+                    if (currentSelected?.id == resolvedMedia.id) {
                         _uiState.update {
                             it.copy(
                                 selectedMedia = currentSelected.copy(trailerYoutubeKey = key),
@@ -694,22 +739,37 @@ class MovieViewModel(
                 }
             }
         }
-        // Automatically fetch all seasons and episodes for TV series / web series / anime
-        if (media.mediaType == "tv") {
-            ensureTvSeriesLoaded(media, initialSeason = media.defaultSeasonNumber())
+        if (resolvedId != null && resolvedMedia.certification.isBlank()) {
+            viewModelScope.launch {
+                val cert = repository.fetchCertification(resolvedId, resolvedMedia.mediaType)
+                if (cert.isNotBlank()) {
+                    _uiState.update { current ->
+                        val curSelected = current.selectedMedia
+                        if (curSelected?.id == resolvedMedia.id && curSelected.certification.isBlank()) {
+                            current.copy(selectedMedia = curSelected.copy(certification = cert))
+                        } else {
+                            current
+                        }
+                    }
+                }
+            }
+        }
+        if (resolvedMedia.mediaType == "tv") {
+            ensureTvSeriesLoaded(resolvedMedia, initialSeason = resolvedMedia.defaultSeasonNumber())
         }
     }
 
     fun openPlayer(media: MediaItem, season: Int = 1, episode: Int = 1) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
         val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
-            mediaType = media.mediaType,
+            mediaType = resolvedMedia.mediaType,
             season = season,
             episode = episode
         )
-        val existing = continueWatching.value.firstOrNull { it.id == media.id }
+        val existing = continueWatching.value.firstOrNull { it.id == resolvedMedia.id }
         val preserve = ContinueWatchingPolicy.shouldPreserveProgress(
             existing = existing,
-            mediaType = media.mediaType,
+            mediaType = resolvedMedia.mediaType,
             targetSeason = safeSeason,
             targetEpisode = safeEpisode
         )
@@ -718,13 +778,13 @@ class MovieViewModel(
         val initialPercent = if (preserve) (existing?.progressPercent ?: 0) else 0
 
         _uiState.value = _uiState.value.copy(
-            playingMedia = media,
+            playingMedia = resolvedMedia,
             currentSeason = safeSeason,
             currentEpisode = safeEpisode
         )
         viewModelScope.launch {
             repository.saveContinueWatching(
-                item = media,
+                item = resolvedMedia,
                 season = safeSeason,
                 episode = safeEpisode,
                 watchedSeconds = initialWatched,
@@ -732,9 +792,9 @@ class MovieViewModel(
                 progressPercent = initialPercent
             )
         }
-        navigateTo(Screen.Player(media, safeSeason, safeEpisode))
-        if (media.mediaType == "tv") {
-            ensureTvSeriesLoaded(media, initialSeason = safeSeason)
+        navigateTo(Screen.Player(resolvedMedia, safeSeason, safeEpisode))
+        if (resolvedMedia.mediaType == "tv") {
+            ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
         }
     }
 
@@ -829,7 +889,6 @@ class MovieViewModel(
                 loadingSeasonNumber = null
             )
 
-            // Preload remaining seasons' episode lists in background so every season opens instantly
             val remainingSeasons = seasonList
                 .map { it.seasonNumber }
                 .filter { it != primarySeason }
@@ -862,36 +921,53 @@ class MovieViewModel(
                     }
                 }.awaitAll().toMap()
             }
-            val current = _uiState.value
-            _uiState.value = current.copy(
-                trending = current.trending.map { enrichedMap[it.id] ?: it },
-                topRatedTv = current.topRatedTv.map { enrichedMap[it.id] ?: it },
-                searchResults = current.searchResults.map { enrichedMap[it.id] ?: it },
-                selectedMedia = current.selectedMedia?.let { enrichedMap[it.id] ?: it },
-                playingMedia = current.playingMedia?.let { enrichedMap[it.id] ?: it }
-            )
+            rawTrending = rawTrending.map { enrichedMap[it.id] ?: it }
+            rawTopRatedTv = rawTopRatedTv.map { enrichedMap[it.id] ?: it }
+            rawSearchResults = rawSearchResults.map { enrichedMap[it.id] ?: it }
+            _uiState.update { current ->
+                val overrides = current.customMedia
+                current.copy(
+                    trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                    topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
+                    searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, overrides),
+                    selectedMedia = current.selectedMedia?.let { sel ->
+                        CatalogOverridePolicy.resolveItemWithOverrides(enrichedMap[sel.id] ?: sel, overrides)
+                    },
+                    playingMedia = current.playingMedia?.let { pl ->
+                        CatalogOverridePolicy.resolveItemWithOverrides(enrichedMap[pl.id] ?: pl, overrides)
+                    }
+                )
+            }
         }
     }
 
     private fun applyEnrichedMediaToState(enriched: MediaItem) {
-        val current = _uiState.value
-        _uiState.value = current.copy(
-            selectedMedia = if (current.selectedMedia?.id == enriched.id) {
-                enriched.copy(trailerYoutubeKey = enriched.trailerYoutubeKey ?: current.selectedMedia.trailerYoutubeKey)
-            } else {
-                current.selectedMedia
-            },
-            playingMedia = if (current.playingMedia?.id == enriched.id) {
-                enriched.copy(trailerYoutubeKey = enriched.trailerYoutubeKey ?: current.playingMedia.trailerYoutubeKey)
-            } else {
-                current.playingMedia
-            },
-            trending = current.trending.map { if (it.id == enriched.id) enriched else it },
-            topRatedTv = current.topRatedTv.map { if (it.id == enriched.id) enriched else it },
-            searchResults = current.searchResults.map { if (it.id == enriched.id) enriched else it }
-        )
+        rawTrending = rawTrending.map { if (it.id == enriched.id) enriched else it }
+        rawTopRatedTv = rawTopRatedTv.map { if (it.id == enriched.id) enriched else it }
+        rawSearchResults = rawSearchResults.map { if (it.id == enriched.id) enriched else it }
+        _uiState.update { current ->
+            val overrides = current.customMedia
+            val resolvedEnriched = CatalogOverridePolicy.resolveItemWithOverrides(enriched, overrides)
+            current.copy(
+                selectedMedia = if (current.selectedMedia?.id == enriched.id) {
+                    resolvedEnriched.copy(trailerYoutubeKey = resolvedEnriched.trailerYoutubeKey ?: current.selectedMedia.trailerYoutubeKey)
+                } else {
+                    current.selectedMedia
+                },
+                playingMedia = if (current.playingMedia?.id == enriched.id) {
+                    resolvedEnriched.copy(trailerYoutubeKey = resolvedEnriched.trailerYoutubeKey ?: current.playingMedia.trailerYoutubeKey)
+                } else {
+                    current.playingMedia
+                },
+                trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
+                searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, overrides)
+            )
+        }
         viewModelScope.launch {
-            repository.updateContinueWatchingMetadata(enriched)
+            repository.updateContinueWatchingMetadata(
+                CatalogOverridePolicy.resolveItemWithOverrides(enriched, _uiState.value.customMedia)
+            )
         }
     }
 

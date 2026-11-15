@@ -4,10 +4,14 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
+import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.AdminSecurityEntity
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.data.model.WatchlistEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -46,11 +50,30 @@ interface MediaDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomMedia(item: CustomMediaEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllCustomMedia(items: List<CustomMediaEntity>)
+
     @Update
     suspend fun updateCustomMedia(item: CustomMediaEntity)
 
     @Query("DELETE FROM custom_media WHERE id = :id")
     suspend fun deleteCustomMedia(id: String)
+
+    @Query("DELETE FROM custom_media")
+    suspend fun clearAllCustomMedia()
+
+    @Query("DELETE FROM custom_media WHERE id NOT IN (:ids)")
+    suspend fun deleteCustomMediaNotIn(ids: List<String>)
+
+    @Transaction
+    suspend fun replaceAllCustomMedia(items: List<CustomMediaEntity>) {
+        if (items.isEmpty()) {
+            clearAllCustomMedia()
+        } else {
+            insertAllCustomMedia(items)
+            deleteCustomMediaNotIn(items.map { it.id })
+        }
+    }
 
     // Announcements
     @Query("SELECT * FROM announcements ORDER BY createdAt DESC")
@@ -59,8 +82,14 @@ interface MediaDao {
     @Query("SELECT * FROM announcements WHERE active = 1 ORDER BY createdAt DESC")
     fun getActiveAnnouncements(): Flow<List<AdminAnnouncementEntity>>
 
+    @Query("SELECT * FROM announcements WHERE id = :id LIMIT 1")
+    suspend fun getAnnouncementById(id: Int): AdminAnnouncementEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAnnouncement(item: AdminAnnouncementEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllAnnouncements(items: List<AdminAnnouncementEntity>)
 
     @Update
     suspend fun updateAnnouncement(item: AdminAnnouncementEntity)
@@ -68,15 +97,31 @@ interface MediaDao {
     @Query("DELETE FROM announcements WHERE id = :id")
     suspend fun deleteAnnouncement(id: Int)
 
+    @Query("DELETE FROM announcements")
+    suspend fun clearAllAnnouncements()
+
+    @Query("DELETE FROM announcements WHERE id NOT IN (:ids)")
+    suspend fun deleteAnnouncementsNotIn(ids: List<Int>)
+
+    @Transaction
+    suspend fun replaceAllAnnouncements(items: List<AdminAnnouncementEntity>) {
+        if (items.isEmpty()) {
+            clearAllAnnouncements()
+        } else {
+            insertAllAnnouncements(items)
+            deleteAnnouncementsNotIn(items.map { it.id })
+        }
+    }
+
     @Query("UPDATE announcements SET active = :active WHERE id = :id")
     suspend fun setAnnouncementActive(id: Int, active: Boolean)
 
     // TMDb Search History (Last 5 searched movie titles)
     @Query("SELECT * FROM tmdb_search_history ORDER BY timestamp DESC LIMIT 5")
-    fun getRecentTmdbSearches(): Flow<List<com.example.data.model.TmdbSearchHistoryEntity>>
+    fun getRecentTmdbSearches(): Flow<List<TmdbSearchHistoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTmdbSearch(item: com.example.data.model.TmdbSearchHistoryEntity)
+    suspend fun insertTmdbSearch(item: TmdbSearchHistoryEntity)
 
     @Query("DELETE FROM tmdb_search_history WHERE query = :query")
     suspend fun deleteTmdbSearch(query: String)
@@ -89,25 +134,24 @@ interface MediaDao {
 
     // Ad Gate Configuration (Adsterra Pop-under & 6-Hour Cooldown)
     @Query("SELECT * FROM ad_config WHERE id = 1 LIMIT 1")
-    fun getAdConfig(): Flow<com.example.data.model.AdConfigEntity?>
+    fun getAdConfig(): Flow<AdConfigEntity?>
 
     @Query("SELECT * FROM ad_config WHERE id = 1 LIMIT 1")
-    suspend fun getAdConfigOnce(): com.example.data.model.AdConfigEntity?
+    suspend fun getAdConfigOnce(): AdConfigEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAdConfig(config: com.example.data.model.AdConfigEntity)
+    suspend fun upsertAdConfig(config: AdConfigEntity)
 
     @Query("UPDATE ad_config SET lastCompletedAtMillis = :timestamp, updatedAt = :updatedAt WHERE id = 1")
     suspend fun updateAdLastCompleted(timestamp: Long, updatedAt: Long = System.currentTimeMillis())
 
     // Admin Panel Security (Password)
     @Query("SELECT * FROM admin_security WHERE id = 1 LIMIT 1")
-    fun getAdminSecurity(): Flow<com.example.data.model.AdminSecurityEntity?>
+    fun getAdminSecurity(): Flow<AdminSecurityEntity?>
 
     @Query("SELECT * FROM admin_security WHERE id = 1 LIMIT 1")
-    suspend fun getAdminSecurityOnce(): com.example.data.model.AdminSecurityEntity?
+    suspend fun getAdminSecurityOnce(): AdminSecurityEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAdminSecurity(security: com.example.data.model.AdminSecurityEntity)
+    suspend fun upsertAdminSecurity(security: AdminSecurityEntity)
 }
-

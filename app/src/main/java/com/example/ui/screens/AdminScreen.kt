@@ -91,6 +91,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.toMediaItem
@@ -113,6 +114,7 @@ fun AdminScreen(
     onPreviewMedia: (MediaItem) -> Unit,
     onExitAdmin: () -> Unit,
     onOpenMainApp: () -> Unit = onExitAdmin,
+    cloudSyncStatus: CloudSyncStatus = CloudSyncStatus(),
     modifier: Modifier = Modifier
 ) {
     val colors = CineTheme.colors
@@ -273,6 +275,7 @@ fun AdminScreen(
                     liveTmdbCount = adminState.liveTmdbCount,
                     isTmdbConnected = adminState.isTmdbConnected,
                     isCheckingTmdb = adminState.isCheckingTmdb,
+                    cloudSyncStatus = cloudSyncStatus,
                     adGateEnabled = adminState.adIsEnabled &&
                         (adminState.adUrl.isNotBlank() || adminState.adPopUnderScript.isNotBlank()),
                     isUsingDefaultPasscode = adminState.isUsingDefaultPasscode,
@@ -295,6 +298,7 @@ fun AdminScreen(
                             posterPath = adminState.formPosterUrl,
                             backdropPath = adminState.formBackdropUrl,
                             mediaType = adminState.formMediaType,
+                            certification = adminState.formCertification.trim(),
                             vidlyId = adminState.formVidlyId,
                             numberOfSeasons = adminState.formSeasons.toIntOrNull()?.coerceAtLeast(1) ?: 1,
                             episodesPerSeason = adminState.formEpisodes.toIntOrNull()?.coerceAtLeast(1) ?: 10
@@ -501,6 +505,7 @@ private fun AdminAnalyticsTab(
     liveTmdbCount: Int,
     isTmdbConnected: Boolean?,
     isCheckingTmdb: Boolean,
+    cloudSyncStatus: CloudSyncStatus,
     adGateEnabled: Boolean,
     isUsingDefaultPasscode: Boolean,
     onRefreshHealth: () -> Unit,
@@ -523,7 +528,7 @@ private fun AdminAnalyticsTab(
             color = colors.textPrimary
         )
         Text(
-            text = "Live catalog metrics and verified local/API connectivity.",
+            text = "Live catalog metrics and verified cloud/API connectivity.",
             fontSize = 12.sp,
             color = colors.textSecondary
         )
@@ -606,7 +611,7 @@ private fun AdminAnalyticsTab(
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh TMDb Status",
+                                contentDescription = "Refresh Cloud & TMDb Status",
                                 tint = colors.gold
                             )
                         }
@@ -614,6 +619,27 @@ private fun AdminAnalyticsTab(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+
+                val cloudColor = when {
+                    !cloudSyncStatus.isAvailable || cloudSyncStatus.lastError != null -> Color(0xFFEF4444)
+                    cloudSyncStatus.stateLabel.startsWith("CONNECTED") -> colors.success
+                    else -> colors.warning
+                }
+                ServiceStatusRow(
+                    service = "Cloud Sync (Firestore)",
+                    status = cloudSyncStatus.stateLabel,
+                    statusColor = cloudColor
+                )
+                if (!cloudSyncStatus.lastError.isNullOrBlank()) {
+                    Text(
+                        text = cloudSyncStatus.lastError,
+                        fontSize = 11.sp,
+                        color = Color(0xFFEF4444),
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 val (tmdbStatusText, tmdbStatusColor) = when {
                     isCheckingTmdb -> "CHECKING..." to colors.warning
@@ -630,7 +656,7 @@ private fun AdminAnalyticsTab(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 ServiceStatusRow(
-                    service = "Room Local Database",
+                    service = "Room Local Cache",
                     status = "ACTIVE ($customMediaCount custom • $continueWatchingCount watching)",
                     statusColor = colors.success
                 )
@@ -1301,6 +1327,62 @@ private fun AdminAddContentTab(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Certification / Content Rating (e.g. PG-13, R, TV-MA, TV-14)
+        OutlinedTextField(
+            value = state.formCertification,
+            onValueChange = { viewModel.updateCertification(it) },
+            label = { Text("Certification / Content Rating") },
+            placeholder = {
+                Text(
+                    text = if (state.formMediaType == "tv") "e.g. TV-14, TV-MA, TV-PG" else "e.g. PG-13, R, PG, G",
+                    color = colors.textMuted
+                )
+            },
+            supportingText = if (state.isFetchingCertification) {
+                { Text("Fetching TMDb certification...", fontSize = 11.sp, color = colors.gold) }
+            } else {
+                null
+            },
+            singleLine = true,
+            colors = adminTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_form_certification")
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        val certPresets = remember(state.formMediaType) {
+            if (state.formMediaType == "tv") {
+                listOf("TV-Y", "TV-G", "TV-PG", "TV-14", "TV-MA", "NR")
+            } else {
+                listOf("G", "PG", "PG-13", "R", "NC-17", "NR")
+            }
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(certPresets) { preset ->
+                val isSelected = state.formCertification.equals(preset, ignoreCase = true)
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        viewModel.updateCertification(if (isSelected) "" else preset)
+                    },
+                    label = { Text(preset, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.primary,
+                        selectedLabelColor = Color.White,
+                        labelColor = colors.textSecondary
+                    ),
+                    modifier = Modifier.testTag("admin_cert_chip_$preset")
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Genres
         OutlinedTextField(
             value = state.formGenres,
@@ -1561,13 +1643,32 @@ private fun AdminManageContentTab(
                             Spacer(modifier = Modifier.width(12.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.textPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = item.title,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    if (item.certification.isNotBlank()) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .border(1.dp, colors.gold.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                text = item.certification,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.gold
+                                            )
+                                        }
+                                    }
+                                }
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "${item.mediaType.uppercase()} • Year: ${item.releaseDate.ifBlank { "N/A" }} • Rating: ${item.voteAverage}",
@@ -1652,7 +1753,11 @@ private fun AdminAnnouncementsTab(
                     .padding(14.dp)
             ) {
                 Text(
-                    text = "Publish New Announcement",
+                    text = if (state.editingAnnouncementId != null) {
+                        "Edit Announcement"
+                    } else {
+                        "Publish New Announcement"
+                    },
                     fontWeight = FontWeight.Bold,
                     color = colors.textPrimary,
                     fontSize = 14.sp
@@ -1662,7 +1767,7 @@ private fun AdminAnnouncementsTab(
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = state.announcementStatusMessage,
-                        color = colors.success,
+                        color = if (state.isAnnouncementError) Color(0xFFEF4444) else colors.success,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1720,21 +1825,42 @@ private fun AdminAnnouncementsTab(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Button(
-                    onClick = { viewModel.saveAnnouncement() },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primary,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("publish_announcement_button")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Campaign, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Publish to Users", fontWeight = FontWeight.Bold)
+                    if (state.editingAnnouncementId != null) {
+                        OutlinedButton(
+                            onClick = { viewModel.cancelEditAnnouncement() },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(0.7f)
+                                .height(48.dp)
+                                .testTag("cancel_edit_announcement_button")
+                        ) {
+                            Text("Cancel", color = colors.textPrimary)
+                        }
+                    }
+
+                    Button(
+                        onClick = { viewModel.saveAnnouncement() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(48.dp)
+                            .testTag("publish_announcement_button")
+                    ) {
+                        Icon(Icons.Default.Campaign, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (state.editingAnnouncementId != null) "Update Notice" else "Publish to Users",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -1787,7 +1913,9 @@ private fun AdminAnnouncementsTab(
                                 text = ann.title,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.textPrimary,
-                                fontSize = 13.sp
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -1810,6 +1938,17 @@ private fun AdminAnnouncementsTab(
                         ),
                         modifier = Modifier.testTag("toggle_announcement_${ann.id}")
                     )
+
+                    IconButton(
+                        onClick = { viewModel.startEditAnnouncement(ann) },
+                        modifier = Modifier.testTag("edit_announcement_${ann.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            tint = colors.textPrimary
+                        )
+                    }
 
                     IconButton(
                         onClick = { viewModel.deleteAnnouncement(ann.id) },

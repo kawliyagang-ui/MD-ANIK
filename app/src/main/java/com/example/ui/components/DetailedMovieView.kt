@@ -145,23 +145,47 @@ fun DetailedMovieView(
                 }
             }
 
-            // Media Type Badge in bottom-right of backdrop
-            Box(
+            // Media Type & Certification Badges in bottom-right of backdrop
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(14.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(gradients.softBadge)
-                    .border(0.75.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (media.mediaType == "tv") "TV SERIES" else "MOVIE",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp
-                )
+                if (media.certification.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .border(0.75.dp, colors.gold.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("detailed_movie_certification")
+                    ) {
+                        Text(
+                            text = media.certification,
+                            color = colors.gold,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(gradients.softBadge)
+                        .border(0.75.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (media.mediaType == "tv") "TV SERIES" else "MOVIE",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
             }
         }
 

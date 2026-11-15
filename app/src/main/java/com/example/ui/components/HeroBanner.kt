@@ -143,6 +143,23 @@ fun HeroBanner(
                     }
                 }
 
+                if (media.certification.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                            .border(0.75.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = media.certification,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 if (media.genres.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
