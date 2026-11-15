@@ -105,34 +105,44 @@ data class MediaItem(
     }
 
     fun getStreamUrl(server: PlayerServer = PlayerServer.VIDLY, season: Int = 1, episode: Int = 1): String {
-        val sId = streamId
+        val sId = streamId.trim()
+        val isCustomHttpUrl = sId.startsWith("http://", ignoreCase = true) ||
+            sId.startsWith("https://", ignoreCase = true)
+        val numericOrFallbackId = if (isCustomHttpUrl) {
+            tmdbId?.toString() ?: sId
+        } else {
+            sId
+        }
+
         return when (server) {
             PlayerServer.VIDLY -> {
-                if (mediaType == "tv") {
+                if (isCustomHttpUrl) {
+                    sId
+                } else if (mediaType == "tv") {
                     "https://vidly.pro/tv/$sId/$season/$episode"
                 } else {
-                    if (sId.startsWith("http")) sId else "https://vidly.pro/movie/$sId"
+                    "https://vidly.pro/movie/$sId"
                 }
             }
             PlayerServer.VIDSRC -> {
                 if (mediaType == "tv") {
-                    "https://vidsrc.to/embed/tv/$sId/$season/$episode"
+                    "https://vidsrc.to/embed/tv/$numericOrFallbackId/$season/$episode"
                 } else {
-                    "https://vidsrc.to/embed/movie/$sId"
+                    "https://vidsrc.to/embed/movie/$numericOrFallbackId"
                 }
             }
             PlayerServer.AUTOEMBED -> {
                 if (mediaType == "tv") {
-                    "https://player.autoembed.cc/embed/tv/$sId/$season/$episode"
+                    "https://player.autoembed.cc/embed/tv/$numericOrFallbackId/$season/$episode"
                 } else {
-                    "https://player.autoembed.cc/embed/movie/$sId"
+                    "https://player.autoembed.cc/embed/movie/$numericOrFallbackId"
                 }
             }
             PlayerServer.MULTIEMBED -> {
                 if (mediaType == "tv") {
-                    "https://multiembed.mov/?video_id=$sId&tmdb=1&s=$season&e=$episode"
+                    "https://multiembed.mov/?video_id=$numericOrFallbackId&tmdb=1&s=$season&e=$episode"
                 } else {
-                    "https://multiembed.mov/?video_id=$sId&tmdb=1"
+                    "https://multiembed.mov/?video_id=$numericOrFallbackId&tmdb=1"
                 }
             }
         }

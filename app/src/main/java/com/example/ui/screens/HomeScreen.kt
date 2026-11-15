@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.WifiOff
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.MediaItem
@@ -93,7 +95,11 @@ fun HomeScreen(
     selectedHomeGenre: String = "All",
     onHomeGenreSelect: (String) -> Unit = {},
     onBrowseGenreInExplore: (String) -> Unit = { onSeeAllClick("Trending") },
-    onResumeWatching: (MediaItem, Int, Int) -> Unit = { m, _, _ -> onWatchClick(m) }
+    onResumeWatching: (MediaItem, Int, Int) -> Unit = { m, _, _ -> onWatchClick(m) },
+    onSearchClick: () -> Unit = {},
+    trendingTotalResults: Int = trending.size,
+    popularMoviesTotalResults: Int = popularMovies.size,
+    topRatedTvTotalResults: Int = topRatedTv.size
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
@@ -116,6 +122,34 @@ fun HomeScreen(
             .background(gradients.appBackdrop)
             .verticalScroll(rememberScrollState())
     ) {
+        // Clickable Search Bar opening Dedicated Search & Results Page
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .minimumInteractiveComponentSize()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.surfaceElevated)
+                .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                .clickable(onClick = onSearchClick)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .testTag("home_search_bar"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = colors.softRose,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = "Search movies, TV series, anime...",
+                color = colors.textMuted,
+                fontSize = 14.sp
+            )
+        }
+
         // Hero Banner (or skeleton while live TMDb data is loading)
         if (heroItem != null) {
             HeroBanner(
@@ -225,9 +259,10 @@ fun HomeScreen(
                         }
                         MovieCard(
                             media = media,
-                            onClick = { onResumeWatching(media, safeSeason, safeEp) },
+                            onClick = { onMediaClick(media) },
                             progressPercent = item.progressPercent.takeIf { it > 0 },
-                            episodeLabel = cardLabel
+                            episodeLabel = cardLabel,
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -249,15 +284,17 @@ fun HomeScreen(
                 filteredTrending = filteredTrending,
                 availableGenres = availableGenres,
                 selectedGenre = selectedHomeGenre,
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = filteredTrending.size,
+                    totalAvailable = if (selectedHomeGenre.equals("All", ignoreCase = true)) {
+                        maxOf(trendingTotalResults, trending.size)
+                    } else {
+                        filteredTrending.size
+                    }
+                ),
                 onGenreSelect = onHomeGenreSelect,
                 onMediaClick = onMediaClick,
-                onSeeAllClick = {
-                    if (selectedHomeGenre.equals("All", ignoreCase = true)) {
-                        onSeeAllClick("Trending")
-                    } else {
-                        onBrowseGenreInExplore(selectedHomeGenre)
-                    }
-                },
+                onSeeAllClick = { onSeeAllClick("Trending") },
                 onBrowseGenreInExplore = { onBrowseGenreInExplore(selectedHomeGenre) }
             )
         }
@@ -266,6 +303,7 @@ fun HomeScreen(
         if (customMedia.isNotEmpty()) {
             MediaSectionRow(
                 title = "Cinetra Specials & Admin Picks",
+                countSummary = CatalogBatchPolicy.formatCount(customMedia.size),
                 icon = Icons.Default.Star,
                 iconColor = colors.gold,
                 onSeeAllClick = { onSeeAllClick("Specials") }
@@ -277,7 +315,8 @@ fun HomeScreen(
                     items(customMedia, key = { it.id }) { item ->
                         MovieCard(
                             media = item,
-                            onClick = { onMediaClick(item) }
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -288,6 +327,10 @@ fun HomeScreen(
         if (popularMovies.isNotEmpty()) {
             MediaSectionRow(
                 title = "Popular Movies",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = popularMovies.size,
+                    totalAvailable = maxOf(popularMoviesTotalResults, popularMovies.size)
+                ),
                 icon = Icons.Default.Movie,
                 iconColor = colors.info,
                 onSeeAllClick = { onSeeAllClick("Movies") }
@@ -299,7 +342,8 @@ fun HomeScreen(
                     items(popularMovies, key = { it.id }) { item ->
                         MovieCard(
                             media = item,
-                            onClick = { onMediaClick(item) }
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -310,6 +354,10 @@ fun HomeScreen(
         if (topRatedTv.isNotEmpty()) {
             MediaSectionRow(
                 title = "Top-Rated TV Series",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = topRatedTv.size,
+                    totalAvailable = maxOf(topRatedTvTotalResults, topRatedTv.size)
+                ),
                 icon = Icons.Default.Tv,
                 iconColor = colors.softRose,
                 onSeeAllClick = { onSeeAllClick("TV") }
@@ -321,7 +369,8 @@ fun HomeScreen(
                     items(topRatedTv, key = { it.id }) { item ->
                         MovieCard(
                             media = item,
-                            onClick = { onMediaClick(item) }
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -337,6 +386,7 @@ private fun TrendingGenreSection(
     filteredTrending: List<MediaItem>,
     availableGenres: List<String>,
     selectedGenre: String,
+    countSummary: String?,
     onGenreSelect: (String) -> Unit,
     onMediaClick: (MediaItem) -> Unit,
     onSeeAllClick: () -> Unit,
@@ -378,6 +428,15 @@ private fun TrendingGenreSection(
                     ),
                     color = colors.textPrimary
                 )
+                if (!countSummary.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = countSummary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textSecondary
+                    )
+                }
 
                 if (isFiltered) {
                     Spacer(modifier = Modifier.width(8.dp))
@@ -584,6 +643,7 @@ private fun MediaSectionRow(
     icon: ImageVector,
     iconColor: Color,
     onSeeAllClick: () -> Unit,
+    countSummary: String? = null,
     content: @Composable () -> Unit
 ) {
     val colors = CineTheme.colors
@@ -596,7 +656,10 @@ private fun MediaSectionRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
@@ -612,6 +675,15 @@ private fun MediaSectionRow(
                     ),
                     color = colors.textPrimary
                 )
+                if (!countSummary.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = countSummary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textSecondary
+                    )
+                }
             }
 
             Row(

@@ -7,10 +7,12 @@ import com.example.data.local.UserPreferences
 import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdGatePolicy
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
+import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.PlayerServer
 import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.data.model.WatchlistEntity
@@ -38,7 +40,11 @@ sealed class Screen {
     object ContinueWatching : Screen()
     object Settings : Screen()
     object Search : Screen()
-    data class CategoryList(val title: String, val categoryKey: String) : Screen()
+    data class CategoryList(
+        val title: String,
+        val categoryKey: String,
+        val genreFilter: String = "All"
+    ) : Screen()
     data class Details(val media: MediaItem) : Screen()
     data class Player(val media: MediaItem, val season: Int = 1, val episode: Int = 1) : Screen()
 }
@@ -49,14 +55,37 @@ sealed interface AdGateState {
     data class GateRequired(val config: AdConfigEntity) : AdGateState
 }
 
+private data class FeedPaginationState(
+    val nextPage: Int = 1,
+    val totalPages: Int = 1,
+    val totalResults: Int = 0,
+    val buffer: List<MediaItem> = emptyList()
+) {
+    fun hasMore(): Boolean = buffer.isNotEmpty() || nextPage <= totalPages
+}
+
 data class UserUiState(
     val currentScreen: Screen = Screen.Home,
     val backStack: List<Screen> = listOf(Screen.Home),
+    val isNavigatingBack: Boolean = false,
+    val batchSize: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE,
     val trending: List<MediaItem> = emptyList(),
     val popularMovies: List<MediaItem> = emptyList(),
     val topRatedTv: List<MediaItem> = emptyList(),
     val customMedia: List<MediaItem> = emptyList(),
     val searchResults: List<MediaItem> = emptyList(),
+    val trendingTotalResults: Int = 0,
+    val popularMoviesTotalResults: Int = 0,
+    val topRatedTvTotalResults: Int = 0,
+    val searchTotalResults: Int = 0,
+    val hasMoreTrending: Boolean = false,
+    val hasMorePopularMovies: Boolean = false,
+    val hasMoreTopRatedTv: Boolean = false,
+    val hasMoreSearch: Boolean = false,
+    val isLoadingMoreTrending: Boolean = false,
+    val isLoadingMoreMovies: Boolean = false,
+    val isLoadingMoreTv: Boolean = false,
+    val isLoadingMoreSearch: Boolean = false,
     val searchQuery: String = "",
     val selectedHomeGenre: String = "All",
     val selectedGenre: String = "All",
@@ -107,6 +136,11 @@ class MovieViewModel(
     private var latestAdConfig: AdConfigEntity? = null
     private var hasLoadedAdConfig: Boolean = false
     private var searchJob: Job? = null
+
+    private var trendingFeed = FeedPaginationState()
+    private var moviesFeed = FeedPaginationState()
+    private var tvFeed = FeedPaginationState()
+    private var searchFeed = FeedPaginationState()
 
     init {
         viewModelScope.launch {
@@ -179,29 +213,118 @@ class MovieViewModel(
         }
     }
 
+    private suspend fun consumeNextBatch(
+        existingVisible: List<MediaItem>,
+        currentFeed: FeedPaginationState,
+        batchSize: Int,
+        fetcher: suspend (startPage: Int, neededCount: Int) -> Result<PagedCatalogBatch>
+    ): Pair<List<MediaItem>, FeedPaginationState> {
+        val safeBatch = CatalogBatchPolicy.normalizeBatchSize(batchSize)
+        val existingIds = existingVisible.mapTo(HashSet(existingVisible.size + safeBatch)) { it.id }
+        val filteredBuffer = currentFeed.buffer.filter { it.id !in existingIds }
+
+        val candidatePool = filteredBuffer.toMutableList()
+        var nextPage = currentFeed.nextPage
+        var totalPages = currentFeed.totalPages
+        var totalResults = currentFeed.totalResults
+
+        if (candidatePool.size < safeBatch && nextPage <= totalPages) {
+            val missing = safeBatch - candidatePool.size
+            val result = fetcher(nextPage, missing)
+            result.onSuccess { batch ->
+                val seenInPool = candidatePool.mapTo(HashSet(candidatePool.size)) { it.id }
+                batch.items.forEach { item ->
+                    if (item.id !in existingIds && item.id !in seenInPool) {
+                        candidatePool.add(item)
+                        seenInPool.add(item.id)
+                    }
+                }
+                nextPage = batch.lastFetchedPage + 1
+                totalPages = batch.totalPages
+                totalResults = batch.totalResults
+            }
+        }
+
+        val toEmit = candidatePool.take(safeBatch)
+        val remainingBuffer = if (candidatePool.size > toEmit.size) {
+            candidatePool.drop(toEmit.size)
+        } else {
+            emptyList()
+        }
+        val updatedFeed = FeedPaginationState(
+            nextPage = nextPage,
+            totalPages = totalPages,
+            totalResults = totalResults,
+            buffer = remainingBuffer
+        )
+        return (existingVisible + toEmit) to updatedFeed
+    }
+
     fun loadHomeData() {
         viewModelScope.launch {
+            val targetBatchSize = _uiState.value.batchSize
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                val trendingDeferred = async { repository.getTrending() }
-                val popularDeferred = async { repository.getPopularMovies() }
-                val tvDeferred = async { repository.getTopRatedTv() }
+                val trendingDeferred = async {
+                    repository.getTrendingBatch(startPage = 1, neededCount = targetBatchSize)
+                }
+                val popularDeferred = async {
+                    repository.getPopularMoviesBatch(startPage = 1, neededCount = targetBatchSize)
+                }
+                val tvDeferred = async {
+                    repository.getTopRatedTvBatch(startPage = 1, neededCount = targetBatchSize)
+                }
 
                 val trendingResult = trendingDeferred.await()
                 val popularResult = popularDeferred.await()
                 val tvResult = tvDeferred.await()
 
-                val trending = trendingResult.getOrDefault(emptyList())
-                val popular = popularResult.getOrDefault(emptyList())
-                val tv = tvResult.getOrDefault(emptyList())
-
                 val allFailed = trendingResult.isFailure && popularResult.isFailure && tvResult.isFailure
+
+                val trendingBatch = trendingResult.getOrNull()
+                val popularBatch = popularResult.getOrNull()
+                val tvBatch = tvResult.getOrNull()
+
+                val trendingItems = trendingBatch?.items?.take(targetBatchSize).orEmpty()
+                val popularItems = popularBatch?.items?.take(targetBatchSize).orEmpty()
+                val tvItems = tvBatch?.items?.take(targetBatchSize).orEmpty()
+
+                if (trendingBatch != null) {
+                    trendingFeed = FeedPaginationState(
+                        nextPage = trendingBatch.lastFetchedPage + 1,
+                        totalPages = trendingBatch.totalPages,
+                        totalResults = trendingBatch.totalResults,
+                        buffer = trendingBatch.items.drop(trendingItems.size)
+                    )
+                }
+                if (popularBatch != null) {
+                    moviesFeed = FeedPaginationState(
+                        nextPage = popularBatch.lastFetchedPage + 1,
+                        totalPages = popularBatch.totalPages,
+                        totalResults = popularBatch.totalResults,
+                        buffer = popularBatch.items.drop(popularItems.size)
+                    )
+                }
+                if (tvBatch != null) {
+                    tvFeed = FeedPaginationState(
+                        nextPage = tvBatch.lastFetchedPage + 1,
+                        totalPages = tvBatch.totalPages,
+                        totalResults = tvBatch.totalResults,
+                        buffer = tvBatch.items.drop(tvItems.size)
+                    )
+                }
 
                 _uiState.update { state ->
                     state.copy(
-                        trending = trending.ifEmpty { state.trending },
-                        popularMovies = popular.ifEmpty { state.popularMovies },
-                        topRatedTv = tv.ifEmpty { state.topRatedTv },
+                        trending = trendingItems.ifEmpty { state.trending },
+                        popularMovies = popularItems.ifEmpty { state.popularMovies },
+                        topRatedTv = tvItems.ifEmpty { state.topRatedTv },
+                        trendingTotalResults = trendingBatch?.totalResults ?: state.trendingTotalResults,
+                        popularMoviesTotalResults = popularBatch?.totalResults ?: state.popularMoviesTotalResults,
+                        topRatedTvTotalResults = tvBatch?.totalResults ?: state.topRatedTvTotalResults,
+                        hasMoreTrending = trendingFeed.hasMore(),
+                        hasMorePopularMovies = moviesFeed.hasMore(),
+                        hasMoreTopRatedTv = tvFeed.hasMore(),
                         isLoading = false,
                         errorMessage = if (allFailed) {
                             "Unable to reach TMDb right now. Please check your internet connection and tap Retry."
@@ -211,7 +334,9 @@ class MovieViewModel(
                     )
                 }
 
-                val tvItemsToEnrich = (trending + tv).filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                val tvItemsToEnrich = (trendingItems + tvItems)
+                    .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                    .take(20)
                 if (tvItemsToEnrich.isNotEmpty()) {
                     enrichTvItemsInBackground(tvItemsToEnrich)
                 }
@@ -226,8 +351,110 @@ class MovieViewModel(
         }
     }
 
+    fun setBatchSize(newSize: Int) {
+        val normalized = CatalogBatchPolicy.normalizeBatchSize(newSize)
+        _uiState.update { it.copy(batchSize = normalized) }
+    }
+
+    fun loadMoreCategory(categoryKey: String) {
+        when (categoryKey) {
+            "Trending" -> loadMoreTrending()
+            "Movies" -> loadMoreMovies()
+            "TV" -> loadMoreTv()
+            "Specials" -> Unit
+            else -> {
+                loadMoreMovies()
+                loadMoreTv()
+            }
+        }
+    }
+
+    private fun loadMoreTrending() {
+        val state = _uiState.value
+        if (state.isLoadingMoreTrending || !trendingFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreTrending = true) }
+            val previousSize = state.trending.size
+            val (updated, newFeed) = consumeNextBatch(
+                existingVisible = _uiState.value.trending,
+                currentFeed = trendingFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getTrendingBatch(page, needed) }
+            )
+            trendingFeed = newFeed
+            _uiState.update {
+                it.copy(
+                    trending = updated,
+                    trendingTotalResults = maxOf(newFeed.totalResults, updated.size),
+                    hasMoreTrending = newFeed.hasMore(),
+                    isLoadingMoreTrending = false
+                )
+            }
+            val newlyAddedTv = updated.drop(previousSize)
+                .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                .take(20)
+            if (newlyAddedTv.isNotEmpty()) {
+                enrichTvItemsInBackground(newlyAddedTv)
+            }
+        }
+    }
+
+    private fun loadMoreMovies() {
+        val state = _uiState.value
+        if (state.isLoadingMoreMovies || !moviesFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreMovies = true) }
+            val (updated, newFeed) = consumeNextBatch(
+                existingVisible = _uiState.value.popularMovies,
+                currentFeed = moviesFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getPopularMoviesBatch(page, needed) }
+            )
+            moviesFeed = newFeed
+            _uiState.update {
+                it.copy(
+                    popularMovies = updated,
+                    popularMoviesTotalResults = maxOf(newFeed.totalResults, updated.size),
+                    hasMorePopularMovies = newFeed.hasMore(),
+                    isLoadingMoreMovies = false
+                )
+            }
+        }
+    }
+
+    private fun loadMoreTv() {
+        val state = _uiState.value
+        if (state.isLoadingMoreTv || !tvFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreTv = true) }
+            val previousSize = state.topRatedTv.size
+            val (updated, newFeed) = consumeNextBatch(
+                existingVisible = _uiState.value.topRatedTv,
+                currentFeed = tvFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getTopRatedTvBatch(page, needed) }
+            )
+            tvFeed = newFeed
+            _uiState.update {
+                it.copy(
+                    topRatedTv = updated,
+                    topRatedTvTotalResults = maxOf(newFeed.totalResults, updated.size),
+                    hasMoreTopRatedTv = newFeed.hasMore(),
+                    isLoadingMoreTv = false
+                )
+            }
+            val newlyAddedTv = updated.drop(previousSize)
+                .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                .take(20)
+            if (newlyAddedTv.isNotEmpty()) {
+                enrichTvItemsInBackground(newlyAddedTv)
+            }
+        }
+    }
+
     fun navigateTo(screen: Screen) {
         val current = _uiState.value
+        if (current.currentScreen == screen) return
         val newStack = if (screen is Screen.Home) {
             listOf(Screen.Home)
         } else {
@@ -235,7 +462,8 @@ class MovieViewModel(
         }
         _uiState.value = current.copy(
             currentScreen = screen,
-            backStack = newStack
+            backStack = newStack,
+            isNavigatingBack = false
         )
     }
 
@@ -246,7 +474,8 @@ class MovieViewModel(
             val previousScreen = poppedStack.last()
             _uiState.value = _uiState.value.copy(
                 currentScreen = previousScreen,
-                backStack = poppedStack
+                backStack = poppedStack,
+                isNavigatingBack = true
             )
             return true
         }
@@ -256,10 +485,14 @@ class MovieViewModel(
     fun onSearchQueryChange(query: String) {
         searchJob?.cancel()
         if (query.isBlank()) {
+            searchFeed = FeedPaginationState()
             _uiState.update {
                 it.copy(
                     searchQuery = query,
                     searchResults = emptyList(),
+                    searchTotalResults = 0,
+                    hasMoreSearch = false,
+                    isLoadingMoreSearch = false,
                     isSearching = false,
                     searchErrorMessage = null
                 )
@@ -271,35 +504,94 @@ class MovieViewModel(
                 searchQuery = query,
                 isSearching = true,
                 searchResults = emptyList(),
+                searchTotalResults = 0,
+                hasMoreSearch = false,
+                isLoadingMoreSearch = false,
                 searchErrorMessage = null
             )
         }
         searchJob = viewModelScope.launch {
             delay(350) // Debounce
-            if (query.trim().length >= 2) {
-                repository.saveTmdbSearch(query.trim())
+            val trimmedQuery = query.trim()
+            if (trimmedQuery.length >= 2) {
+                repository.saveTmdbSearch(trimmedQuery)
             }
-            val result = repository.searchTitles(query)
+            val targetBatch = _uiState.value.batchSize
+            val result = repository.searchTitlesBatch(
+                query = trimmedQuery,
+                startPage = 1,
+                neededCount = targetBatch
+            )
             result.fold(
-                onSuccess = { results ->
+                onSuccess = { batch ->
+                    val initialItems = batch.items.take(targetBatch)
+                    searchFeed = FeedPaginationState(
+                        nextPage = batch.lastFetchedPage + 1,
+                        totalPages = batch.totalPages,
+                        totalResults = batch.totalResults,
+                        buffer = batch.items.drop(initialItems.size)
+                    )
                     _uiState.update {
-                        it.copy(searchResults = results, isSearching = false, searchErrorMessage = null)
+                        it.copy(
+                            searchResults = initialItems,
+                            searchTotalResults = maxOf(batch.totalResults, initialItems.size),
+                            hasMoreSearch = searchFeed.hasMore(),
+                            isSearching = false,
+                            searchErrorMessage = null
+                        )
                     }
-                    val tvSearchItems = results.filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                    val tvSearchItems = initialItems
+                        .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                        .take(15)
                     if (tvSearchItems.isNotEmpty()) {
                         enrichTvItemsInBackground(tvSearchItems)
                     }
                 },
                 onFailure = { err ->
+                    searchFeed = FeedPaginationState()
                     _uiState.update {
                         it.copy(
                             searchResults = emptyList(),
+                            searchTotalResults = 0,
+                            hasMoreSearch = false,
                             isSearching = false,
                             searchErrorMessage = "TMDb search failed (${err.localizedMessage ?: "offline"}). Check connection and try again."
                         )
                     }
                 }
             )
+        }
+    }
+
+    fun loadMoreSearchResults() {
+        val state = _uiState.value
+        val trimmedQuery = state.searchQuery.trim()
+        if (trimmedQuery.isBlank() || state.isSearching || state.isLoadingMoreSearch || !searchFeed.hasMore()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreSearch = true) }
+            val previousSize = _uiState.value.searchResults.size
+            val (updated, newFeed) = consumeNextBatch(
+                existingVisible = _uiState.value.searchResults,
+                currentFeed = searchFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.searchTitlesBatch(trimmedQuery, page, needed) }
+            )
+            searchFeed = newFeed
+            _uiState.update {
+                it.copy(
+                    searchResults = updated,
+                    searchTotalResults = maxOf(newFeed.totalResults, updated.size),
+                    hasMoreSearch = newFeed.hasMore(),
+                    isLoadingMoreSearch = false
+                )
+            }
+            val newlyAddedTv = updated.drop(previousSize)
+                .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                .take(15)
+            if (newlyAddedTv.isNotEmpty()) {
+                enrichTvItemsInBackground(newlyAddedTv)
+            }
         }
     }
 
@@ -365,8 +657,8 @@ class MovieViewModel(
         navigateTo(Screen.Search)
     }
 
-    fun openCategoryList(title: String, categoryKey: String) {
-        navigateTo(Screen.CategoryList(title, categoryKey))
+    fun openCategoryList(title: String, categoryKey: String, genreFilter: String = "All") {
+        navigateTo(Screen.CategoryList(title, categoryKey, genreFilter))
     }
 
     fun selectGenre(genre: String) {

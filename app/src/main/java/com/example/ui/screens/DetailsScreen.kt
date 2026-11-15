@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -21,8 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.ButtonDefaults
@@ -32,7 +37,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -46,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -131,9 +136,9 @@ fun DetailsScreen(
                 showBackButton = true,
                 onDismissOrBack = onBack,
                 actionsContent = {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         val targetWatchPair = remember(media.mediaType, selectedSeason, continueWatchingItem) {
                             if (continueWatchingItem != null) {
@@ -148,19 +153,21 @@ fun DetailsScreen(
                         }
                         val watchCtaLabel = when {
                             continueWatchingItem != null && media.mediaType == "tv" ->
-                                "Resume S${targetWatchPair.first}:E${targetWatchPair.second}"
+                                "Watch Now • Resume S${targetWatchPair.first}:E${targetWatchPair.second}"
                             continueWatchingItem != null ->
-                                "Resume Stream"
-                            else -> "Watch Stream"
+                                "Watch Now • Resume"
+                            else -> "Watch Now"
                         }
+
+                        // Primary CTA: Watch Now
                         CineGradientButton(
                             onClick = { onWatchClick(targetWatchPair.first, targetWatchPair.second) },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             fillWidth = true,
                             minHeight = 48.dp,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                             modifier = Modifier
-                                .weight(1.3f)
+                                .fillMaxWidth()
                                 .height(48.dp)
                                 .testTag("details_watch_now_button")
                         ) {
@@ -169,56 +176,106 @@ fun DetailsScreen(
                                 contentDescription = watchCtaLabel,
                                 tint = Color.White
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = watchCtaLabel,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                fontSize = 15.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        OutlinedButton(
-                            onClick = onTrailerClick,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = colors.surfaceElevated,
-                                contentColor = colors.textPrimary
+                        // Secondary CTAs: Favorite & Watch Trailer
+                        val favScale by animateFloatAsState(
+                            targetValue = if (isInWatchlist) 1.04f else 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMedium
                             ),
-                            modifier = Modifier
-                                .weight(1.1f)
-                                .height(48.dp)
-                                .testTag("details_trailer_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Videocam,
-                                contentDescription = "Trailer",
-                                tint = colors.gold,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Trailer",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
-                        }
+                            label = "favorite_button_scale"
+                        )
+                        val favContainerColor by animateColorAsState(
+                            targetValue = if (isInWatchlist) colors.softRose.copy(alpha = 0.16f) else colors.surfaceElevated,
+                            animationSpec = tween(220),
+                            label = "favorite_container_color"
+                        )
+                        val favContentColor by animateColorAsState(
+                            targetValue = if (isInWatchlist) colors.softRose else colors.textPrimary,
+                            animationSpec = tween(220),
+                            label = "favorite_content_color"
+                        )
 
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        IconButton(
-                            onClick = onWatchlistToggle,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(colors.surfaceElevated, RoundedCornerShape(8.dp))
-                                .testTag("details_watchlist_toggle_button")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = if (isInWatchlist) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                contentDescription = "Watchlist",
-                                tint = if (isInWatchlist) colors.gold else colors.textPrimary
-                            )
+                            OutlinedButton(
+                                onClick = onWatchlistToggle,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = favContainerColor,
+                                    contentColor = favContentColor
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isInWatchlist) colors.softRose.copy(alpha = 0.65f) else colors.border
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .graphicsLayer {
+                                        scaleX = favScale
+                                        scaleY = favScale
+                                    }
+                                    .testTag("details_watchlist_toggle_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isInWatchlist) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = if (isInWatchlist) "Remove from Favorites" else "Add to Favorites",
+                                    tint = if (isInWatchlist) colors.softRose else colors.textPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isInWatchlist) "Favorited" else "Favorite",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = onTrailerClick,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = colors.surfaceElevated,
+                                    contentColor = colors.textPrimary
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("details_trailer_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = "Watch Trailer",
+                                    tint = colors.gold,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Trailer",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }

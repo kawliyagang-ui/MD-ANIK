@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,10 +31,11 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.MediaItem
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,7 +58,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import com.example.data.model.TmdbSearchHistoryEntity
+import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CineGradientButton
+import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.components.SearchResultsSkeletonGrid
 import com.example.ui.theme.CineTheme
@@ -80,6 +86,13 @@ fun ExploreScreen(
     onRetrySearch: () -> Unit = {},
     onResetFilters: () -> Unit = {},
     isLoadingCatalog: Boolean = false,
+    onOpenSearch: () -> Unit = {},
+    totalAvailableCount: Int = allTitles.size,
+    batchSize: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE,
+    hasMore: Boolean = false,
+    isLoadingMore: Boolean = false,
+    onBatchSizeChange: (Int) -> Unit = {},
+    onLoadMore: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = CineTheme.colors
@@ -123,51 +136,50 @@ fun ExploreScreen(
             .fillMaxSize()
             .background(gradients.appBackdrop)
     ) {
-        // Search Header
+        // Search Header -> Tapping opens dedicated Search & Results Page
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = { Text("Search movies, TV shows, anime...", color = colors.textMuted, fontSize = 14.sp) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = colors.softRose
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onSearchQueryChange("") },
-                            modifier = Modifier.testTag("clear_search_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear",
-                                tint = colors.textSecondary
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = colors.softRose,
-                    unfocusedBorderColor = colors.border,
-                    focusedContainerColor = colors.surfaceElevated,
-                    unfocusedContainerColor = colors.surfaceElevated,
-                    focusedTextColor = colors.textPrimary,
-                    unfocusedTextColor = colors.textPrimary
-                ),
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("search_input_field")
-            )
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(colors.surfaceElevated)
+                    .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                    .clickable(onClick = onOpenSearch)
+                    .padding(horizontal = 14.dp)
+                    .testTag("search_input_field"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = colors.softRose
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = if (searchQuery.isNotBlank()) searchQuery else "Search movies, TV shows, anime...",
+                    color = if (searchQuery.isNotBlank()) colors.textPrimary else colors.textMuted,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onSearchQueryChange("") },
+                        modifier = Modifier.testTag("clear_search_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear",
+                            tint = colors.textSecondary
+                        )
+                    }
+                }
+            }
 
             // Search History (Last 5 movie searches from Room DB)
             if (searchHistory.isNotEmpty()) {
@@ -214,7 +226,10 @@ fun ExploreScreen(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(colors.surface)
                                 .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                                .clickable { onSearchQueryChange(item.query) }
+                                .clickable {
+                                    onSearchQueryChange(item.query)
+                                    onOpenSearch()
+                                }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                                 .testTag("explore_recent_chip_${item.query}")
                         ) {
@@ -319,13 +334,19 @@ fun ExploreScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Genre Horizontal Pills
+            // Genre & Batch Size Horizontal Pills
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                BatchSizeChip(
+                    batchSize = batchSize,
+                    onToggleBatchSize = onBatchSizeChange,
+                    testTag = "explore_batch_size_chip"
+                )
                 genres.forEach { genre ->
                     val isSelected = selectedGenre == genre
                     FilterChip(
@@ -348,6 +369,12 @@ fun ExploreScreen(
         val showSkeletonGrid = (isSearching && filteredList.isEmpty()) ||
             (isLoadingCatalog && searchQuery.isBlank() && filteredList.isEmpty())
 
+        val displayTotal = if (selectedGenre == "All") {
+            maxOf(totalAvailableCount, filteredList.size)
+        } else {
+            filteredList.size
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -359,14 +386,17 @@ fun ExploreScreen(
                 text = when {
                     isSearching -> "Searching TMDb..."
                     isLoadingCatalog && filteredList.isEmpty() -> "Loading catalog..."
-                    else -> "${filteredList.size} titles found"
+                    else -> CatalogBatchPolicy.formatAvailabilitySummary(
+                        shownCount = filteredList.size,
+                        totalAvailable = displayTotal
+                    )
                 },
                 fontSize = 12.sp,
                 color = colors.textSecondary,
                 fontWeight = FontWeight.Medium
             )
 
-            if (isSearching || (isLoadingCatalog && filteredList.isEmpty())) {
+            if (isSearching || isLoadingMore || (isLoadingCatalog && filteredList.isEmpty())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
                         color = colors.softRose,
@@ -374,7 +404,11 @@ fun ExploreScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isSearching) "Fetching results" else "Syncing TMDb",
+                        text = when {
+                            isSearching -> "Fetching results"
+                            isLoadingMore -> "Loading batch"
+                            else -> "Syncing TMDb"
+                        },
                         fontSize = 11.sp,
                         color = colors.gold
                     )
@@ -481,7 +515,22 @@ fun ExploreScreen(
                 }
             }
         } else {
+            val gridState = rememberLazyGridState()
+            val shouldAutoLoadMore by remember(hasMore, isLoadingMore, filteredList.size) {
+                derivedStateOf {
+                    val total = gridState.layoutInfo.totalItemsCount
+                    val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    hasMore && !isLoadingMore && total > 8 && lastVisible >= total - 4
+                }
+            }
+            LaunchedEffect(shouldAutoLoadMore) {
+                if (shouldAutoLoadMore) {
+                    onLoadMore()
+                }
+            }
+
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(minSize = 135.dp),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -493,7 +542,20 @@ fun ExploreScreen(
                         media = item,
                         onClick = { onMediaClick(item) },
                         cardWidth = 140.dp,
-                        cardHeight = 205.dp
+                        cardHeight = 205.dp,
+                        modifier = Modifier.animateItem()
+                    )
+                }
+
+                item(span = { GridItemSpan(maxLineSpan) }, key = "explore_load_more_footer") {
+                    LoadMoreBatchFooter(
+                        shownCount = filteredList.size,
+                        totalAvailable = displayTotal,
+                        batchSize = batchSize,
+                        hasMore = hasMore,
+                        isLoadingMore = isLoadingMore,
+                        onLoadMore = onLoadMore,
+                        testTag = "explore_load_more_button"
                     )
                 }
             }

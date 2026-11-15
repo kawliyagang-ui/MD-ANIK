@@ -5,13 +5,16 @@ import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.AdminSecurityEntity
 import com.example.data.model.AdminSecurityPolicy
+import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
+import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.SeasonInfo
 import com.example.data.model.TmdbItemDto
+import com.example.data.model.TmdbPageResponse
 import com.example.data.model.TmdbSeasonDetailsDto
 import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.data.model.TmdbTvDetailsDto
@@ -20,7 +23,10 @@ import com.example.data.remote.CuratedCatalog
 import com.example.data.remote.TmdbClient
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.firstOrNull
@@ -88,6 +94,114 @@ class MovieRepository(private val mediaDao: MediaDao) {
                 )
             )
         }
+    }
+
+    private suspend fun fetchMultiPageBatch(
+        startPage: Int,
+        neededCount: Int,
+        fetchPage: suspend (Int) -> TmdbPageResponse,
+        mapResponse: (TmdbPageResponse) -> List<MediaItem>
+    ): Result<PagedCatalogBatch> = withContext(Dispatchers.IO) {
+        try {
+            val safeStart = startPage.coerceAtLeast(1)
+            val firstPageResponse = fetchPage(safeStart)
+            val totalPages = firstPageResponse.totalPages
+                .coerceAtLeast(1)
+                .coerceAtMost(CatalogBatchPolicy.MAX_TMDB_BROWSABLE_PAGES)
+            val totalResults = maxOf(firstPageResponse.totalResults, firstPageResponse.results.size)
+
+            val desiredPages = CatalogBatchPolicy.pageRangeToFetch(
+                startPage = safeStart,
+                neededCount = neededCount,
+                totalPages = totalPages
+            )
+            val extraPages = if (desiredPages.last > safeStart) {
+                coroutineScope {
+                    ((safeStart + 1)..desiredPages.last).map { pageNum ->
+                        async { runCatching { fetchPage(pageNum) }.getOrNull() }
+                    }.awaitAll().filterNotNull()
+                }
+            } else {
+                emptyList()
+            }
+
+            val allResponses = listOf(firstPageResponse) + extraPages
+            val mergedItems = allResponses
+                .flatMap(mapResponse)
+                .distinctBy { it.id }
+            val lastPage = maxOf(safeStart, allResponses.maxOfOrNull { it.page } ?: safeStart)
+
+            Result.success(
+                PagedCatalogBatch(
+                    items = mergedItems,
+                    lastFetchedPage = lastPage,
+                    totalPages = totalPages,
+                    totalResults = totalResults
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTrendingBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getTrending(TmdbClient.apiKey, page) },
+        mapResponse = { resp -> resp.results.filter { it.posterPath != null }.map { it.toMediaItem() } }
+    )
+
+    suspend fun getPopularMoviesBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getPopularMovies(TmdbClient.apiKey, page) },
+        mapResponse = { resp ->
+            resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
+        }
+    )
+
+    suspend fun getTopRatedTvBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getTopRatedTv(TmdbClient.apiKey, page) },
+        mapResponse = { resp ->
+            resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
+        }
+    )
+
+    suspend fun searchTitlesBatch(
+        query: String,
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> {
+        if (query.isBlank()) {
+            return Result.success(PagedCatalogBatch(emptyList(), 1, 1, 0))
+        }
+        return fetchMultiPageBatch(
+            startPage = startPage,
+            neededCount = neededCount,
+            fetchPage = { page ->
+                TmdbClient.apiService.searchMulti(
+                    apiKey = TmdbClient.apiKey,
+                    query = query,
+                    page = page
+                )
+            },
+            mapResponse = { resp ->
+                resp.results
+                    .filter { it.posterPath != null && (it.mediaType == "movie" || it.mediaType == "tv" || it.mediaType == null) }
+                    .map { it.toMediaItem() }
+            }
+        )
     }
 
     suspend fun getTrending(): Result<List<MediaItem>> = withContext(Dispatchers.IO) {

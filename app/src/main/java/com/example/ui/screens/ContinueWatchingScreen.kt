@@ -55,7 +55,8 @@ fun ContinueWatchingScreen(
     onRemoveItem: (String) -> Unit,
     onBrowseClick: () -> Unit,
     modifier: Modifier = Modifier,
-    allCatalogItems: List<MediaItem> = emptyList()
+    allCatalogItems: List<MediaItem> = emptyList(),
+    onMediaClick: (MediaItem) -> Unit = { media -> onResumeWatching(media, 1, 1) }
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
@@ -155,7 +156,8 @@ fun ContinueWatchingScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onResumeWatching(media, safeSeason, safeEpisode) }
+                            .animateItem()
+                            .clickable { onMediaClick(media) }
                             .testTag("continue_card_${item.id}")
                     ) {
                         Row(
@@ -164,12 +166,13 @@ fun ContinueWatchingScreen(
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Poster thumbnail
+                            // Poster thumbnail (tap play badge to resume immediately)
                             Box(
                                 modifier = Modifier
                                     .size(width = 65.dp, height = 95.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(colors.surface),
+                                    .background(colors.surface)
+                                    .clickable { onResumeWatching(media, safeSeason, safeEpisode) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (media.fullPosterUrl.isNotBlank()) {

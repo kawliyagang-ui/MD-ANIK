@@ -5,6 +5,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -18,6 +30,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -164,11 +177,14 @@ fun CinetraApp() {
 
         val watchlistIds = remember(watchlist) { watchlist.map { it.id }.toSet() }
         val isPlayerScreen = userState.currentScreen is Screen.Player
+        val isDedicatedSubPage = userState.currentScreen is Screen.Details ||
+            userState.currentScreen is Screen.Search ||
+            userState.currentScreen is Screen.CategoryList ||
+            userState.currentScreen is Screen.Player
 
         BackHandler(
             enabled = userState.backStack.size > 1 &&
-                userState.currentScreen !is Screen.Details &&
-                userState.currentScreen !is Screen.Player &&
+                !isDedicatedSubPage &&
                 !userState.isTrailerModalOpen
         ) {
             movieViewModel.navigateBack()
@@ -185,9 +201,17 @@ fun CinetraApp() {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = colors.background,
-            contentWindowInsets = if (isPlayerScreen) WindowInsets(0, 0, 0, 0) else WindowInsets.statusBars,
+            contentWindowInsets = when {
+                isPlayerScreen -> WindowInsets(0, 0, 0, 0)
+                isDedicatedSubPage -> WindowInsets.systemBars
+                else -> WindowInsets.statusBars
+            },
             topBar = {
-                if (!isPlayerScreen && userState.currentScreen !is Screen.Details) {
+                AnimatedVisibility(
+                    visible = !isDedicatedSubPage,
+                    enter = fadeIn(tween(180)) + expandVertically(tween(200)),
+                    exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                ) {
                     Surface(
                         color = Color.Transparent,
                         modifier = Modifier
@@ -283,7 +307,11 @@ fun CinetraApp() {
                 }
             },
             bottomBar = {
-                if (!isPlayerScreen) {
+                AnimatedVisibility(
+                    visible = !isDedicatedSubPage,
+                    enter = fadeIn(tween(180)) + expandVertically(tween(200)),
+                    exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -401,196 +429,360 @@ fun CinetraApp() {
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                when (val screen = userState.currentScreen) {
-                    is Screen.Home -> {
-                        HomeScreen(
-                            trending = userState.trending,
-                            popularMovies = userState.popularMovies,
-                            topRatedTv = userState.topRatedTv,
-                            customMedia = userState.customMedia,
-                            continueWatching = continueWatching,
-                            announcements = activeAnnouncements,
-                            isLoading = userState.isLoading,
-                            errorMessage = userState.errorMessage,
-                            onRetry = { movieViewModel.loadHomeData() },
-                            selectedHomeGenre = userState.selectedHomeGenre,
-                            onHomeGenreSelect = { movieViewModel.selectHomeGenre(it) },
-                            onBrowseGenreInExplore = { movieViewModel.openExploreWithGenre(it) },
-                            isItemInWatchlist = { it in watchlistIds },
-                            onMediaClick = { movieViewModel.openDetails(it) },
-                            onWatchClick = { movieViewModel.openPlayer(it) },
-                            onWatchlistToggle = { movieViewModel.toggleWatchlist(it) },
-                            onTrailerClick = { movieViewModel.openTrailer(it) },
-                            onResumeWatching = { media, s, ep -> movieViewModel.openPlayer(media, s, ep) },
-                            onSeeAllClick = { section ->
-                                when (section) {
-                                    "Continue Watching" -> movieViewModel.navigateTo(Screen.ContinueWatching)
-                                    "Trending" -> movieViewModel.openCategoryList("Trending Movies", "Trending")
-                                    "Movies" -> movieViewModel.openCategoryList("Popular Movies", "Movies")
-                                    "TV" -> movieViewModel.openCategoryList("Top-Rated TV Series", "TV")
-                                    "Specials" -> movieViewModel.openCategoryList("Cinetra Specials & Admin Picks", "Specials")
-                                    else -> movieViewModel.openCategoryList(section, "All")
+                AnimatedContent(
+                    targetState = userState.currentScreen,
+                    transitionSpec = {
+                        val isSecondaryDestination = targetState is Screen.Details ||
+                            targetState is Screen.Search ||
+                            targetState is Screen.CategoryList ||
+                            targetState is Screen.Player
+                        val wasSecondaryOrigin = initialState is Screen.Details ||
+                            initialState is Screen.Search ||
+                            initialState is Screen.CategoryList ||
+                            initialState is Screen.Player
+
+                        when {
+                            userState.isNavigatingBack -> {
+                                (slideInHorizontally(
+                                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { -it / 5 }
+                                ) + fadeIn(tween(240))) togetherWith
+                                    (slideOutHorizontally(
+                                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                        targetOffsetX = { it / 3 }
+                                    ) + fadeOut(tween(200)))
+                            }
+                            isSecondaryDestination || wasSecondaryOrigin -> {
+                                (slideInHorizontally(
+                                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { it / 4 }
+                                ) + fadeIn(tween(250)) + scaleIn(
+                                    initialScale = 0.97f,
+                                    animationSpec = tween(260)
+                                )) togetherWith
+                                    (slideOutHorizontally(
+                                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                        targetOffsetX = { -it / 6 }
+                                    ) + fadeOut(tween(200)))
+                            }
+                            else -> {
+                                (fadeIn(tween(220)) + scaleIn(
+                                    initialScale = 0.985f,
+                                    animationSpec = tween(220)
+                                )) togetherWith fadeOut(tween(160))
+                            }
+                        }
+                    },
+                    contentKey = { screen ->
+                        when (screen) {
+                            Screen.Home -> "home"
+                            Screen.Explore -> "explore"
+                            Screen.Watchlist -> "watchlist"
+                            Screen.ContinueWatching -> "continue_watching"
+                            Screen.Settings -> "settings"
+                            Screen.Search -> "search"
+                            is Screen.CategoryList -> "category_${screen.categoryKey}_${screen.genreFilter}_${screen.title}"
+                            is Screen.Details -> "details_${screen.media.id}"
+                            is Screen.Player -> "player_${screen.media.id}_${screen.season}_${screen.episode}"
+                        }
+                    },
+                    label = "cinetra_screen_transition",
+                    modifier = Modifier.fillMaxSize()
+                ) { screen ->
+                    when (screen) {
+                        is Screen.Home -> {
+                            HomeScreen(
+                                trending = userState.trending,
+                                popularMovies = userState.popularMovies,
+                                topRatedTv = userState.topRatedTv,
+                                customMedia = userState.customMedia,
+                                continueWatching = continueWatching,
+                                announcements = activeAnnouncements,
+                                isLoading = userState.isLoading,
+                                errorMessage = userState.errorMessage,
+                                onRetry = { movieViewModel.loadHomeData() },
+                                selectedHomeGenre = userState.selectedHomeGenre,
+                                onHomeGenreSelect = { movieViewModel.selectHomeGenre(it) },
+                                onBrowseGenreInExplore = { movieViewModel.openExploreWithGenre(it) },
+                                isItemInWatchlist = { it in watchlistIds },
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                onWatchClick = { movieViewModel.openPlayer(it) },
+                                onWatchlistToggle = { movieViewModel.toggleWatchlist(it) },
+                                onTrailerClick = { movieViewModel.openTrailer(it) },
+                                onResumeWatching = { media, s, ep -> movieViewModel.openPlayer(media, s, ep) },
+                                onSearchClick = { movieViewModel.openSearch() },
+                                trendingTotalResults = userState.trendingTotalResults,
+                                popularMoviesTotalResults = userState.popularMoviesTotalResults,
+                                topRatedTvTotalResults = userState.topRatedTvTotalResults,
+                                onSeeAllClick = { section ->
+                                    when (section) {
+                                        "Continue Watching" -> movieViewModel.navigateTo(Screen.ContinueWatching)
+                                        "Trending" -> {
+                                            val activeGenre = userState.selectedHomeGenre
+                                            val title = if (activeGenre.equals("All", ignoreCase = true)) {
+                                                "Trending Movies & Series"
+                                            } else {
+                                                "Trending • $activeGenre"
+                                            }
+                                            movieViewModel.openCategoryList(title, "Trending", activeGenre)
+                                        }
+                                        "Movies" -> movieViewModel.openCategoryList("Popular Movies", "Movies")
+                                        "TV" -> movieViewModel.openCategoryList("Top-Rated TV Series", "TV")
+                                        "Specials" -> movieViewModel.openCategoryList("Cinetra Specials & Admin Picks", "Specials")
+                                        else -> movieViewModel.openCategoryList(section, "All")
+                                    }
                                 }
+                            )
+                        }
+                        is Screen.Explore -> {
+                            val combinedCatalog = remember(
+                                userState.trending,
+                                userState.popularMovies,
+                                userState.topRatedTv,
+                                userState.customMedia
+                            ) {
+                                (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia)
+                                    .distinctBy { it.id }
                             }
-                        )
-                    }
-                    is Screen.Explore -> {
-                        val combinedCatalog = remember(
-                            userState.trending,
-                            userState.popularMovies,
-                            userState.topRatedTv,
-                            userState.customMedia
-                        ) {
-                            (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia)
-                                .distinctBy { it.id }
-                        }
-                        ExploreScreen(
-                            searchQuery = userState.searchQuery,
-                            onSearchQueryChange = { movieViewModel.onSearchQueryChange(it) },
-                            selectedCategory = userState.selectedCategory,
-                            onCategorySelect = { movieViewModel.selectCategory(it) },
-                            selectedGenre = userState.selectedGenre,
-                            onGenreSelect = { movieViewModel.selectGenre(it) },
-                            sortBy = userState.sortBy,
-                            onSortSelect = { movieViewModel.selectSortBy(it) },
-                            allTitles = combinedCatalog,
-                            searchResults = userState.searchResults,
-                            isSearching = userState.isSearching,
-                            isLoadingCatalog = userState.isLoading,
-                            onMediaClick = { movieViewModel.openDetails(it) },
-                            searchHistory = searchHistory,
-                            onDeleteSearchHistory = { movieViewModel.deleteSearchHistory(it) },
-                            onClearSearchHistory = { movieViewModel.clearSearchHistory() },
-                            searchErrorMessage = userState.searchErrorMessage,
-                            onRetrySearch = { movieViewModel.onSearchQueryChange(userState.searchQuery) },
-                            onResetFilters = {
-                                movieViewModel.selectCategory("All")
-                                movieViewModel.selectGenre("All")
-                                if (userState.searchQuery.isNotBlank()) {
-                                    movieViewModel.onSearchQueryChange("")
-                                }
-                            }
-                        )
-                    }
-                    is Screen.Search -> {
-                        SearchScreen(
-                            searchQuery = userState.searchQuery,
-                            onSearchQueryChange = { movieViewModel.onSearchQueryChange(it) },
-                            searchResults = userState.searchResults,
-                            isSearching = userState.isSearching,
-                            searchHistory = searchHistory,
-                            onDeleteSearchHistory = { movieViewModel.deleteSearchHistory(it) },
-                            onClearSearchHistory = { movieViewModel.clearSearchHistory() },
-                            searchErrorMessage = userState.searchErrorMessage,
-                            onRetrySearch = { movieViewModel.onSearchQueryChange(userState.searchQuery) },
-                            onMediaClick = { movieViewModel.openDetails(it) },
-                            onBack = { movieViewModel.navigateBack() }
-                        )
-                    }
-                    is Screen.CategoryList -> {
-                        val categoryItems = when (screen.categoryKey) {
-                            "Trending" -> userState.trending
-                            "Movies" -> userState.popularMovies
-                            "TV" -> userState.topRatedTv
-                            "Specials" -> userState.customMedia
-                            else -> (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia).distinctBy { it.id }
-                        }
-                        CategoryListScreen(
-                            title = screen.title,
-                            items = categoryItems,
-                            onMediaClick = { movieViewModel.openDetails(it) },
-                            onBack = { movieViewModel.navigateBack() }
-                        )
-                    }
-                    is Screen.Watchlist -> {
-                        WatchlistScreen(
-                            watchlist = watchlist,
-                            onMediaClick = { movieViewModel.openDetails(it) },
-                            onRemoveFromWatchlist = { movieViewModel.toggleWatchlist(it) },
-                            onExploreClick = { movieViewModel.navigateTo(Screen.Explore) }
-                        )
-                    }
-                    is Screen.ContinueWatching -> {
-                        val combinedCatalog = remember(
-                            userState.trending,
-                            userState.popularMovies,
-                            userState.topRatedTv,
-                            userState.customMedia
-                        ) {
-                            (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia)
-                                .distinctBy { it.id }
-                        }
-                        ContinueWatchingScreen(
-                            items = continueWatching,
-                            allCatalogItems = combinedCatalog,
-                            onResumeWatching = { media, season, ep -> movieViewModel.openPlayer(media, season, ep) },
-                            onRemoveItem = { movieViewModel.removeContinueWatching(it) },
-                            onBrowseClick = { movieViewModel.navigateTo(Screen.Explore) }
-                        )
-                    }
-                    is Screen.Settings -> {
-                        SettingsScreen(
-                            selectedPalette = userState.selectedPalette,
-                            defaultServer = userState.playerServer,
-                            watchlistCount = watchlist.size,
-                            continueWatchingCount = continueWatching.size,
-                            searchHistoryCount = searchHistory.size,
-                            appVersionName = appVersionName,
-                            onToggleHighReadability = { movieViewModel.toggleHighReadabilityPalette() },
-                            onSelectPalette = { movieViewModel.selectDarkThemePalette(it) },
-                            onSelectDefaultServer = { movieViewModel.setDefaultPlayerServer(it) },
-                            onClearSearchHistory = { movieViewModel.clearSearchHistory() }
-                        )
-                    }
-                    is Screen.Details -> {
-                        val activeMedia = userState.selectedMedia?.takeIf { it.id == screen.media.id } ?: screen.media
-                        val savedContinueItem = remember(continueWatching, activeMedia.id) {
-                            continueWatching.firstOrNull { it.id == activeMedia.id }
-                        }
-                        DetailsScreen(
-                            media = activeMedia,
-                            isInWatchlist = activeMedia.id in watchlistIds,
-                            episodesBySeason = userState.episodesByMediaAndSeason[activeMedia.id].orEmpty(),
-                            isLoadingSeasons = userState.isLoadingSeasons,
-                            loadingSeasonNumber = userState.loadingSeasonNumber,
-                            onSeasonSelected = { seasonNum -> movieViewModel.loadSeasonEpisodes(activeMedia, seasonNum) },
-                            continueWatchingItem = savedContinueItem,
-                            onWatchClick = { s, ep -> movieViewModel.openPlayer(activeMedia, s, ep) },
-                            onWatchlistToggle = { movieViewModel.toggleWatchlist(activeMedia) },
-                            onTrailerClick = { movieViewModel.openTrailer(activeMedia) },
-                            onBack = { movieViewModel.navigateBack() }
-                        )
-                    }
-                    is Screen.Player -> {
-                        val activePlayerMedia = userState.playingMedia?.takeIf { it.id == screen.media.id } ?: screen.media
-                        val savedProgress = remember(continueWatching, activePlayerMedia.id, userState.currentSeason, userState.currentEpisode) {
-                            continueWatching.firstOrNull {
-                                it.id == activePlayerMedia.id &&
-                                    (activePlayerMedia.mediaType != "tv" ||
-                                        (it.season == userState.currentSeason && it.episode == userState.currentEpisode))
-                            }
-                        }
-                        StreamPlayerView(
-                            media = activePlayerMedia,
-                            currentSeason = userState.currentSeason,
-                            currentEpisode = userState.currentEpisode,
-                            selectedServer = userState.playerServer,
-                            episodesBySeason = userState.episodesByMediaAndSeason[activePlayerMedia.id].orEmpty(),
-                            initialWatchedSeconds = savedProgress?.watchedSeconds ?: 0L,
-                            initialDurationSeconds = savedProgress?.durationSeconds ?: 0L,
-                            onProgressUpdate = { watchedSec, durationSec ->
-                                movieViewModel.updateWatchProgress(
-                                    media = activePlayerMedia,
-                                    season = userState.currentSeason,
-                                    episode = userState.currentEpisode,
-                                    watchedSeconds = watchedSec,
-                                    durationSeconds = durationSec
+                            val exploreTotalCount = remember(
+                                userState.selectedCategory,
+                                userState.popularMoviesTotalResults,
+                                userState.topRatedTvTotalResults,
+                                userState.trendingTotalResults,
+                                userState.customMedia,
+                                combinedCatalog.size
+                            ) {
+                                com.example.data.model.CatalogBatchPolicy.resolveExploreTotalCount(
+                                    selectedCategory = userState.selectedCategory,
+                                    moviesTotalResults = userState.popularMoviesTotalResults,
+                                    tvTotalResults = userState.topRatedTvTotalResults,
+                                    trendingTotalResults = userState.trendingTotalResults,
+                                    customMedia = userState.customMedia,
+                                    shownCount = combinedCatalog.size
                                 )
-                            },
-                            onServerSelect = { movieViewModel.switchPlayerServer(it) },
-                            onEpisodeSelect = { s, ep -> movieViewModel.switchEpisode(s, ep) },
-                            onBack = { movieViewModel.navigateBack() }
-                        )
+                            }
+                            val exploreHasMore = when (userState.selectedCategory) {
+                                "movie" -> userState.hasMorePopularMovies
+                                "tv" -> userState.hasMoreTopRatedTv
+                                else -> userState.hasMorePopularMovies || userState.hasMoreTopRatedTv
+                            }
+                            val exploreIsLoadingMore = when (userState.selectedCategory) {
+                                "movie" -> userState.isLoadingMoreMovies
+                                "tv" -> userState.isLoadingMoreTv
+                                else -> userState.isLoadingMoreMovies || userState.isLoadingMoreTv
+                            }
+                            val exploreTargetCategory = when (userState.selectedCategory) {
+                                "movie" -> "Movies"
+                                "tv" -> "TV"
+                                else -> "All"
+                            }
+                            ExploreScreen(
+                                searchQuery = userState.searchQuery,
+                                onSearchQueryChange = { movieViewModel.onSearchQueryChange(it) },
+                                selectedCategory = userState.selectedCategory,
+                                onCategorySelect = { movieViewModel.selectCategory(it) },
+                                selectedGenre = userState.selectedGenre,
+                                onGenreSelect = { movieViewModel.selectGenre(it) },
+                                sortBy = userState.sortBy,
+                                onSortSelect = { movieViewModel.selectSortBy(it) },
+                                allTitles = combinedCatalog,
+                                searchResults = userState.searchResults,
+                                isSearching = userState.isSearching,
+                                isLoadingCatalog = userState.isLoading,
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                searchHistory = searchHistory,
+                                onDeleteSearchHistory = { movieViewModel.deleteSearchHistory(it) },
+                                onClearSearchHistory = { movieViewModel.clearSearchHistory() },
+                                searchErrorMessage = userState.searchErrorMessage,
+                                onRetrySearch = { movieViewModel.onSearchQueryChange(userState.searchQuery) },
+                                onOpenSearch = { movieViewModel.openSearch() },
+                                totalAvailableCount = exploreTotalCount,
+                                batchSize = userState.batchSize,
+                                hasMore = exploreHasMore,
+                                isLoadingMore = exploreIsLoadingMore,
+                                onBatchSizeChange = { movieViewModel.setBatchSize(it) },
+                                onLoadMore = { movieViewModel.loadMoreCategory(exploreTargetCategory) },
+                                onResetFilters = {
+                                    movieViewModel.selectCategory("All")
+                                    movieViewModel.selectGenre("All")
+                                    if (userState.searchQuery.isNotBlank()) {
+                                        movieViewModel.onSearchQueryChange("")
+                                    }
+                                }
+                            )
+                        }
+                        is Screen.Search -> {
+                            SearchScreen(
+                                searchQuery = userState.searchQuery,
+                                onSearchQueryChange = { movieViewModel.onSearchQueryChange(it) },
+                                searchResults = userState.searchResults,
+                                isSearching = userState.isSearching,
+                                searchHistory = searchHistory,
+                                onDeleteSearchHistory = { movieViewModel.deleteSearchHistory(it) },
+                                onClearSearchHistory = { movieViewModel.clearSearchHistory() },
+                                searchErrorMessage = userState.searchErrorMessage,
+                                onRetrySearch = { movieViewModel.onSearchQueryChange(userState.searchQuery) },
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                onBack = { movieViewModel.navigateBack() },
+                                totalResultsCount = userState.searchTotalResults,
+                                batchSize = userState.batchSize,
+                                hasMore = userState.hasMoreSearch,
+                                isLoadingMore = userState.isLoadingMoreSearch,
+                                onBatchSizeChange = { movieViewModel.setBatchSize(it) },
+                                onLoadMore = { movieViewModel.loadMoreSearchResults() }
+                            )
+                        }
+                        is Screen.CategoryList -> {
+                            val categoryItems = remember(
+                                screen.categoryKey,
+                                screen.genreFilter,
+                                userState.trending,
+                                userState.popularMovies,
+                                userState.topRatedTv,
+                                userState.customMedia
+                            ) {
+                                val rawList = when (screen.categoryKey) {
+                                    "Trending" -> userState.trending
+                                    "Movies" -> userState.popularMovies
+                                    "TV" -> userState.topRatedTv
+                                    "Specials" -> userState.customMedia
+                                    else -> (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia)
+                                        .distinctBy { it.id }
+                                }
+                                com.example.ui.components.HomeGenreCatalog.filterByGenre(rawList, screen.genreFilter)
+                            }
+                            val categoryTotalCount = when (screen.categoryKey) {
+                                "Trending" -> if (screen.genreFilter.equals("All", ignoreCase = true)) {
+                                    maxOf(userState.trendingTotalResults, categoryItems.size)
+                                } else {
+                                    categoryItems.size
+                                }
+                                "Movies" -> maxOf(userState.popularMoviesTotalResults, categoryItems.size)
+                                "TV" -> maxOf(userState.topRatedTvTotalResults, categoryItems.size)
+                                "Specials" -> categoryItems.size
+                                else -> maxOf(
+                                    userState.popularMoviesTotalResults + userState.topRatedTvTotalResults + userState.customMedia.size,
+                                    categoryItems.size
+                                )
+                            }
+                            val categoryHasMore = when (screen.categoryKey) {
+                                "Trending" -> userState.hasMoreTrending
+                                "Movies" -> userState.hasMorePopularMovies
+                                "TV" -> userState.hasMoreTopRatedTv
+                                "Specials" -> false
+                                else -> userState.hasMorePopularMovies || userState.hasMoreTopRatedTv
+                            }
+                            val categoryIsLoadingMore = when (screen.categoryKey) {
+                                "Trending" -> userState.isLoadingMoreTrending
+                                "Movies" -> userState.isLoadingMoreMovies
+                                "TV" -> userState.isLoadingMoreTv
+                                "Specials" -> false
+                                else -> userState.isLoadingMoreMovies || userState.isLoadingMoreTv
+                            }
+                            CategoryListScreen(
+                                title = screen.title,
+                                mediaItems = categoryItems,
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                onBack = { movieViewModel.navigateBack() },
+                                totalAvailableCount = categoryTotalCount,
+                                batchSize = userState.batchSize,
+                                hasMore = categoryHasMore,
+                                isLoadingMore = categoryIsLoadingMore,
+                                onBatchSizeChange = { movieViewModel.setBatchSize(it) },
+                                onLoadMore = { movieViewModel.loadMoreCategory(screen.categoryKey) }
+                            )
+                        }
+                        is Screen.Watchlist -> {
+                            WatchlistScreen(
+                                watchlist = watchlist,
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                onRemoveFromWatchlist = { movieViewModel.toggleWatchlist(it) },
+                                onExploreClick = { movieViewModel.navigateTo(Screen.Explore) }
+                            )
+                        }
+                        is Screen.ContinueWatching -> {
+                            val combinedCatalog = remember(
+                                userState.trending,
+                                userState.popularMovies,
+                                userState.topRatedTv,
+                                userState.customMedia
+                            ) {
+                                (userState.trending + userState.popularMovies + userState.topRatedTv + userState.customMedia)
+                                    .distinctBy { it.id }
+                            }
+                            ContinueWatchingScreen(
+                                items = continueWatching,
+                                allCatalogItems = combinedCatalog,
+                                onResumeWatching = { media, season, ep -> movieViewModel.openPlayer(media, season, ep) },
+                                onMediaClick = { movieViewModel.openDetails(it) },
+                                onRemoveItem = { movieViewModel.removeContinueWatching(it) },
+                                onBrowseClick = { movieViewModel.navigateTo(Screen.Explore) }
+                            )
+                        }
+                        is Screen.Settings -> {
+                            SettingsScreen(
+                                selectedPalette = userState.selectedPalette,
+                                defaultServer = userState.playerServer,
+                                watchlistCount = watchlist.size,
+                                continueWatchingCount = continueWatching.size,
+                                searchHistoryCount = searchHistory.size,
+                                appVersionName = appVersionName,
+                                onToggleHighReadability = { movieViewModel.toggleHighReadabilityPalette() },
+                                onSelectPalette = { movieViewModel.selectDarkThemePalette(it) },
+                                onSelectDefaultServer = { movieViewModel.setDefaultPlayerServer(it) },
+                                onClearSearchHistory = { movieViewModel.clearSearchHistory() }
+                            )
+                        }
+                        is Screen.Details -> {
+                            val activeMedia = userState.selectedMedia?.takeIf { it.id == screen.media.id } ?: screen.media
+                            val savedContinueItem = remember(continueWatching, activeMedia.id) {
+                                continueWatching.firstOrNull { it.id == activeMedia.id }
+                            }
+                            DetailsScreen(
+                                media = activeMedia,
+                                isInWatchlist = activeMedia.id in watchlistIds,
+                                episodesBySeason = userState.episodesByMediaAndSeason[activeMedia.id].orEmpty(),
+                                isLoadingSeasons = userState.isLoadingSeasons,
+                                loadingSeasonNumber = userState.loadingSeasonNumber,
+                                onSeasonSelected = { seasonNum -> movieViewModel.loadSeasonEpisodes(activeMedia, seasonNum) },
+                                continueWatchingItem = savedContinueItem,
+                                onWatchClick = { s, ep -> movieViewModel.openPlayer(activeMedia, s, ep) },
+                                onWatchlistToggle = { movieViewModel.toggleWatchlist(activeMedia) },
+                                onTrailerClick = { movieViewModel.openTrailer(activeMedia) },
+                                onBack = { movieViewModel.navigateBack() }
+                            )
+                        }
+                        is Screen.Player -> {
+                            val activePlayerMedia = userState.playingMedia?.takeIf { it.id == screen.media.id } ?: screen.media
+                            val savedProgress = remember(continueWatching, activePlayerMedia.id, userState.currentSeason, userState.currentEpisode) {
+                                continueWatching.firstOrNull {
+                                    it.id == activePlayerMedia.id &&
+                                        (activePlayerMedia.mediaType != "tv" ||
+                                            (it.season == userState.currentSeason && it.episode == userState.currentEpisode))
+                                }
+                            }
+                            StreamPlayerView(
+                                media = activePlayerMedia,
+                                currentSeason = userState.currentSeason,
+                                currentEpisode = userState.currentEpisode,
+                                selectedServer = userState.playerServer,
+                                episodesBySeason = userState.episodesByMediaAndSeason[activePlayerMedia.id].orEmpty(),
+                                initialWatchedSeconds = savedProgress?.watchedSeconds ?: 0L,
+                                initialDurationSeconds = savedProgress?.durationSeconds ?: 0L,
+                                onProgressUpdate = { watchedSec, durationSec ->
+                                    movieViewModel.updateWatchProgress(
+                                        media = activePlayerMedia,
+                                        season = userState.currentSeason,
+                                        episode = userState.currentEpisode,
+                                        watchedSeconds = watchedSec,
+                                        durationSeconds = durationSec
+                                    )
+                                },
+                                onServerSelect = { movieViewModel.switchPlayerServer(it) },
+                                onEpisodeSelect = { s, ep -> movieViewModel.switchEpisode(s, ep) },
+                                onBack = { movieViewModel.navigateBack() }
+                            )
+                        }
                     }
                 }
 

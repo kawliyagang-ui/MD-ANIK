@@ -10,16 +10,21 @@ import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.media.AudioManager
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +34,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
@@ -37,12 +43,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -70,24 +82,24 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.R
 import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
 import com.example.data.model.PlayerServer
@@ -145,8 +157,20 @@ fun StreamPlayerView(
     }
     var isMuted by remember { mutableStateOf(volumeFraction <= 0.005f) }
 
+    val initialOrientation = remember(activity) {
+        activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    val initialCutoutMode = remember(activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            activity?.window?.attributes?.layoutInDisplayCutoutMode
+        } else {
+            null
+        }
+    }
+
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var customFullscreenView by remember { mutableStateOf<View?>(null) }
+    var fullscreenHostContainer by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
     var isLoadingPage by remember { mutableStateOf(true) }
@@ -163,13 +187,10 @@ fun StreamPlayerView(
         mutableLongStateOf(initialDurationSeconds.coerceAtLeast(0L))
     }
     val latestOnProgressUpdate by rememberUpdatedState(onProgressUpdate)
-    val latestMedia by rememberUpdatedState(media)
-    val latestSeason by rememberUpdatedState(currentSeason)
-    val latestEpisode by rememberUpdatedState(currentEpisode)
-
-    val currentStreamUrl = remember(media, selectedServer, currentSeason, currentEpisode) {
+    val latestStreamUrl by rememberUpdatedState(
         media.getStreamUrl(selectedServer, currentSeason, currentEpisode)
-    }
+    )
+    val currentStreamUrl = latestStreamUrl
 
     val subtitleText = remember(media.mediaType, currentSeason, currentEpisode, selectedServer) {
         if (media.mediaType == "tv") {
@@ -179,7 +200,7 @@ fun StreamPlayerView(
         }
     }
 
-    // Listen for physical hardware volume button changes so the slider stays accurate
+    // Listen for physical hardware volume button changes
     DisposableEffect(context, audioManager, maxStreamVolume) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -204,34 +225,46 @@ fun StreamPlayerView(
         }
     }
 
-    // Manage system bars & landscape orientation during full-screen playback
-    DisposableEffect(isFullScreen, activity, hostView) {
-        val window = activity?.window
-        val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-
-        if (isFullScreen) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            if (window != null) {
-                WindowCompat.getInsetsController(window, hostView).apply {
-                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    hide(WindowInsetsCompat.Type.systemBars())
-                }
+    // Sync WebView lifecycle on background/foreground transitions
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, webViewInstance) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> webViewInstance?.onResume()
+                Lifecycle.Event.ON_PAUSE -> webViewInstance?.onPause()
+                else -> Unit
             }
-        } else if (window != null) {
-            WindowCompat.getInsetsController(window, hostView).show(WindowInsetsCompat.Type.systemBars())
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Manage system bars, cutout edge-to-edge, keep-screen-on & landscape orientation during full-screen playback
+    DisposableEffect(isFullScreen, activity, hostView) {
+        WebViewFullscreenHost.applyFullScreenWindowState(
+            activity = activity,
+            hostView = hostView,
+            isFullScreen = isFullScreen,
+            originalOrientation = initialOrientation,
+            originalCutoutMode = initialCutoutMode
+        )
 
         onDispose {
             if (isFullScreen) {
-                activity?.requestedOrientation = originalOrientation
-                if (window != null) {
-                    WindowCompat.getInsetsController(window, hostView).show(WindowInsetsCompat.Type.systemBars())
-                }
+                WebViewFullscreenHost.applyFullScreenWindowState(
+                    activity = activity,
+                    hostView = hostView,
+                    isFullScreen = false,
+                    originalOrientation = initialOrientation,
+                    originalCutoutMode = initialCutoutMode
+                )
             }
         }
     }
 
-    // Auto-hide full-screen HUD after 4 seconds of inactivity
+    // Softly dim full-screen exit button after 4 seconds so it never obscures the video
     LaunchedEffect(isFullScreen, showFullScreenHud, hudInteractionTick) {
         if (isFullScreen && showFullScreenHud) {
             delay(4000L)
@@ -316,11 +349,20 @@ fun StreamPlayerView(
         }
     }
 
+    val detachCustomFullscreenOnly: () -> Unit = {
+        val activeContainer = fullscreenHostContainer
+        val activeCustomView = customFullscreenView
+        fullscreenHostContainer = null
+        customFullscreenView = null
+        WebViewFullscreenHost.detachCustomFullscreenView(activeContainer, activeCustomView)
+    }
+
     val setFullScreenMode: (Boolean) -> Unit = { enter ->
         if (!enter) {
-            customViewCallback?.onCustomViewHidden()
+            val cb = customViewCallback
             customViewCallback = null
-            customFullscreenView = null
+            detachCustomFullscreenOnly()
+            runCatching { cb?.onCustomViewHidden() }
         }
         isFullScreen = enter
         showFullScreenHud = true
@@ -328,7 +370,7 @@ fun StreamPlayerView(
     }
 
     BackHandler {
-        if (isFullScreen) {
+        if (isFullScreen || customFullscreenView != null) {
             setFullScreenMode(false)
         } else {
             latestOnProgressUpdate(trackedWatchedSeconds, trackedDurationSeconds)
@@ -339,9 +381,17 @@ fun StreamPlayerView(
     DisposableEffect(Unit) {
         onDispose {
             latestOnProgressUpdate(trackedWatchedSeconds, trackedDurationSeconds)
-            customViewCallback?.onCustomViewHidden()
+            val cb = customViewCallback
             customViewCallback = null
-            customFullscreenView = null
+            detachCustomFullscreenOnly()
+            runCatching { cb?.onCustomViewHidden() }
+            WebViewFullscreenHost.applyFullScreenWindowState(
+                activity = activity,
+                hostView = hostView,
+                isFullScreen = false,
+                originalOrientation = initialOrientation,
+                originalCutoutMode = initialCutoutMode
+            )
             webViewInstance?.apply {
                 stopLoading()
                 loadUrl("about:blank")
@@ -411,6 +461,17 @@ fun StreamPlayerView(
                     }
 
                     IconButton(
+                        onClick = { setFullScreenMode(true) },
+                        modifier = Modifier.testTag("player_fullscreen_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Fullscreen,
+                            contentDescription = stringResource(R.string.player_fullscreen_enter_desc),
+                            tint = Color.White
+                        )
+                    }
+
+                    IconButton(
                         onClick = { webViewInstance?.reload() },
                         modifier = Modifier.testTag("player_reload_button")
                     ) {
@@ -459,6 +520,7 @@ fun StreamPlayerView(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        WebViewFullscreenHost.configureVideoWebViewBasics(this)
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -466,9 +528,12 @@ fun StreamPlayerView(
                             loadsImagesAutomatically = true
                             useWideViewPort = true
                             loadWithOverviewMode = true
+                            allowContentAccess = true
+                            javaScriptCanOpenWindowsAutomatically = false
+                            setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString =
-                                "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                                "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
                         }
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -478,6 +543,10 @@ fun StreamPlayerView(
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isLoadingPage = false
                                 view?.evaluateJavascript(
+                                    PlayerControlsPolicy.buildProgressMessageBridgeScript(),
+                                    null
+                                )
+                                view?.evaluateJavascript(
                                     PlayerControlsPolicy.buildVolumeScript(volumeFraction, isMuted),
                                     null
                                 )
@@ -485,21 +554,50 @@ fun StreamPlayerView(
 
                             override fun shouldOverrideUrlLoading(
                                 view: WebView?,
-                                request: android.webkit.WebResourceRequest?
+                                request: WebResourceRequest?
                             ): Boolean {
-                                val url = request?.url?.toString() ?: return false
-                                return !(url.contains("vidly") || url.contains("vidsrc") ||
-                                    url.contains("autoembed") || url.contains("multiembed") ||
-                                    url.contains("player") || url.contains("embed"))
+                                val targetUrl = request?.url?.toString() ?: return false
+                                val allow = PlayerControlsPolicy.shouldAllowNavigation(
+                                    url = targetUrl,
+                                    currentStreamUrl = latestStreamUrl,
+                                    isForMainFrame = request.isForMainFrame,
+                                    isRedirect = request.isRedirect
+                                )
+                                return !allow
                             }
                         }
                         webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                if (newProgress >= 85) {
+                                    isLoadingPage = false
+                                }
+                            }
+
                             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                                 if (view == null) {
                                     callback?.onCustomViewHidden()
                                     return
                                 }
-                                customViewCallback?.onCustomViewHidden()
+                                customViewCallback = null
+                                detachCustomFullscreenOnly()
+
+                                val targetRoot = (activity?.window?.decorView as? ViewGroup)
+                                    ?: (hostView.rootView as? ViewGroup)
+                                if (targetRoot != null) {
+                                    WebViewFullscreenHost.applyFullScreenWindowState(
+                                        activity = activity,
+                                        hostView = hostView,
+                                        isFullScreen = true,
+                                        originalOrientation = initialOrientation,
+                                        originalCutoutMode = initialCutoutMode
+                                    )
+                                    fullscreenHostContainer = WebViewFullscreenHost.attachCustomFullscreenView(
+                                        targetRoot = targetRoot,
+                                        context = ctx,
+                                        customView = view,
+                                        onExitClicked = { setFullScreenMode(false) }
+                                    )
+                                }
                                 customFullscreenView = view
                                 customViewCallback = callback
                                 isFullScreen = true
@@ -508,8 +606,8 @@ fun StreamPlayerView(
                             }
 
                             override fun onHideCustomView() {
-                                customFullscreenView = null
                                 customViewCallback = null
+                                detachCustomFullscreenOnly()
                                 isFullScreen = false
                             }
                         }
@@ -526,8 +624,17 @@ fun StreamPlayerView(
                             }
                         }
                         addJavascriptInterface(jsBridge, "CinetraPlayerBridge")
-                        val iframeHtml = PlayerControlsPolicy.buildIframeHtml(currentStreamUrl)
-                        loadDataWithBaseURL(currentStreamUrl, iframeHtml, "text/html", "UTF-8", null)
+                        if (PlayerControlsPolicy.isDirectMediaFileUrl(currentStreamUrl)) {
+                            loadDataWithBaseURL(
+                                currentStreamUrl,
+                                PlayerControlsPolicy.buildDirectVideoHtml(currentStreamUrl),
+                                "text/html",
+                                "UTF-8",
+                                null
+                            )
+                        } else {
+                            loadUrl(currentStreamUrl)
+                        }
                         tag = currentStreamUrl
                         webViewInstance = this
                     }
@@ -536,45 +643,52 @@ fun StreamPlayerView(
                     if (webView.tag != currentStreamUrl) {
                         webView.tag = currentStreamUrl
                         isPlaying = true
-                        val iframeHtml = PlayerControlsPolicy.buildIframeHtml(currentStreamUrl)
-                        webView.loadDataWithBaseURL(currentStreamUrl, iframeHtml, "text/html", "UTF-8", null)
+                        isLoadingPage = true
+                        if (PlayerControlsPolicy.isDirectMediaFileUrl(currentStreamUrl)) {
+                            webView.loadDataWithBaseURL(
+                                currentStreamUrl,
+                                PlayerControlsPolicy.buildDirectVideoHtml(currentStreamUrl),
+                                "text/html",
+                                "UTF-8",
+                                null
+                            )
+                        } else {
+                            webView.loadUrl(currentStreamUrl)
+                        }
                     }
                 }
             )
 
-            // Native HTML5 custom fullscreen view container when iframe invokes requestFullscreen()
-            val htmlCustomView = customFullscreenView
-            if (htmlCustomView != null) {
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black),
-                    factory = { ctx ->
-                        FrameLayout(ctx).apply {
-                            (htmlCustomView.parent as? ViewGroup)?.removeView(htmlCustomView)
-                            addView(
-                                htmlCustomView,
-                                FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                            )
-                        }
-                    },
-                    update = { container ->
-                        if (htmlCustomView.parent !== container) {
-                            (htmlCustomView.parent as? ViewGroup)?.removeView(htmlCustomView)
-                            container.removeAllViews()
-                            container.addView(
-                                htmlCustomView,
-                                FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                            )
-                        }
-                    }
+            // Non-blocking corner exit-fullscreen control when in app full-screen mode
+            if (isFullScreen && customFullscreenView == null) {
+                val pillAlpha by animateFloatAsState(
+                    targetValue = if (showFullScreenHud) 0.92f else 0.42f,
+                    animationSpec = tween(350),
+                    label = "fullscreen_exit_alpha"
                 )
+                IconButton(
+                    onClick = { setFullScreenMode(false) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .windowInsetsPadding(WindowInsets.displayCutout)
+                        .padding(14.dp)
+                        .size(48.dp)
+                        .alpha(pillAlpha)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.68f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.35f),
+                            shape = CircleShape
+                        )
+                        .testTag("player_exit_fullscreen_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FullscreenExit,
+                        contentDescription = stringResource(R.string.player_fullscreen_exit_desc),
+                        tint = Color.White
+                    )
+                }
             }
 
             if (isLoadingPage) {

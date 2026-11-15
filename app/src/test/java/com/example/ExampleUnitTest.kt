@@ -575,6 +575,164 @@ class ExampleUnitTest {
         assertFalse(com.example.data.model.ContinueWatchingPolicy.shouldPreserveProgress(entity, "tv", 3, 13))
         assertTrue(com.example.data.model.ContinueWatchingPolicy.shouldPreserveProgress(entity, "movie", 1, 1))
     }
+
+    @Test
+    fun testEmbedNavigationAllowlistAndDirectMediaDetection() {
+        val primaryUrl = "https://vidsrc.to/embed/movie/693134"
+
+        // Same host & legitimate mirror redirects in main frame allowed
+        assertTrue(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://vidsrc.to/embed/movie/693134",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = true,
+                isRedirect = false
+            )
+        )
+        assertTrue(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://vidsrc.xyz/embed/movie/693134",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = true,
+                isRedirect = true
+            )
+        )
+
+        // Subframe mirror video players (e.g. cloudnestra, megacloud, cdn) allowed
+        assertTrue(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://cloudnestra.com/rcp/abc123",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = false,
+                isRedirect = false
+            )
+        )
+        assertTrue(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://megacloud.blog/embed-2/e-1/xyz",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = false,
+                isRedirect = false
+            )
+        )
+
+        // Intent / market / ad-network popups are blocked
+        assertFalse(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "intent://promo.example.com/#Intent;scheme=https;end",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = true,
+                isRedirect = false
+            )
+        )
+        assertFalse(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://pl1234.effectivegatecpm.com/ad.js",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = false,
+                isRedirect = false
+            )
+        )
+        assertFalse(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://spam-casino-popup.example.com/offer",
+                currentStreamUrl = primaryUrl,
+                isForMainFrame = true,
+                isRedirect = false
+            )
+        )
+
+        // Direct MP4 / HLS detection & mobile fullscreen iframe attributes
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.isDirectMediaFileUrl("https://cdn.example.com/video.mp4?token=abc"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.isDirectMediaFileUrl("https://cdn.example.com/master.m3u8"))
+        assertFalse(com.example.ui.components.PlayerControlsPolicy.isDirectMediaFileUrl(primaryUrl))
+
+        val directHtml = com.example.ui.components.PlayerControlsPolicy.buildDirectVideoHtml("https://cdn.example.com/video.mp4")
+        assertTrue(directHtml.contains("<video src=\"https://cdn.example.com/video.mp4\""))
+        assertTrue(directHtml.contains("viewport-fit=cover"))
+
+        val updatedIframe = com.example.ui.components.PlayerControlsPolicy.buildIframeHtml(primaryUrl)
+        assertTrue(updatedIframe.contains("fullscreen *"))
+        assertTrue(updatedIframe.contains("viewport-fit=cover"))
+
+        // Custom full URL for TV series does not get concatenated onto https://vidly.pro/tv/...
+        val customSeries = MediaItem(
+            id = "custom_tv",
+            tmdbId = 1399L,
+            title = "Custom Show",
+            overview = "Desc",
+            posterPath = "/p.jpg",
+            mediaType = "tv",
+            vidlyId = "https://custom.player.example.com/watch/show-1"
+        )
+        assertEquals(
+            "https://custom.player.example.com/watch/show-1",
+            customSeries.getStreamUrl(PlayerServer.VIDLY, season = 2, episode = 4)
+        )
+        assertEquals(
+            "https://vidsrc.to/embed/tv/1399/2/4",
+            customSeries.getStreamUrl(PlayerServer.VIDSRC, season = 2, episode = 4)
+        )
+    }
+
+    @Test
+    fun testCatalogBatchPolicyPaginationAndTotals() {
+        assertEquals(50, CatalogBatchPolicy.DEFAULT_BATCH_SIZE)
+        assertEquals(25, CatalogBatchPolicy.normalizeBatchSize(25))
+        assertEquals(50, CatalogBatchPolicy.normalizeBatchSize(50))
+        assertEquals(25, CatalogBatchPolicy.nextBatchSize(50))
+        assertEquals(50, CatalogBatchPolicy.nextBatchSize(25))
+
+        // TMDB uses 20 items per page -> 25 needs 2 pages, 50 needs 3 pages
+        assertEquals(2, CatalogBatchPolicy.pagesCountForNeededItems(25))
+        assertEquals(3, CatalogBatchPolicy.pagesCountForNeededItems(50))
+        assertEquals(1..3, CatalogBatchPolicy.pageRangeToFetch(startPage = 1, neededCount = 50, totalPages = 500))
+        assertEquals(4..5, CatalogBatchPolicy.pageRangeToFetch(startPage = 4, neededCount = 25, totalPages = 500))
+        assertEquals(499..500, CatalogBatchPolicy.pageRangeToFetch(startPage = 499, neededCount = 50, totalPages = 900))
+        assertTrue(CatalogBatchPolicy.pageRangeToFetch(startPage = 501, neededCount = 50, totalPages = 500).isEmpty())
+
+        // Formatted totals & availability labels
+        assertEquals("948,210", CatalogBatchPolicy.formatCount(948210))
+        assertEquals(
+            "Showing 50 of 948,210 available",
+            CatalogBatchPolicy.formatAvailabilitySummary(shownCount = 50, totalAvailable = 948210)
+        )
+        assertEquals(
+            "Showing all 18 titles",
+            CatalogBatchPolicy.formatAvailabilitySummary(shownCount = 18, totalAvailable = 18)
+        )
+        assertEquals(
+            "50 / 20,000",
+            CatalogBatchPolicy.formatCompactHeaderTotal(shownCount = 50, totalAvailable = 20000)
+        )
+
+        val customItems = listOf(
+            MediaItem(id = "c1", title = "Custom Movie", overview = "", posterPath = "/1.jpg", mediaType = "movie"),
+            MediaItem(id = "c2", title = "Custom Series", overview = "", posterPath = "/2.jpg", mediaType = "tv")
+        )
+        assertEquals(
+            501,
+            CatalogBatchPolicy.resolveExploreTotalCount(
+                selectedCategory = "movie",
+                moviesTotalResults = 500,
+                tvTotalResults = 300,
+                trendingTotalResults = 1000,
+                customMedia = customItems,
+                shownCount = 50
+            )
+        )
+        assertEquals(
+            802,
+            CatalogBatchPolicy.resolveExploreTotalCount(
+                selectedCategory = "All",
+                moviesTotalResults = 500,
+                tvTotalResults = 300,
+                trendingTotalResults = 1000,
+                customMedia = customItems,
+                shownCount = 100
+            )
+        )
+    }
 }
 
 

@@ -184,16 +184,176 @@ object PlayerControlsPolicy {
         """.trimIndent()
     }
 
+    fun isDirectMediaFileUrl(url: String): Boolean {
+        val normalized = url.trim().substringBefore('?').substringBefore('#').lowercase(Locale.US)
+        return normalized.endsWith(".mp4") ||
+            normalized.endsWith(".m3u8") ||
+            normalized.endsWith(".webm") ||
+            normalized.endsWith(".mkv") ||
+            normalized.endsWith(".mov")
+    }
+
+    fun isAdPopupUrl(url: String): Boolean {
+        val lower = url.trim().lowercase(Locale.US)
+        if (lower.isBlank()) return false
+        val adKeywords = listOf(
+            "effectivegatecpm",
+            "adsterra",
+            "doubleclick.net",
+            "googlesyndication",
+            "popads.net",
+            "popcash.net",
+            "propellerads",
+            "exoclick",
+            "juicyads",
+            "trafficjunky",
+            "onclickalgo",
+            "acscdn",
+            "clickadu",
+            "hilltopads"
+        )
+        return adKeywords.any { lower.contains(it) }
+    }
+
+    fun extractHost(url: String): String {
+        val trimmed = url.trim()
+        val afterScheme = trimmed.substringAfter("://", missingDelimiterValue = "")
+        val authority = (if (afterScheme.isNotEmpty()) afterScheme else trimmed)
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringBefore(':')
+        return authority.lowercase(Locale.US).removePrefix("www.")
+    }
+
+    fun shouldAllowNavigation(
+        url: String,
+        currentStreamUrl: String,
+        isForMainFrame: Boolean,
+        isRedirect: Boolean = false
+    ): Boolean {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return false
+        val lower = trimmed.lowercase(Locale.US)
+
+        if (lower == "about:blank") return true
+
+        // Block intent://, market://, tel:, mailto:, sms:, javascript: top-level hijacks
+        val isHttp = lower.startsWith("https://") || lower.startsWith("http://")
+        if (!isHttp) return false
+
+        // Subframes (nested mirror embeds inside Vidly/VidSrc/AutoEmbed/MultiEmbed) must be allowed
+        if (!isForMainFrame) {
+            return !isAdPopupUrl(lower)
+        }
+
+        // Always block explicit known ad-network popups in main frame
+        if (isAdPopupUrl(lower)) return false
+
+        // Allow server-side redirects (e.g. vidsrc.to -> vidsrc.xyz / vidsrc.pm / cloudnestra)
+        if (isRedirect) return true
+
+        val targetHost = extractHost(lower)
+        val sourceHost = extractHost(currentStreamUrl)
+        if (targetHost.isNotBlank() && sourceHost.isNotBlank()) {
+            if (targetHost == sourceHost ||
+                targetHost.endsWith(".$sourceHost") ||
+                sourceHost.endsWith(".$targetHost")
+            ) {
+                return true
+            }
+        }
+
+        val allowedEmbedKeywords = listOf(
+            "vidly",
+            "vidsrc",
+            "autoembed",
+            "multiembed",
+            "2embed",
+            "superembed",
+            "cloudnestra",
+            "shadowlands",
+            "megacloud",
+            "rabbitstream",
+            "dokicloud",
+            "vidplay",
+            "mcloud",
+            "filemoon",
+            "streamwish",
+            "dood",
+            "mixdrop",
+            "streamtape",
+            "voe.sx",
+            "youtube",
+            "youtu.be",
+            "vimeo",
+            "player",
+            "embed",
+            "stream",
+            "watch",
+            "video",
+            "cdn",
+            "tmdb"
+        )
+        return allowedEmbedKeywords.any { lower.contains(it) }
+    }
+
+    fun buildProgressMessageBridgeScript(): String {
+        return """
+            (function() {
+                if (window.__cinetraBridgeInstalled) return;
+                window.__cinetraBridgeInstalled = true;
+                window.addEventListener('message', function(event) {
+                    if (!window.CinetraPlayerBridge || !window.CinetraPlayerBridge.onPlaybackProgress) return;
+                    try {
+                        var data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                        if (!data || typeof data !== 'object') return;
+                        var payload = data.data || data.info || data;
+                        var cur = payload.currentTime !== undefined ? payload.currentTime : payload.seconds;
+                        var dur = payload.duration;
+                        if (typeof cur === 'number' && typeof dur === 'number' && isFinite(dur) && dur > 0) {
+                            window.CinetraPlayerBridge.onPlaybackProgress(Math.floor(cur), Math.floor(dur));
+                        }
+                    } catch (e) {}
+                });
+                try {
+                    var style = document.createElement('style');
+                    style.textContent = 'html, body { background: #000 !important; margin: 0 !important; padding: 0 !important; }';
+                    (document.head || document.documentElement).appendChild(style);
+                } catch (e) {}
+            })();
+        """.trimIndent()
+    }
+
+    fun buildDirectVideoHtml(streamUrl: String): String {
+        return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    html, body { width: 100%; height: 100%; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
+                    video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+                </style>
+            </head>
+            <body>
+                <video src="$streamUrl" controls autoplay playsinline webkit-playsinline controlsList="nodownload"></video>
+            </body>
+            </html>
+        """.trimIndent()
+    }
+
     fun buildIframeHtml(streamUrl: String): String {
         return """
             <!DOCTYPE html>
             <html>
             <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
                 <style>
                     * { margin: 0; padding: 0; box-sizing: border-box; }
-                    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-                    iframe { width: 100%; height: 100%; border: 0; }
+                    html, body { width: 100%; height: 100%; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
+                    iframe { width: 100%; height: 100%; width: 100vw; height: 100vh; border: 0; display: block; }
                 </style>
                 <script>
                     window.addEventListener('message', function(event) {
@@ -217,7 +377,7 @@ object PlayerControlsPolicy {
                     allowfullscreen="true"
                     webkitallowfullscreen="true"
                     mozallowfullscreen="true"
-                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                    allow="autoplay; fullscreen *; encrypted-media; picture-in-picture; accelerometer; gyroscope"
                     referrerpolicy="origin">
                 </iframe>
             </body>
