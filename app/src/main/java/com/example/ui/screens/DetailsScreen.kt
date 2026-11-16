@@ -22,12 +22,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +65,7 @@ import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.DetailedMovieView
+import com.example.ui.components.MovieCard
 import com.example.ui.components.formatReleaseDate
 import com.example.ui.theme.CineTheme
 
@@ -78,7 +82,10 @@ fun DetailsScreen(
     isLoadingSeasons: Boolean = false,
     loadingSeasonNumber: Int? = null,
     onSeasonSelected: (Int) -> Unit = {},
-    continueWatchingItem: ContinueWatchingEntity? = null
+    continueWatchingItem: ContinueWatchingEntity? = null,
+    similarMedia: List<MediaItem> = emptyList(),
+    onSimilarMediaClick: (MediaItem) -> Unit = {},
+    onReportProblemClick: () -> Unit = {}
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
@@ -276,6 +283,70 @@ fun DetailsScreen(
                                     softWrap = false
                                 )
                             }
+                        }
+
+                        if (media.mediaType == "tv" && (media.latestEpisodeLabel.isNotBlank() || isInWatchlist)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.primaryContainer.copy(alpha = 0.45f))
+                                    .border(0.75.dp, colors.primary.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = colors.gold,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                val infoText = buildString {
+                                    if (media.latestEpisodeLabel.isNotBlank()) {
+                                        append(media.latestEpisodeLabel)
+                                    }
+                                    if (isInWatchlist) {
+                                        if (isNotEmpty()) append(" • ")
+                                        append("Following for new episode alerts")
+                                    }
+                                }
+                                Text(
+                                    text = infoText,
+                                    fontSize = 11.sp,
+                                    color = colors.textPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onReportProblemClick,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = colors.surfaceElevated.copy(alpha = 0.7f),
+                                contentColor = colors.textSecondary
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.7f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("details_report_problem_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BugReport,
+                                contentDescription = "Report a Problem",
+                                tint = colors.softRose,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Report Video / Info Issue",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -482,6 +553,38 @@ fun DetailsScreen(
                                 lineHeight = 16.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Similar Movies & Series Row
+        if (similarMedia.isNotEmpty()) {
+            item(key = "details_similar_section_${media.id}") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp)
+                        .testTag("details_similar_section")
+                ) {
+                    Text(
+                        text = if (media.mediaType == "tv") "Similar TV Series" else "Similar Movies",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = colors.textPrimary,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(similarMedia, key = { "sim_${it.id}" }) { simItem ->
+                            MovieCard(
+                                media = simItem,
+                                onClick = { onSimilarMediaClick(simItem) },
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }

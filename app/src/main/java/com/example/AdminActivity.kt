@@ -29,9 +29,11 @@ import com.example.data.model.PlayerServer
 import com.example.data.repository.MovieRepository
 import com.example.ui.components.StreamPlayerView
 import com.example.ui.screens.AdminScreen
+import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.CineTheme
 import com.example.ui.theme.DarkThemePalette
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.ThemeMode
 import com.example.ui.viewmodel.AdminViewModel
 import com.example.ui.viewmodel.AdminViewModelFactory
 
@@ -67,6 +69,12 @@ fun CinetraAdminApp(
     val selectedPalette by userPreferences.darkThemePaletteFlow.collectAsState(
         initial = DarkThemePalette.VELVET_CINEMA
     )
+    val themeMode by userPreferences.themeModeFlow.collectAsState(
+        initial = ThemeMode.DARK
+    )
+    val accentColor by userPreferences.accentColorFlow.collectAsState(
+        initial = AccentColorOption.VELVET_ROSE
+    )
 
     val adminViewModel: AdminViewModel = viewModel(
         factory = AdminViewModelFactory(repository)
@@ -92,7 +100,11 @@ fun CinetraAdminApp(
         }
     }
 
-    MyApplicationTheme(palette = selectedPalette) {
+    MyApplicationTheme(
+        palette = selectedPalette,
+        themeMode = themeMode,
+        accentColor = accentColor
+    ) {
         val colors = CineTheme.colors
 
         Scaffold(

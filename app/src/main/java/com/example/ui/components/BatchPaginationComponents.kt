@@ -1,8 +1,14 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +21,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -29,10 +37,73 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CatalogBatchPolicy
 import com.example.ui.theme.CineTheme
+
+@Composable
+fun CatalogCountChip(
+    totalAvailable: Int,
+    isFiltered: Boolean = false,
+    isLoading: Boolean = false,
+    customLabel: String? = null,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    val colors = CineTheme.colors
+    val gradients = CineTheme.gradients
+    val labelText = customLabel ?: CatalogBatchPolicy.formatTotalChipText(
+        totalAvailable = totalAvailable,
+        isFiltered = isFiltered,
+        isLoading = isLoading
+    )
+    val borderColor = if (isFiltered) {
+        colors.softRose.copy(alpha = 0.55f)
+    } else {
+        colors.gold.copy(alpha = 0.45f)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (isFiltered) gradients.softBadge else gradients.topBarBackdrop
+            )
+            .border(1.dp, borderColor, RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .testTag(testTag)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = if (isFiltered) Icons.Default.FilterList else Icons.Default.VideoLibrary,
+                contentDescription = null,
+                tint = if (isFiltered) Color.White else colors.gold,
+                modifier = Modifier.size(13.dp)
+            )
+            AnimatedContent(
+                targetState = labelText,
+                transitionSpec = {
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                },
+                label = "catalog_count_chip_text"
+            ) { currentText ->
+                Text(
+                    text = currentText,
+                    color = if (isFiltered) Color.White else colors.textPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun BatchSizeChip(

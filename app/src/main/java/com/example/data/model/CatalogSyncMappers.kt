@@ -13,6 +13,7 @@ object CatalogSyncMappers {
     const val COLLECTION_CUSTOM_MEDIA = "custom_media"
     const val COLLECTION_ANNOUNCEMENTS = "announcements"
     const val COLLECTION_AD_CONFIG = "ad_config"
+    const val COLLECTION_ISSUE_REPORTS = "issue_reports"
     const val AD_CONFIG_DOC_ID = "global"
 
     fun announcementDocId(localId: Int): String = "ann_$localId"
@@ -156,6 +157,48 @@ object CatalogSyncMappers {
                 .coerceIn(1, 168),
             lastCompletedAtMillis = resolvedLastCompletedAt,
             cooldownResetAtMillis = maxOf(remoteResetAt, localExisting?.cooldownResetAtMillis ?: 0L),
+            updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+        )
+    }
+
+    fun issueReportToMap(entity: IssueReportEntity): Map<String, Any?> {
+        return mapOf(
+            "id" to entity.id,
+            "category" to entity.category,
+            "description" to entity.description,
+            "mediaId" to entity.mediaId,
+            "mediaTitle" to entity.mediaTitle,
+            "mediaType" to entity.mediaType,
+            "serverName" to entity.serverName,
+            "episodeLabel" to entity.episodeLabel,
+            "screenshotPreviewBase64" to entity.screenshotPreviewBase64,
+            "status" to entity.status,
+            "adminNotes" to entity.adminNotes,
+            "createdAt" to entity.createdAt,
+            "updatedAt" to entity.updatedAt
+        )
+    }
+
+    fun issueReportFromMap(documentId: String, data: Map<String, Any?>?): IssueReportEntity? {
+        if (data == null) return null
+        val id = (data["id"] as? String)?.takeIf { it.isNotBlank() } ?: documentId
+        val description = (data["description"] as? String)?.trim().orEmpty()
+        val category = IssueReportCategory.fromKey(data["category"] as? String).storageKey
+        if (id.isBlank() || description.isBlank()) return null
+
+        return IssueReportEntity(
+            id = id,
+            category = category,
+            description = description,
+            mediaId = (data["mediaId"] as? String).orEmpty(),
+            mediaTitle = (data["mediaTitle"] as? String).orEmpty(),
+            mediaType = (data["mediaType"] as? String).orEmpty(),
+            serverName = (data["serverName"] as? String).orEmpty(),
+            episodeLabel = (data["episodeLabel"] as? String).orEmpty(),
+            screenshotPreviewBase64 = (data["screenshotPreviewBase64"] as? String).orEmpty(),
+            status = IssueReportStatus.fromKey(data["status"] as? String).storageKey,
+            adminNotes = (data["adminNotes"] as? String).orEmpty(),
+            createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }

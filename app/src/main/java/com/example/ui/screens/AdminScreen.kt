@@ -95,6 +95,7 @@ import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.toMediaItem
+import com.example.ui.components.CatalogCountChip
 import com.example.ui.components.DetailedMovieView
 import com.example.ui.components.TmdbSearchRowSkeleton
 import com.example.ui.theme.CineTheme
@@ -118,6 +119,8 @@ fun AdminScreen(
     modifier: Modifier = Modifier
 ) {
     val colors = CineTheme.colors
+    val issueReports by viewModel.issueReports.collectAsState()
+    val openReportCount = remember(issueReports) { issueReports.count { it.status == "OPEN" } }
 
     BackHandler {
         onExitAdmin()
@@ -247,12 +250,17 @@ fun AdminScreen(
         ) {
             AdminTab.values().forEach { tab ->
                 val isSelected = adminState.currentTab == tab
+                val tabLabel = if (tab == AdminTab.REPORTS && openReportCount > 0) {
+                    "${tab.title} ($openReportCount)"
+                } else {
+                    tab.title
+                }
                 Tab(
                     selected = isSelected,
                     onClick = { viewModel.switchTab(tab) },
                     text = {
                         Text(
-                            text = tab.title,
+                            text = tabLabel,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) colors.textPrimary else colors.textSecondary
@@ -319,6 +327,11 @@ fun AdminScreen(
                 AdminTab.ANNOUNCEMENTS -> AdminAnnouncementsTab(
                     state = adminState,
                     announcements = announcementsList,
+                    viewModel = viewModel
+                )
+                AdminTab.REPORTS -> AdminReportsTab(
+                    state = adminState,
+                    reports = issueReports,
                     viewModel = viewModel
                 )
                 AdminTab.AD_CONFIG -> AdminAdConfigTab(
@@ -1545,11 +1558,28 @@ private fun AdminManageContentTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Custom Media Database (${items.size})",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = colors.textPrimary
-            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Custom Media Database",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = colors.textPrimary
+                )
+                CatalogCountChip(
+                    totalAvailable = filtered.size,
+                    isFiltered = searchQuery.isNotBlank(),
+                    customLabel = if (searchQuery.isNotBlank()) {
+                        "${filtered.size} / ${items.size} matching"
+                    } else {
+                        "${items.size} in database"
+                    },
+                    testTag = "admin_manage_count_chip"
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Button(
                 onClick = onAddNew,

@@ -9,6 +9,7 @@ import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.AdminSecurityPolicy
 import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.PasswordChangeValidation
 import com.example.data.model.TmdbSearchHistoryEntity
@@ -27,6 +28,7 @@ enum class AdminTab(val title: String) {
     ADD_CONTENT("Add Content"),
     MANAGE_CONTENT("Manage Items"),
     ANNOUNCEMENTS("Announcements"),
+    REPORTS("Reports"),
     AD_CONFIG("Ad Gate"),
     SECURITY("Security")
 }
@@ -103,7 +105,12 @@ data class AdminUiState(
     val newPasswordInput: String = "",
     val confirmPasswordInput: String = "",
     val passwordStatusMessage: String? = null,
-    val isPasswordStatusSuccess: Boolean = false
+    val isPasswordStatusSuccess: Boolean = false,
+
+    // User Problem Reports Management
+    val reportFilterStatus: String = "ALL", // "ALL", "OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"
+    val reportActionMessage: String? = null,
+    val isReportActionError: Boolean = false
 )
 
 class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
@@ -117,6 +124,9 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val announcementsList: StateFlow<List<AdminAnnouncementEntity>> = repository.allAnnouncements
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val issueReports: StateFlow<List<IssueReportEntity>> = repository.issueReports
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val tmdbSearchHistory: StateFlow<List<TmdbSearchHistoryEntity>> = repository.tmdbSearchHistory
@@ -244,7 +254,8 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formStatusMessage = null,
             adStatusMessage = null,
             announcementStatusMessage = null,
-            passwordStatusMessage = null
+            passwordStatusMessage = null,
+            reportActionMessage = null
         )
     }
 
@@ -803,6 +814,54 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
                     )
                 }
             }
+        }
+    }
+
+    // Problem Reports Management
+    fun setReportFilterStatus(status: String) {
+        _uiState.value = _uiState.value.copy(
+            reportFilterStatus = status,
+            reportActionMessage = null
+        )
+    }
+
+    fun updateIssueReportStatus(reportId: String, status: String, adminNotes: String) {
+        viewModelScope.launch {
+            val result = repository.updateIssueReportStatus(reportId, status, adminNotes)
+            result.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        reportActionMessage = "✓ Report updated to $status & synced!",
+                        isReportActionError = false
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        reportActionMessage = "Updated locally, cloud sync failed: ${err.localizedMessage ?: "Error"}",
+                        isReportActionError = true
+                    )
+                }
+            )
+        }
+    }
+
+    fun deleteIssueReport(reportId: String) {
+        viewModelScope.launch {
+            val result = repository.deleteIssueReport(reportId)
+            result.fold(
+                onSuccess = {
+                    _uiState.value = _uiState.value.copy(
+                        reportActionMessage = "✓ Report deleted from cloud.",
+                        isReportActionError = false
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(
+                        reportActionMessage = "Cloud delete failed: ${err.localizedMessage ?: "Error"}",
+                        isReportActionError = true
+                    )
+                }
+            )
         }
     }
 }

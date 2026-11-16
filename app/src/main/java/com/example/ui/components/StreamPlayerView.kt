@@ -52,6 +52,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -61,6 +62,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -128,7 +130,8 @@ fun StreamPlayerView(
     episodesBySeason: Map<Int, List<EpisodeInfo>> = emptyMap(),
     initialWatchedSeconds: Long = 0L,
     initialDurationSeconds: Long = 0L,
-    onProgressUpdate: (watchedSeconds: Long, durationSeconds: Long) -> Unit = { _, _ -> }
+    onProgressUpdate: (watchedSeconds: Long, durationSeconds: Long) -> Unit = { _, _ -> },
+    onReportIssue: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val hostView = LocalView.current
@@ -976,6 +979,30 @@ fun StreamPlayerView(
                             fontSize = 11.sp,
                             color = colors.textSecondary
                         )
+                        if (onReportIssue != null) {
+                            Spacer(modifier = Modifier.size(10.dp))
+                            OutlinedButton(
+                                onClick = onReportIssue,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("player_report_issue_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BugReport,
+                                    contentDescription = "Report Stream Issue",
+                                    tint = colors.softRose,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Report Broken Stream / Subtitle / Audio Issue",
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
             }

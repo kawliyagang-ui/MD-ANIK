@@ -9,7 +9,9 @@ import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.AdminSecurityEntity
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.IssueReportEntity
 import com.example.data.model.TmdbSearchHistoryEntity
+import com.example.data.model.TrackedReleaseEntity
 import com.example.data.model.WatchlistEntity
 
 @Database(
@@ -20,9 +22,11 @@ import com.example.data.model.WatchlistEntity
         AdminAnnouncementEntity::class,
         TmdbSearchHistoryEntity::class,
         AdConfigEntity::class,
-        AdminSecurityEntity::class
+        AdminSecurityEntity::class,
+        IssueReportEntity::class,
+        TrackedReleaseEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

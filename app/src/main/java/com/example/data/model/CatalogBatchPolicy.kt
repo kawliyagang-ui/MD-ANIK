@@ -102,4 +102,54 @@ object CatalogBatchPolicy {
         }
         return maxOf(shownCount, estimatedTotal)
     }
+
+    fun resolveHomeDatabaseTotal(
+        moviesTotalResults: Int,
+        tvTotalResults: Int,
+        trendingTotalResults: Int,
+        customMediaCount: Int,
+        loadedUniqueCount: Int
+    ): Int {
+        val sum = moviesTotalResults + tvTotalResults + customMediaCount
+        val estimatedTotal = if (sum > 0) sum else trendingTotalResults + customMediaCount
+        return maxOf(loadedUniqueCount, estimatedTotal)
+    }
+
+    fun resolveExploreFilteredTotal(
+        searchQuery: String,
+        selectedCategory: String,
+        selectedGenre: String,
+        catalogTotalAvailable: Int,
+        searchTotalResults: Int,
+        filteredShownCount: Int
+    ): Int {
+        val isSearching = searchQuery.isNotBlank()
+        return if (isSearching) {
+            if (selectedCategory.equals("All", ignoreCase = true) &&
+                selectedGenre.equals("All", ignoreCase = true)
+            ) {
+                maxOf(searchTotalResults, filteredShownCount)
+            } else {
+                filteredShownCount
+            }
+        } else {
+            if (selectedGenre.equals("All", ignoreCase = true)) {
+                maxOf(catalogTotalAvailable, filteredShownCount)
+            } else {
+                filteredShownCount
+            }
+        }
+    }
+
+    fun formatTotalChipText(
+        totalAvailable: Int,
+        isFiltered: Boolean,
+        isLoading: Boolean = false
+    ): String {
+        if (isLoading) return "Syncing..."
+        val safeTotal = totalAvailable.coerceAtLeast(0)
+        val formatted = formatCount(safeTotal)
+        val suffix = if (isFiltered) "matching" else "in database"
+        return "$formatted $suffix"
+    }
 }

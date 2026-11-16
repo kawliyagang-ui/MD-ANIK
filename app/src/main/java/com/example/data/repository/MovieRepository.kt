@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import android.util.Log
+import coil.imageLoader
 import com.example.data.local.MediaDao
 import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdminAnnouncementEntity
@@ -13,17 +14,24 @@ import com.example.data.model.CloudSyncStatus
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.DiscoverFilters
 import com.example.data.model.EpisodeInfo
+import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
+import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.SeasonInfo
+import com.example.data.model.TmdbFilterCatalog
 import com.example.data.model.TmdbItemDto
 import com.example.data.model.TmdbPageResponse
 import com.example.data.model.TmdbSeasonDetailsDto
 import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.data.model.TmdbTvDetailsDto
+import com.example.data.model.TrackedReleaseEntity
+import com.example.data.model.UpcomingReleasePolicy
 import com.example.data.model.WatchlistEntity
 import com.example.data.model.extractBestCertification
+import com.example.data.notifications.ReleaseAlertItem
 import com.example.data.remote.CuratedCatalog
 import com.example.data.remote.FirebaseInitializer
 import com.example.data.remote.TmdbClient
@@ -68,6 +76,8 @@ class MovieRepository(
     private val tvDetailsCache = ConcurrentHashMap<Long, TmdbTvDetailsDto>()
     private val tvSeasonEpisodesCache = ConcurrentHashMap<Pair<Long, Int>, List<EpisodeInfo>>()
     private val certificationCache = ConcurrentHashMap<String, String>()
+    @Volatile
+    var currentLanguageCode: String = "en-US"
 
     private val firestoreDb: FirebaseFirestore? = firestoreOverride
         ?: FirebaseInitializer.getFirestore(context)
@@ -93,6 +103,7 @@ class MovieRepository(
     val tmdbSearchHistory: Flow<List<TmdbSearchHistoryEntity>> = mediaDao.getRecentTmdbSearches()
     val adConfig: Flow<AdConfigEntity?> = mediaDao.getAdConfig()
     val adminSecurity: Flow<AdminSecurityEntity?> = mediaDao.getAdminSecurity()
+    val issueReports: Flow<List<IssueReportEntity>> = mediaDao.getAllIssueReports()
 
     init {
         startFirestoreRealtimeSync()
@@ -204,6 +215,31 @@ class MovieRepository(
                 }
             }
         listenerRegistrations.add(adReg)
+
+        // 4. Real-time Issue Reports Listener
+        val reportReg = db.collection(CatalogSyncMappers.COLLECTION_ISSUE_REPORTS)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    listenersNeedReattach = true
+                    Log.e(TAG, "Firestore issue_reports listener failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+
+                val remoteReports = snapshot.documents.mapNotNull { doc ->
+                    CatalogSyncMappers.issueReportFromMap(doc.id, doc.data)
+                }
+                syncScope.launch {
+                    runCatching {
+                        if (!snapshot.metadata.isFromCache || remoteReports.isNotEmpty()) {
+                            mediaDao.replaceAllIssueReports(remoteReports)
+                        }
+                    }.onFailure { err ->
+                        Log.e(TAG, "Failed reconciling issue_reports into Room", err)
+                    }
+                }
+            }
+        listenerRegistrations.add(reportReg)
     }
 
     suspend fun syncFromCloudNow(): Result<Unit> = withContext(Dispatchers.IO) {
@@ -237,6 +273,14 @@ class MovieRepository(
                     if (mergedAd != null) {
                         mediaDao.upsertAdConfig(mergedAd)
                     }
+                }
+
+                val reportsSnap = db.collection(CatalogSyncMappers.COLLECTION_ISSUE_REPORTS).get().await()
+                val remoteReports = reportsSnap.documents.mapNotNull { doc ->
+                    CatalogSyncMappers.issueReportFromMap(doc.id, doc.data)
+                }
+                if (!reportsSnap.metadata.isFromCache || remoteReports.isNotEmpty()) {
+                    mediaDao.replaceAllIssueReports(remoteReports)
                 }
 
                 if (listenersNeedReattach) {
@@ -373,8 +417,28 @@ class MovieRepository(
     ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
         startPage = startPage,
         neededCount = neededCount,
-        fetchPage = { page -> TmdbClient.apiService.getTrending(TmdbClient.apiKey, page) },
+        fetchPage = { page -> TmdbClient.apiService.getTrending(TmdbClient.apiKey, page, currentLanguageCode) },
         mapResponse = { resp -> resp.results.filter { it.posterPath != null }.map { it.toMediaItem() } }
+    )
+
+    suspend fun getTrendingMoviesBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getTrendingMovies(TmdbClient.apiKey, page, currentLanguageCode) },
+        mapResponse = { resp -> resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") } }
+    )
+
+    suspend fun getTrendingTvBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getTrendingTv(TmdbClient.apiKey, page, currentLanguageCode) },
+        mapResponse = { resp -> resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") } }
     )
 
     suspend fun getPopularMoviesBatch(
@@ -383,7 +447,204 @@ class MovieRepository(
     ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
         startPage = startPage,
         neededCount = neededCount,
-        fetchPage = { page -> TmdbClient.apiService.getPopularMovies(TmdbClient.apiKey, page) },
+        fetchPage = { page -> TmdbClient.apiService.getPopularMovies(TmdbClient.apiKey, page, currentLanguageCode) },
+        mapResponse = { resp ->
+            resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
+        }
+    )
+
+    suspend fun getUpcomingMoviesBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = withContext(Dispatchers.IO) {
+        try {
+            val lang = currentLanguageCode
+            val today = UpcomingReleasePolicy.todayIsoDate()
+            val tomorrow = UpcomingReleasePolicy.tomorrowIsoDate()
+            val halfNeeded = maxOf(neededCount / 2, 20)
+
+            coroutineScope {
+                val moviesDef = async {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = halfNeeded,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverMovies(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = "popularity.desc",
+                                releaseDateGte = tomorrow,
+                                minVotes = null
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results
+                                .filter { it.posterPath != null }
+                                .map { it.toMediaItem(defaultType = "movie") }
+                        }
+                    ).getOrNull()
+                }
+                val tvDef = async {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = halfNeeded,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverTv(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = "popularity.desc",
+                                firstAirDateGte = tomorrow,
+                                minVotes = null
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results
+                                .filter { it.posterPath != null }
+                                .map { it.toMediaItem(defaultType = "tv") }
+                        }
+                    ).getOrNull()
+                }
+
+                val mBatch = moviesDef.await()
+                val tBatch = tvDef.await()
+                if (mBatch == null && tBatch == null) {
+                    return@coroutineScope Result.failure(IllegalStateException("Unable to load upcoming releases."))
+                }
+
+                val strictUpcoming = UpcomingReleasePolicy.filterStrictUpcoming(
+                    items = mBatch?.items.orEmpty() + tBatch?.items.orEmpty(),
+                    todayIso = today
+                )
+
+                Result.success(
+                    PagedCatalogBatch(
+                        items = strictUpcoming,
+                        lastFetchedPage = maxOf(mBatch?.lastFetchedPage ?: startPage, tBatch?.lastFetchedPage ?: startPage),
+                        totalPages = maxOf(mBatch?.totalPages ?: 1, tBatch?.totalPages ?: 1),
+                        totalResults = maxOf(strictUpcoming.size, (mBatch?.totalResults ?: 0) + (tBatch?.totalResults ?: 0))
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getNewReleasesBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = withContext(Dispatchers.IO) {
+        try {
+            val lang = currentLanguageCode
+            val today = UpcomingReleasePolicy.todayIsoDate()
+            val movieWindowStart = UpcomingReleasePolicy.daysAgoIsoDate(NewReleasePolicy.DEFAULT_LOOKBACK_DAYS)
+            val tvWindowStart = UpcomingReleasePolicy.daysAgoIsoDate(7)
+            val halfNeeded = maxOf(neededCount / 2, 20)
+
+            coroutineScope {
+                val dailyMoviesDef = async {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = halfNeeded,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverMovies(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = "primary_release_date.desc",
+                                releaseDateGte = movieWindowStart,
+                                releaseDateLte = today,
+                                minVotes = null
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results
+                                .filter { it.posterPath != null }
+                                .map { it.toMediaItem(defaultType = "movie") }
+                        }
+                    ).getOrNull()
+                }
+                val dailyTvDef = async {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = halfNeeded,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverTv(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = "popularity.desc",
+                                firstAirDateLte = today,
+                                airDateGte = tvWindowStart,
+                                airDateLte = today,
+                                minVotes = null
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results
+                                .filter { it.posterPath != null }
+                                .map { it.toMediaItem(defaultType = "tv") }
+                        }
+                    ).getOrNull()
+                }
+                val nowPlayingExtraDef = async {
+                    if (startPage == 1) {
+                        runCatching {
+                            TmdbClient.apiService.getNowPlayingMovies(TmdbClient.apiKey, 1, lang)
+                                .results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
+                        }.getOrDefault(emptyList())
+                    } else {
+                        emptyList()
+                    }
+                }
+                val onTheAirExtraDef = async {
+                    if (startPage == 1) {
+                        runCatching {
+                            TmdbClient.apiService.getOnTheAirTv(TmdbClient.apiKey, 1, lang)
+                                .results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
+                        }.getOrDefault(emptyList())
+                    } else {
+                        emptyList()
+                    }
+                }
+
+                val mBatch = dailyMoviesDef.await()
+                val tBatch = dailyTvDef.await()
+                val nowPlaying = nowPlayingExtraDef.await()
+                val onTheAir = onTheAirExtraDef.await()
+
+                if (mBatch == null && tBatch == null && nowPlaying.isEmpty() && onTheAir.isEmpty()) {
+                    return@coroutineScope Result.failure(IllegalStateException("Unable to load daily new releases."))
+                }
+
+                val mergedDaily = NewReleasePolicy.filterReleasedTitles(
+                    items = mBatch?.items.orEmpty() + tBatch?.items.orEmpty() + nowPlaying + onTheAir,
+                    todayIso = today
+                )
+
+                Result.success(
+                    PagedCatalogBatch(
+                        items = mergedDaily,
+                        lastFetchedPage = maxOf(mBatch?.lastFetchedPage ?: startPage, tBatch?.lastFetchedPage ?: startPage),
+                        totalPages = maxOf(mBatch?.totalPages ?: 1, tBatch?.totalPages ?: 1),
+                        totalResults = maxOf(mergedDaily.size, (mBatch?.totalResults ?: 0) + (tBatch?.totalResults ?: 0))
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTopRatedMoviesBatch(
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
+        startPage = startPage,
+        neededCount = neededCount,
+        fetchPage = { page -> TmdbClient.apiService.getTopRatedMovies(TmdbClient.apiKey, page, currentLanguageCode) },
         mapResponse = { resp ->
             resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
         }
@@ -395,11 +656,223 @@ class MovieRepository(
     ): Result<PagedCatalogBatch> = fetchMultiPageBatch(
         startPage = startPage,
         neededCount = neededCount,
-        fetchPage = { page -> TmdbClient.apiService.getTopRatedTv(TmdbClient.apiKey, page) },
+        fetchPage = { page -> TmdbClient.apiService.getTopRatedTv(TmdbClient.apiKey, page, currentLanguageCode) },
         mapResponse = { resp ->
             resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
         }
     )
+
+    suspend fun discoverCatalogBatch(
+        filters: DiscoverFilters,
+        startPage: Int = 1,
+        neededCount: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE
+    ): Result<PagedCatalogBatch> = withContext(Dispatchers.IO) {
+        try {
+            val lang = currentLanguageCode
+            val minRatingArg = filters.minRating.takeIf { it > 0.0 }
+            val minVotesArg = when {
+                filters.sortBy == "rating" || minRatingArg != null -> if (filters.originalLanguage.isNotBlank()) 30 else 80
+                filters.sortBy == "newest" -> 5
+                filters.originalLanguage.isNotBlank() -> 5
+                else -> 25
+            }
+            val origLangArg = filters.originalLanguage.takeIf { it.isNotBlank() }
+            val originCountryArg = filters.originCountry.takeIf { it.isNotBlank() }
+
+            when (filters.mediaType) {
+                "movie" -> {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = neededCount,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverMovies(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = filters.toTmdbMovieSortParam(),
+                                withGenres = filters.movieGenreIdsQuery(),
+                                releaseYear = filters.releaseYear,
+                                minRating = minRatingArg,
+                                minVotes = minVotesArg,
+                                originalLanguage = origLangArg,
+                                originCountry = originCountryArg
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
+                        }
+                    )
+                }
+                "tv" -> {
+                    fetchMultiPageBatch(
+                        startPage = startPage,
+                        neededCount = neededCount,
+                        fetchPage = { page ->
+                            TmdbClient.apiService.discoverTv(
+                                apiKey = TmdbClient.apiKey,
+                                page = page,
+                                language = lang,
+                                sortBy = filters.toTmdbTvSortParam(),
+                                withGenres = filters.tvGenreIdsQuery(),
+                                releaseYear = filters.releaseYear,
+                                minRating = minRatingArg,
+                                minVotes = minVotesArg,
+                                originalLanguage = origLangArg,
+                                originCountry = originCountryArg
+                            )
+                        },
+                        mapResponse = { resp ->
+                            resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
+                        }
+                    )
+                }
+                else -> {
+                    coroutineScope {
+                        val halfNeeded = maxOf(neededCount / 2, 20)
+                        val movieDeferred = async {
+                            fetchMultiPageBatch(
+                                startPage = startPage,
+                                neededCount = halfNeeded,
+                                fetchPage = { page ->
+                                    TmdbClient.apiService.discoverMovies(
+                                        apiKey = TmdbClient.apiKey,
+                                        page = page,
+                                        language = lang,
+                                        sortBy = filters.toTmdbMovieSortParam(),
+                                        withGenres = filters.movieGenreIdsQuery(),
+                                        releaseYear = filters.releaseYear,
+                                        minRating = minRatingArg,
+                                        minVotes = minVotesArg,
+                                        originalLanguage = origLangArg,
+                                        originCountry = originCountryArg
+                                    )
+                                },
+                                mapResponse = { resp ->
+                                    resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "movie") }
+                                }
+                            ).getOrNull()
+                        }
+                        val tvDeferred = async {
+                            fetchMultiPageBatch(
+                                startPage = startPage,
+                                neededCount = halfNeeded,
+                                fetchPage = { page ->
+                                    TmdbClient.apiService.discoverTv(
+                                        apiKey = TmdbClient.apiKey,
+                                        page = page,
+                                        language = lang,
+                                        sortBy = filters.toTmdbTvSortParam(),
+                                        withGenres = filters.tvGenreIdsQuery(),
+                                        releaseYear = filters.releaseYear,
+                                        minRating = minRatingArg,
+                                        minVotes = minVotesArg,
+                                        originalLanguage = origLangArg,
+                                        originCountry = originCountryArg
+                                    )
+                                },
+                                mapResponse = { resp ->
+                                    resp.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
+                                }
+                            ).getOrNull()
+                        }
+                        val mBatch = movieDeferred.await()
+                        val tBatch = tvDeferred.await()
+                        if (mBatch == null && tBatch == null) {
+                            return@coroutineScope Result.failure(IllegalStateException("Unable to load filtered catalog."))
+                        }
+                        val interleaved = mutableListOf<MediaItem>()
+                        val mList = mBatch?.items.orEmpty()
+                        val tList = tBatch?.items.orEmpty()
+                        val maxLen = maxOf(mList.size, tList.size)
+                        for (i in 0 until maxLen) {
+                            if (i < mList.size) interleaved.add(mList[i])
+                            if (i < tList.size) interleaved.add(tList[i])
+                        }
+                        val sorted = filters.sortItems(interleaved.distinctBy { it.id })
+                        Result.success(
+                            PagedCatalogBatch(
+                                items = sorted,
+                                lastFetchedPage = maxOf(mBatch?.lastFetchedPage ?: startPage, tBatch?.lastFetchedPage ?: startPage),
+                                totalPages = maxOf(mBatch?.totalPages ?: 1, tBatch?.totalPages ?: 1),
+                                totalResults = (mBatch?.totalResults ?: 0) + (tBatch?.totalResults ?: 0)
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchRecommendationsForMedia(media: MediaItem): List<MediaItem> = withContext(Dispatchers.IO) {
+        val tmdbId = media.resolvedTmdbId() ?: return@withContext emptyList()
+        try {
+            val response = if (media.mediaType == "tv") {
+                TmdbClient.apiService.getTvRecommendations(tmdbId, TmdbClient.apiKey, 1, currentLanguageCode)
+            } else {
+                TmdbClient.apiService.getMovieRecommendations(tmdbId, TmdbClient.apiKey, 1, currentLanguageCode)
+            }
+            val typeDefault = if (media.mediaType == "tv") "tv" else "movie"
+            response.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = typeDefault) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchSimilarMedia(media: MediaItem): List<MediaItem> = withContext(Dispatchers.IO) {
+        val tmdbId = media.resolvedTmdbId() ?: return@withContext emptyList()
+        try {
+            val response = if (media.mediaType == "tv") {
+                TmdbClient.apiService.getTvSimilar(tmdbId, TmdbClient.apiKey, 1, currentLanguageCode)
+            } else {
+                TmdbClient.apiService.getMovieSimilar(tmdbId, TmdbClient.apiKey, 1, currentLanguageCode)
+            }
+            val typeDefault = if (media.mediaType == "tv") "tv" else "movie"
+            val items = response.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = typeDefault) }
+            if (items.isNotEmpty()) items else fetchRecommendationsForMedia(media)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchPopularInGenre(genreName: String): List<MediaItem> = withContext(Dispatchers.IO) {
+        val mGenre = TmdbFilterCatalog.movieGenreIdForName(genreName)?.toString()
+        val tGenre = TmdbFilterCatalog.tvGenreIdForName(genreName)?.toString()
+        try {
+            coroutineScope {
+                val mDef = async {
+                    runCatching {
+                        TmdbClient.apiService.discoverMovies(
+                            apiKey = TmdbClient.apiKey,
+                            language = currentLanguageCode,
+                            withGenres = mGenre
+                        ).results.filter { it.posterPath != null }.map { it.toMediaItem("movie") }
+                    }.getOrDefault(emptyList())
+                }
+                val tDef = async {
+                    runCatching {
+                        TmdbClient.apiService.discoverTv(
+                            apiKey = TmdbClient.apiKey,
+                            language = currentLanguageCode,
+                            withGenres = tGenre
+                        ).results.filter { it.posterPath != null }.map { it.toMediaItem("tv") }
+                    }.getOrDefault(emptyList())
+                }
+                val mList = mDef.await()
+                val tList = tDef.await()
+                val merged = mutableListOf<MediaItem>()
+                val maxLen = maxOf(mList.size, tList.size)
+                for (i in 0 until maxLen) {
+                    if (i < mList.size) merged.add(mList[i])
+                    if (i < tList.size) merged.add(tList[i])
+                }
+                merged.distinctBy { it.id }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     suspend fun searchTitlesBatch(
         query: String,
@@ -416,7 +889,8 @@ class MovieRepository(
                 TmdbClient.apiService.searchMulti(
                     apiKey = TmdbClient.apiKey,
                     query = query,
-                    page = page
+                    page = page,
+                    language = currentLanguageCode
                 )
             },
             mapResponse = { resp ->
@@ -802,6 +1276,150 @@ class MovieRepository(
             )
         )
     }
+
+    // Issue Reports (User <-> Admin Cloud + Room)
+    suspend fun submitIssueReport(report: IssueReportEntity): Result<Unit> = withContext(Dispatchers.IO) {
+        mediaDao.insertIssueReport(report)
+        executeCloudWrite("submitIssueReport:${report.id}") { db ->
+            db.collection(CatalogSyncMappers.COLLECTION_ISSUE_REPORTS)
+                .document(report.id)
+                .set(CatalogSyncMappers.issueReportToMap(report))
+                .await()
+        }
+    }
+
+    suspend fun updateIssueReportStatus(
+        reportId: String,
+        status: String,
+        adminNotes: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val existing = mediaDao.getIssueReportById(reportId) ?: return@withContext Result.failure(
+            IllegalArgumentException("Report not found")
+        )
+        val updated = existing.copy(
+            status = status,
+            adminNotes = adminNotes.trim(),
+            updatedAt = System.currentTimeMillis()
+        )
+        mediaDao.insertIssueReport(updated)
+        executeCloudWrite("updateIssueReportStatus:$reportId") { db ->
+            db.collection(CatalogSyncMappers.COLLECTION_ISSUE_REPORTS)
+                .document(reportId)
+                .set(CatalogSyncMappers.issueReportToMap(updated))
+                .await()
+        }
+    }
+
+    suspend fun deleteIssueReport(reportId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mediaDao.deleteIssueReport(reportId)
+        executeCloudWrite("deleteIssueReport:$reportId") { db ->
+            db.collection(CatalogSyncMappers.COLLECTION_ISSUE_REPORTS)
+                .document(reportId)
+                .delete()
+                .await()
+        }
+    }
+
+    // Release & New Episode Alert Scanner
+    suspend fun checkForNewReleaseAlerts(
+        watchlist: List<WatchlistEntity>,
+        customMedia: List<CustomMediaEntity>,
+        checkEpisodes: Boolean,
+        checkNewMovies: Boolean
+    ): List<ReleaseAlertItem> = withContext(Dispatchers.IO) {
+        val alerts = mutableListOf<ReleaseAlertItem>()
+
+        if (checkEpisodes) {
+            val followedTv = watchlist.filter { it.mediaType == "tv" }.take(8)
+            for (show in followedTv) {
+                val tvId = show.tmdbId ?: show.id.toLongOrNull() ?: continue
+                runCatching {
+                    val details = TmdbClient.apiService.getTvDetails(tvId, TmdbClient.apiKey, currentLanguageCode)
+                    tvDetailsCache[tvId] = details
+                    val latestEp = details.lastEpisodeToAir
+                    if (latestEp != null && !latestEp.airDate.isNullOrBlank()) {
+                        val epKey = "tv_${tvId}_s${latestEp.seasonNumber ?: 1}_e${latestEp.episodeNumber ?: 1}"
+                        if (!mediaDao.hasTrackedRelease(epKey)) {
+                            mediaDao.insertTrackedRelease(TrackedReleaseEntity(epKey, show.title))
+                            val epCode = "S${latestEp.seasonNumber ?: 1}:E${latestEp.episodeNumber ?: 1}"
+                            val epTitle = latestEp.name?.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()
+                            alerts.add(
+                                ReleaseAlertItem(
+                                    releaseKey = epKey,
+                                    title = "New Episode: ${show.title}",
+                                    body = "$epCode$epTitle (Aired ${latestEp.airDate}) is ready to stream on Cinetra.",
+                                    isEpisodeAlert = true
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (checkNewMovies) {
+            runCatching {
+                val nowPlaying = TmdbClient.apiService.getNowPlayingMovies(TmdbClient.apiKey, 1, currentLanguageCode)
+                nowPlaying.results.take(3).forEach { dto ->
+                    val releaseKey = "movie_${dto.id}_${dto.releaseDate.orEmpty()}"
+                    val movieTitle = dto.title ?: dto.name ?: return@forEach
+                    if (!mediaDao.hasTrackedRelease(releaseKey)) {
+                        mediaDao.insertTrackedRelease(TrackedReleaseEntity(releaseKey, movieTitle))
+                        if (alerts.size < 2) {
+                            alerts.add(
+                                ReleaseAlertItem(
+                                    releaseKey = releaseKey,
+                                    title = "New Release: $movieTitle",
+                                    body = "Now trending in theaters & streaming on Cinetra.",
+                                    isEpisodeAlert = false
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            customMedia.take(2).forEach { custom ->
+                val customKey = "custom_${custom.id}"
+                if (!mediaDao.hasTrackedRelease(customKey)) {
+                    mediaDao.insertTrackedRelease(TrackedReleaseEntity(customKey, custom.title))
+                    if (alerts.size < 3) {
+                        alerts.add(
+                            ReleaseAlertItem(
+                                releaseKey = customKey,
+                                title = "Added to Cinetra: ${custom.title}",
+                                body = "Studio spotlight title is now available in your catalog.",
+                                isEpisodeAlert = false
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        alerts.take(3)
+    }
+
+    // Cache Metrics & Cleanup
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    fun getImageCacheSizeBytes(context: Context): Long {
+        val loader = context.applicationContext.imageLoader
+        val diskBytes = loader.diskCache?.size ?: 0L
+        val memBytes = loader.memoryCache?.size?.toLong() ?: 0L
+        return diskBytes + memBytes
+    }
+
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    suspend fun clearCaches(context: Context): Long = withContext(Dispatchers.IO) {
+        val previousBytes = getImageCacheSizeBytes(context)
+        tvDetailsCache.clear()
+        tvSeasonEpisodesCache.clear()
+        certificationCache.clear()
+        val loader = context.applicationContext.imageLoader
+        runCatching { loader.memoryCache?.clear() }
+        runCatching { loader.diskCache?.clear() }
+        previousBytes
+    }
 }
 
 
@@ -829,7 +1447,10 @@ fun TmdbItemDto.toMediaItem(defaultType: String = "movie"): MediaItem {
         vidlyId = id.toString(),
         isCustom = false,
         numberOfSeasons = numberOfSeasons ?: 1,
-        episodesPerSeason = numberOfEpisodes ?: 10
+        episodesPerSeason = numberOfEpisodes ?: 10,
+        originalLanguage = originalLanguage.orEmpty(),
+        originCountry = originCountry.orEmpty(),
+        popularity = popularity ?: 0.0
     )
 }
 
@@ -871,6 +1492,15 @@ fun TmdbTvDetailsDto.applyToMediaItem(base: MediaItem): MediaItem {
         ?.takeIf { it.isNotEmpty() }
         ?: base.genres
 
+    val latestLabel = lastEpisodeToAir?.let { ep ->
+        val s = ep.seasonNumber ?: 1
+        val e = ep.episodeNumber ?: 1
+        val title = ep.name?.takeIf { it.isNotBlank() }?.let { " • $it" }.orEmpty()
+        "Latest: S$s:E$e$title"
+    } ?: base.latestEpisodeLabel
+
+    val nextAir = nextEpisodeToAir?.airDate?.takeIf { it.isNotBlank() } ?: base.nextAirDate
+
     return base.copy(
         tmdbId = base.tmdbId ?: id,
         title = name?.takeIf { it.isNotBlank() } ?: base.title,
@@ -883,7 +1513,11 @@ fun TmdbTvDetailsDto.applyToMediaItem(base: MediaItem): MediaItem {
         numberOfSeasons = resolvedNumSeasons,
         episodesPerSeason = firstRegularEpisodes.coerceAtLeast(1),
         totalEpisodes = resolvedTotalEpisodes,
-        seasons = mappedSeasons.ifEmpty { base.seasons }
+        seasons = mappedSeasons.ifEmpty { base.seasons },
+        originalLanguage = originalLanguage?.takeIf { it.isNotBlank() } ?: base.originalLanguage,
+        originCountry = originCountry?.takeIf { it.isNotEmpty() } ?: base.originCountry,
+        latestEpisodeLabel = latestLabel,
+        nextAirDate = nextAir
     )
 }
 

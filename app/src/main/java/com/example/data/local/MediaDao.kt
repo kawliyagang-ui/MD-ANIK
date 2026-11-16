@@ -154,4 +154,43 @@ interface MediaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAdminSecurity(security: AdminSecurityEntity)
+
+    // Issue Reports (User <-> Admin Problem Tracking)
+    @Query("SELECT * FROM issue_reports ORDER BY createdAt DESC")
+    fun getAllIssueReports(): Flow<List<com.example.data.model.IssueReportEntity>>
+
+    @Query("SELECT * FROM issue_reports WHERE id = :id LIMIT 1")
+    suspend fun getIssueReportById(id: String): com.example.data.model.IssueReportEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIssueReport(report: com.example.data.model.IssueReportEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllIssueReports(reports: List<com.example.data.model.IssueReportEntity>)
+
+    @Query("DELETE FROM issue_reports WHERE id = :id")
+    suspend fun deleteIssueReport(id: String)
+
+    @Query("DELETE FROM issue_reports")
+    suspend fun clearAllIssueReports()
+
+    @Query("DELETE FROM issue_reports WHERE id NOT IN (:ids)")
+    suspend fun deleteIssueReportsNotIn(ids: List<String>)
+
+    @Transaction
+    suspend fun replaceAllIssueReports(items: List<com.example.data.model.IssueReportEntity>) {
+        if (items.isEmpty()) {
+            clearAllIssueReports()
+        } else {
+            insertAllIssueReports(items)
+            deleteIssueReportsNotIn(items.map { it.id })
+        }
+    }
+
+    // Tracked Notification Releases
+    @Query("SELECT COUNT(*) > 0 FROM tracked_releases WHERE releaseKey = :releaseKey")
+    suspend fun hasTrackedRelease(releaseKey: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrackedRelease(release: com.example.data.model.TrackedReleaseEntity)
 }

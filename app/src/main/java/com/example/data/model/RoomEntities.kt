@@ -105,3 +105,27 @@ data class AdminSecurityEntity(
     val isDefault: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "issue_reports")
+data class IssueReportEntity(
+    @PrimaryKey val id: String,
+    val category: String,
+    val description: String,
+    val mediaId: String = "",
+    val mediaTitle: String = "",
+    val mediaType: String = "",
+    val serverName: String = "",
+    val episodeLabel: String = "",
+    val screenshotPreviewBase64: String = "",
+    val status: String = "OPEN", // OPEN, IN_REVIEW, RESOLVED, DISMISSED
+    val adminNotes: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "tracked_releases")
+data class TrackedReleaseEntity(
+    @PrimaryKey val releaseKey: String,
+    val title: String,
+    val notifiedAt: Long = System.currentTimeMillis()
+)

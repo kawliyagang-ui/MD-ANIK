@@ -4,6 +4,128 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
+enum class ThemeMode(
+    val storageKey: String,
+    val displayName: String,
+    val subtitle: String
+) {
+    DARK("dark", "Dark Mode", "Signature deep cinema look"),
+    LIGHT("light", "Light Mode", "Bright high-clarity daytime UI"),
+    SYSTEM("system", "System Default", "Follow device appearance setting");
+
+    companion object {
+        fun fromKey(key: String?): ThemeMode {
+            return entries.firstOrNull { it.storageKey == key } ?: DARK
+        }
+    }
+}
+
+enum class AccentColorOption(
+    val storageKey: String,
+    val displayName: String,
+    val primaryColor: Color,
+    val hoverColor: Color,
+    val softTint: Color,
+    val darkContainer: Color,
+    val lightContainer: Color,
+    val onDarkContainer: Color,
+    val onLightContainer: Color,
+    val gradientStart: Color,
+    val gradientMid: Color,
+    val gradientEnd: Color
+) {
+    VELVET_ROSE(
+        storageKey = "velvet_rose",
+        displayName = "Velvet Rose",
+        primaryColor = Color(0xFFC4455B),
+        hoverColor = Color(0xFFDA5D72),
+        softTint = Color(0xFFE37A8C),
+        darkContainer = Color(0xFF2B1824),
+        lightContainer = Color(0xFFFDE8EE),
+        onDarkContainer = Color(0xFFF6D9E2),
+        onLightContainer = Color(0xFF7D1D34),
+        gradientStart = Color(0xFFC84B5F),
+        gradientMid = Color(0xFF9F365D),
+        gradientEnd = Color(0xFF6B2D5C)
+    ),
+    CRIMSON_RED(
+        storageKey = "crimson_red",
+        displayName = "Cinema Red",
+        primaryColor = Color(0xFFE50914),
+        hoverColor = Color(0xFFFF2A35),
+        softTint = Color(0xFFFF6B73),
+        darkContainer = Color(0xFF3A1014),
+        lightContainer = Color(0xFFFFE5E7),
+        onDarkContainer = Color(0xFFFFD8DB),
+        onLightContainer = Color(0xFF8E000A),
+        gradientStart = Color(0xFFE50914),
+        gradientMid = Color(0xFFB80710),
+        gradientEnd = Color(0xFF7A040A)
+    ),
+    ELECTRIC_BLUE(
+        storageKey = "electric_blue",
+        displayName = "Cobalt Blue",
+        primaryColor = Color(0xFF0EA5E9),
+        hoverColor = Color(0xFF38BDF8),
+        softTint = Color(0xFF7DD3FC),
+        darkContainer = Color(0xFF132D46),
+        lightContainer = Color(0xFFE0F2FE),
+        onDarkContainer = Color(0xFFE0F2FE),
+        onLightContainer = Color(0xFF075985),
+        gradientStart = Color(0xFF0284C7),
+        gradientMid = Color(0xFF0EA5E9),
+        gradientEnd = Color(0xFF2563EB)
+    ),
+    ROYAL_VIOLET(
+        storageKey = "royal_violet",
+        displayName = "Royal Violet",
+        primaryColor = Color(0xFF8B5CF6),
+        hoverColor = Color(0xFFA78BFA),
+        softTint = Color(0xFFC4B5FD),
+        darkContainer = Color(0xFF281B49),
+        lightContainer = Color(0xFFEDE9FE),
+        onDarkContainer = Color(0xFFEDE9FE),
+        onLightContainer = Color(0xFF5B21B6),
+        gradientStart = Color(0xFF7C3AED),
+        gradientMid = Color(0xFF8B5CF6),
+        gradientEnd = Color(0xFF4F46E5)
+    ),
+    EMERALD_MINT(
+        storageKey = "emerald_mint",
+        displayName = "Emerald",
+        primaryColor = Color(0xFF10B981),
+        hoverColor = Color(0xFF34D399),
+        softTint = Color(0xFF6EE7B7),
+        darkContainer = Color(0xFF0E3529),
+        lightContainer = Color(0xFFD1FAE5),
+        onDarkContainer = Color(0xFFD1FAE5),
+        onLightContainer = Color(0xFF065F46),
+        gradientStart = Color(0xFF059669),
+        gradientMid = Color(0xFF10B981),
+        gradientEnd = Color(0xFF0D9488)
+    ),
+    AMBER_GOLD(
+        storageKey = "amber_gold",
+        displayName = "Sunset Gold",
+        primaryColor = Color(0xFFF59E0B),
+        hoverColor = Color(0xFFFBBF24),
+        softTint = Color(0xFFFCD34D),
+        darkContainer = Color(0xFF3A270B),
+        lightContainer = Color(0xFFFEF3C7),
+        onDarkContainer = Color(0xFFFEF3C7),
+        onLightContainer = Color(0xFF92400E),
+        gradientStart = Color(0xFFD97706),
+        gradientMid = Color(0xFFF59E0B),
+        gradientEnd = Color(0xFFB45309)
+    );
+
+    companion object {
+        fun fromKey(key: String?): AccentColorOption {
+            return entries.firstOrNull { it.storageKey == key } ?: VELVET_ROSE
+        }
+    }
+}
+
 enum class DarkThemePalette(
     val storageKey: String,
     val displayName: String,
@@ -61,6 +183,8 @@ object ThemeTogglePolicy {
 @Immutable
 data class CinePaletteColors(
     val palette: DarkThemePalette,
+    val isLight: Boolean = false,
+    val accentOption: AccentColorOption = AccentColorOption.VELVET_ROSE,
     val background: Color,
     val surface: Color,
     val surfaceElevated: Color,
@@ -106,6 +230,7 @@ data class CinePaletteGradients(
 
 val VelvetCinemaColors = CinePaletteColors(
     palette = DarkThemePalette.VELVET_CINEMA,
+    isLight = false,
     background = Color(0xFF09090D),
     surface = Color(0xFF13131B),
     surfaceElevated = Color(0xFF1D1D28),
@@ -139,6 +264,8 @@ val VelvetCinemaColors = CinePaletteColors(
 
 val CrispSlateColors = CinePaletteColors(
     palette = DarkThemePalette.CRISP_SLATE,
+    isLight = false,
+    accentOption = AccentColorOption.ELECTRIC_BLUE,
     background = Color(0xFF0A1019),
     surface = Color(0xFF121B29),
     surfaceElevated = Color(0xFF1B273A),
@@ -172,6 +299,8 @@ val CrispSlateColors = CinePaletteColors(
 
 val WarmAmberNightColors = CinePaletteColors(
     palette = DarkThemePalette.WARM_AMBER_NIGHT,
+    isLight = false,
+    accentOption = AccentColorOption.AMBER_GOLD,
     background = Color(0xFF110E0B),
     surface = Color(0xFF1B1612),
     surfaceElevated = Color(0xFF261F1A),
@@ -203,12 +332,69 @@ val WarmAmberNightColors = CinePaletteColors(
     info = Color(0xFF60A5FA)
 )
 
-fun paletteColorsFor(palette: DarkThemePalette): CinePaletteColors {
-    return when (palette) {
-        DarkThemePalette.VELVET_CINEMA -> VelvetCinemaColors
-        DarkThemePalette.CRISP_SLATE -> CrispSlateColors
-        DarkThemePalette.WARM_AMBER_NIGHT -> WarmAmberNightColors
+val LightCinemaColors = CinePaletteColors(
+    palette = DarkThemePalette.VELVET_CINEMA,
+    isLight = true,
+    accentOption = AccentColorOption.VELVET_ROSE,
+    background = Color(0xFFF6F7FB),
+    surface = Color(0xFFFFFFFF),
+    surfaceElevated = Color(0xFFEEF1F7),
+    surfaceHover = Color(0xFFE3E8F2),
+    primary = Color(0xFFC4455B),
+    primaryHover = Color(0xFFA63146),
+    primaryContainer = Color(0xFFFDE8EE),
+    onPrimaryContainer = Color(0xFF7D1D34),
+    softRose = Color(0xFFB52E47),
+    accentStart = Color(0xFFC84B5F),
+    accentMid = Color(0xFF9F365D),
+    accentEnd = Color(0xFF6B2D5C),
+    navIndicator = Color(0xFFFADBE4),
+    atmosphericTop = Color(0xFFECEFF7),
+    atmosphericMid = Color(0xFFF3F5FA),
+    topBarStart = Color(0xFFFFFFFF),
+    topBarMid = Color(0xFFF9FAFD),
+    topBarEnd = Color(0xFFFFFFFF),
+    bottomBarTop = Color(0xFFFFFFFF),
+    bottomBarBottom = Color(0xFFF4F6FA),
+    gold = Color(0xFFD97706),
+    goldLight = Color(0xFFB45309),
+    textPrimary = Color(0xFF111827),
+    textSecondary = Color(0xFF4B5563),
+    textMuted = Color(0xFF6B7280),
+    border = Color(0xFFD8DEE9),
+    success = Color(0xFF059669),
+    warning = Color(0xFFD97706),
+    info = Color(0xFF2563EB)
+)
+
+fun paletteColorsFor(
+    palette: DarkThemePalette,
+    isLight: Boolean = false,
+    accentOption: AccentColorOption? = null
+): CinePaletteColors {
+    val base = if (isLight) {
+        LightCinemaColors.copy(palette = palette)
+    } else {
+        when (palette) {
+            DarkThemePalette.VELVET_CINEMA -> VelvetCinemaColors
+            DarkThemePalette.CRISP_SLATE -> CrispSlateColors
+            DarkThemePalette.WARM_AMBER_NIGHT -> WarmAmberNightColors
+        }
     }
+    if (accentOption == null) return base
+
+    return base.copy(
+        accentOption = accentOption,
+        primary = accentOption.primaryColor,
+        primaryHover = accentOption.hoverColor,
+        primaryContainer = if (isLight) accentOption.lightContainer else accentOption.darkContainer,
+        onPrimaryContainer = if (isLight) accentOption.onLightContainer else accentOption.onDarkContainer,
+        softRose = if (isLight) accentOption.primaryColor else accentOption.softTint,
+        accentStart = accentOption.gradientStart,
+        accentMid = accentOption.gradientMid,
+        accentEnd = accentOption.gradientEnd,
+        navIndicator = if (isLight) accentOption.lightContainer else accentOption.darkContainer
+    )
 }
 
 fun buildPaletteGradients(colors: CinePaletteColors): CinePaletteGradients {

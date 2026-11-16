@@ -63,4 +63,18 @@
     <string name="settings_clear_history_button">Clear Search History</string>
     <string name="settings_history_already_empty">Search History Empty</string>
     <string name="settings_about_source">Live movie, TV &amp; anime metadata powered by TMDb API v3</string>
+    <string name="settings_theme_mode_label">Theme Appearance</string>
+    <string name="settings_accent_color_label">Accent Color</string>
+    <string name="settings_language_heading">Content Language</string>
+    <string name="settings_language_subtitle">Applies to movie &amp; TV metadata fetched from TMDb.</string>
+    <string name="settings_notifications_heading">Notifications &amp; Release Alerts</string>
+    <string name="settings_notifications_subtitle">Get alerted when new episodes air for watchlisted shows or new titles arrive.</string>
+    <string name="settings_clear_cache_button">Clear Image &amp; API Cache</string>
+    <string name="settings_report_problem_title">Report a Problem</string>
+    <string name="settings_report_problem_subtitle">Flag broken streams, wrong subtitles, audio issues, or app bugs.</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_terms_conditions">Terms &amp; Conditions</string>
+    <string name="report_problem_title">Report a Problem</string>
+    <string name="report_problem_submit">Submit Report</string>
+    <string name="report_problem_success">Report submitted! Our studio team will review it shortly.</string>
 </resources>

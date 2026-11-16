@@ -1,25 +1,38 @@
 package com.example.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.local.NotificationPreferences
 import com.example.data.local.UserPreferences
 import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdGatePolicy
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.AppLanguageOption
 import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.CatalogOverridePolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
+import com.example.data.model.CustomMediaEntity
+import com.example.data.model.DiscoverFilters
 import com.example.data.model.EpisodeInfo
+import com.example.data.model.IssueReportCategory
+import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
+import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.PlayerServer
+import com.example.data.model.RecommendationPolicy
 import com.example.data.model.TmdbSearchHistoryEntity
+import com.example.data.model.UpcomingReleasePolicy
 import com.example.data.model.WatchlistEntity
 import com.example.data.model.toMediaItem
+import com.example.data.notifications.EpisodeNotificationHelper
 import com.example.data.repository.MovieRepository
+import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.DarkThemePalette
+import com.example.ui.theme.ThemeMode
 import com.example.ui.theme.ThemeTogglePolicy
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -29,10 +42,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import java.util.Locale
+import java.util.UUID
 
 sealed class Screen {
     object Home : Screen()
@@ -41,10 +57,19 @@ sealed class Screen {
     object ContinueWatching : Screen()
     object Settings : Screen()
     object Search : Screen()
+    data class ReportProblem(
+        val prefilledMedia: MediaItem? = null,
+        val serverName: String = "",
+        val episodeLabel: String = ""
+    ) : Screen()
     data class CategoryList(
         val title: String,
         val categoryKey: String,
         val genreFilter: String = "All"
+    ) : Screen()
+    data class LanguageCatalog(
+        val languageCode: String,
+        val languageName: String
     ) : Screen()
     data class Details(val media: MediaItem) : Screen()
     data class Player(val media: MediaItem, val season: Int = 1, val episode: Int = 1) : Screen()
@@ -71,34 +96,92 @@ data class UserUiState(
     val isNavigatingBack: Boolean = false,
     val batchSize: Int = CatalogBatchPolicy.DEFAULT_BATCH_SIZE,
     val trending: List<MediaItem> = emptyList(),
+    val trendingMovies: List<MediaItem> = emptyList(),
+    val trendingTv: List<MediaItem> = emptyList(),
+    val newReleases: List<MediaItem> = emptyList(),
     val popularMovies: List<MediaItem> = emptyList(),
+    val upcomingMovies: List<MediaItem> = emptyList(),
+    val topRatedMovies: List<MediaItem> = emptyList(),
     val topRatedTv: List<MediaItem> = emptyList(),
     val customMedia: List<MediaItem> = emptyList(),
     val searchResults: List<MediaItem> = emptyList(),
+    val discoverResults: List<MediaItem> = emptyList(),
+    val discoverFilters: DiscoverFilters = DiscoverFilters(),
+    val isLoadingDiscover: Boolean = false,
+    val isLoadingMoreDiscover: Boolean = false,
+    val hasMoreDiscover: Boolean = false,
+    val discoverTotalResults: Int = 0,
+    val selectedLanguageCode: String = "",
+    val selectedLanguageName: String = "",
+    val languageCatalogItems: List<MediaItem> = emptyList(),
+    val languageCatalogTotalResults: Int = 0,
+    val languageCatalogMediaType: String = "All",
+    val languageCatalogSortBy: String = "popular",
+    val isLoadingLanguageCatalog: Boolean = false,
+    val isLoadingMoreLanguageCatalog: Boolean = false,
+    val hasMoreLanguageCatalog: Boolean = false,
+    val languageCatalogError: String? = null,
     val trendingTotalResults: Int = 0,
+    val trendingMoviesTotalResults: Int = 0,
+    val trendingTvTotalResults: Int = 0,
+    val newReleasesTotalResults: Int = 0,
     val popularMoviesTotalResults: Int = 0,
+    val upcomingMoviesTotalResults: Int = 0,
+    val topRatedMoviesTotalResults: Int = 0,
     val topRatedTvTotalResults: Int = 0,
     val searchTotalResults: Int = 0,
     val hasMoreTrending: Boolean = false,
+    val hasMoreTrendingMovies: Boolean = false,
+    val hasMoreTrendingTv: Boolean = false,
+    val hasMoreNewReleases: Boolean = false,
     val hasMorePopularMovies: Boolean = false,
+    val hasMoreUpcomingMovies: Boolean = false,
+    val hasMoreTopRatedMovies: Boolean = false,
     val hasMoreTopRatedTv: Boolean = false,
     val hasMoreSearch: Boolean = false,
     val isLoadingMoreTrending: Boolean = false,
+    val isLoadingMoreTrendingMovies: Boolean = false,
+    val isLoadingMoreTrendingTv: Boolean = false,
+    val isLoadingMoreNewReleases: Boolean = false,
     val isLoadingMoreMovies: Boolean = false,
+    val isLoadingMoreUpcomingMovies: Boolean = false,
+    val isLoadingMoreTopRatedMovies: Boolean = false,
     val isLoadingMoreTv: Boolean = false,
     val isLoadingMoreSearch: Boolean = false,
+    // Smart Recommendations
+    val recommendedForYou: List<MediaItem> = emptyList(),
+    val becauseYouWatchedTitle: String = "",
+    val becauseYouWatchedItems: List<MediaItem> = emptyList(),
+    val popularInGenreName: String = "Action",
+    val popularInGenreItems: List<MediaItem> = emptyList(),
+    val similarForSelectedMedia: List<MediaItem> = emptyList(),
+    val isLoadingRecommendations: Boolean = false,
+    // Explore/Search Simple State
     val searchQuery: String = "",
     val selectedHomeGenre: String = "All",
     val selectedGenre: String = "All",
     val selectedCategory: String = "All", // "All", "movie", "tv"
     val sortBy: String = "popular", // "popular", "rating", "newest"
+    // Active Media & Player
     val selectedMedia: MediaItem? = null,
     val playingMedia: MediaItem? = null,
     val currentSeason: Int = 1,
     val currentEpisode: Int = 1,
     val playerServer: PlayerServer = PlayerServer.VIDLY,
+    // Customization & Notifications
     val selectedPalette: DarkThemePalette = DarkThemePalette.VELVET_CINEMA,
     val preferredHighReadabilityPalette: DarkThemePalette = DarkThemePalette.CRISP_SLATE,
+    val themeMode: ThemeMode = ThemeMode.DARK,
+    val accentColor: AccentColorOption = AccentColorOption.VELVET_ROSE,
+    val appLanguage: AppLanguageOption = AppLanguageOption.ENGLISH,
+    val notificationPrefs: NotificationPreferences = NotificationPreferences(),
+    val cacheSizeLabel: String = "0 KB",
+    val settingsFeedbackMessage: String? = null,
+    // Report Problem State
+    val isSubmittingReport: Boolean = false,
+    val reportSubmitMessage: String? = null,
+    val isReportError: Boolean = false,
+    // Trailer & Seasons
     val trailerYoutubeKey: String? = null,
     val isTrailerLoading: Boolean = false,
     val isTrailerModalOpen: Boolean = false,
@@ -113,7 +196,8 @@ data class UserUiState(
 
 class MovieViewModel(
     private val repository: MovieRepository,
-    private val userPreferences: UserPreferences? = null
+    private val userPreferences: UserPreferences? = null,
+    private val appContext: Context? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UserUiState())
@@ -131,22 +215,47 @@ class MovieViewModel(
     val searchHistory: StateFlow<List<TmdbSearchHistoryEntity>> = repository.tmdbSearchHistory
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val issueReports: StateFlow<List<IssueReportEntity>> = repository.issueReports
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _adGateState = MutableStateFlow<AdGateState>(AdGateState.Loading)
     val adGateState: StateFlow<AdGateState> = _adGateState.asStateFlow()
 
     private var latestAdConfig: AdConfigEntity? = null
     private var hasLoadedAdConfig: Boolean = false
     private var searchJob: Job? = null
+    private var languageCatalogJob: Job? = null
+    private var hasCheckedReleasesThisSession = false
 
     private var rawTrending: List<MediaItem> = emptyList()
+    private var rawTrendingMovies: List<MediaItem> = emptyList()
+    private var rawTrendingTv: List<MediaItem> = emptyList()
+    private var rawNewReleases: List<MediaItem> = emptyList()
+    private var rawCustomEntities: List<CustomMediaEntity> = emptyList()
     private var rawPopularMovies: List<MediaItem> = emptyList()
+    private var rawUpcomingMovies: List<MediaItem> = emptyList()
+    private var rawTopRatedMovies: List<MediaItem> = emptyList()
     private var rawTopRatedTv: List<MediaItem> = emptyList()
     private var rawSearchResults: List<MediaItem> = emptyList()
+    private var rawDiscoverResults: List<MediaItem> = emptyList()
+    private var rawLanguageCatalog: List<MediaItem> = emptyList()
+    private var rawRecommendedForYou: List<MediaItem> = emptyList()
+    private var rawBecauseYouWatched: List<MediaItem> = emptyList()
+    private var rawPopularInGenre: List<MediaItem> = emptyList()
+    private var rawSimilarForSelected: List<MediaItem> = emptyList()
 
     private var trendingFeed = FeedPaginationState()
+    private var trendingMoviesFeed = FeedPaginationState()
+    private var trendingTvFeed = FeedPaginationState()
+    private var newReleasesFeed = FeedPaginationState()
     private var moviesFeed = FeedPaginationState()
+    private var upcomingFeed = FeedPaginationState()
+    private var topRatedMoviesFeed = FeedPaginationState()
     private var tvFeed = FeedPaginationState()
     private var searchFeed = FeedPaginationState()
+    private var discoverFeed = FeedPaginationState()
+    private var languageCatalogFeed = FeedPaginationState()
+    private var lastDailyFeedDate: String = UpcomingReleasePolicy.todayIsoDate()
 
     init {
         viewModelScope.launch {
@@ -156,12 +265,27 @@ class MovieViewModel(
         observeUserPreferences()
         observeAdConfig()
         observeCustomMedia()
+        observeHistoryForRecommendations()
+        refreshCacheSize()
         loadHomeData()
     }
 
     fun refreshFromCloud() {
         viewModelScope.launch {
             repository.syncFromCloudNow()
+            refreshDailyFeedsIfDateChanged()
+            if (!hasCheckedReleasesThisSession) {
+                hasCheckedReleasesThisSession = true
+                checkNewReleasesAndNotify(silentIfNoPermission = true)
+            }
+        }
+    }
+
+    fun refreshDailyFeedsIfDateChanged() {
+        val currentDay = UpcomingReleasePolicy.todayIsoDate()
+        if (currentDay != lastDailyFeedDate) {
+            lastDailyFeedDate = currentDay
+            loadHomeData()
         }
     }
 
@@ -180,6 +304,46 @@ class MovieViewModel(
         viewModelScope.launch {
             prefs.defaultPlayerServerFlow.collect { server ->
                 _uiState.update { it.copy(playerServer = server) }
+            }
+        }
+        viewModelScope.launch {
+            prefs.themeModeFlow.collect { mode ->
+                _uiState.update { it.copy(themeMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            prefs.accentColorFlow.collect { accent ->
+                _uiState.update { it.copy(accentColor = accent) }
+            }
+        }
+        viewModelScope.launch {
+            var firstEmit = true
+            prefs.appLanguageFlow.collect { lang ->
+                val changed = repository.currentLanguageCode != lang.tmdbCode
+                repository.currentLanguageCode = lang.tmdbCode
+                _uiState.update { it.copy(appLanguage = lang) }
+                if (!firstEmit && changed) {
+                    loadHomeData()
+                }
+                firstEmit = false
+            }
+        }
+        viewModelScope.launch {
+            prefs.notificationPreferencesFlow.collect { nPrefs ->
+                _uiState.update { it.copy(notificationPrefs = nPrefs) }
+            }
+        }
+    }
+
+    private fun observeHistoryForRecommendations() {
+        viewModelScope.launch {
+            continueWatching.collect {
+                refreshSmartRecommendations()
+            }
+        }
+        viewModelScope.launch {
+            watchlist.collect {
+                refreshSmartRecommendations()
             }
         }
     }
@@ -216,29 +380,82 @@ class MovieViewModel(
         }
     }
 
+    private fun buildDailyNewReleasesUiList(
+        tmdbNewReleases: List<MediaItem>,
+        customEntities: List<CustomMediaEntity>,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        val merged = NewReleasePolicy.mergeDailyNewReleases(
+            dailyTmdbItems = tmdbNewReleases,
+            customMediaEntities = customEntities
+        )
+        return CatalogOverridePolicy.applyAdminOverrides(merged, mappedCustom)
+    }
+
+    private fun buildStrictUpcomingUiList(
+        rawUpcoming: List<MediaItem>,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        val overridden = CatalogOverridePolicy.applyAdminOverrides(rawUpcoming, mappedCustom)
+        return UpcomingReleasePolicy.filterStrictUpcoming(overridden)
+    }
+
+    private fun buildLanguageCatalogUiList(
+        rawTmdbItems: List<MediaItem>,
+        languageCode: String,
+        mediaType: String,
+        sortBy: String,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        if (languageCode.isBlank()) return emptyList()
+        val matchingCustom = mappedCustom.filter { custom ->
+            custom.originalLanguage.equals(languageCode, ignoreCase = true) &&
+                (mediaType == "All" || custom.mediaType.equals(mediaType, ignoreCase = true))
+        }
+        val merged = (matchingCustom + rawTmdbItems).distinctBy { it.id }
+        val overridden = CatalogOverridePolicy.applyAdminOverrides(merged, mappedCustom)
+        return DiscoverFilters(
+            mediaType = mediaType,
+            originalLanguage = languageCode,
+            sortBy = sortBy
+        ).sortItems(overridden)
+    }
+
     private fun observeCustomMedia() {
         viewModelScope.launch {
             repository.customMedia.collect { list ->
+                rawCustomEntities = list
                 val mappedCustom = list.map { it.toMediaItem() }
                 _uiState.update { current ->
-                    val updatedTrending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, mappedCustom)
-                    val updatedPopular = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, mappedCustom)
-                    val updatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, mappedCustom)
-                    val updatedSearch = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, mappedCustom)
-                    val updatedSelected = current.selectedMedia?.let {
-                        CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
-                    }
-                    val updatedPlaying = current.playingMedia?.let {
-                        CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
-                    }
                     current.copy(
                         customMedia = mappedCustom,
-                        trending = updatedTrending,
-                        popularMovies = updatedPopular,
-                        topRatedTv = updatedTv,
-                        searchResults = updatedSearch,
-                        selectedMedia = updatedSelected,
-                        playingMedia = updatedPlaying
+                        trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, mappedCustom),
+                        trendingMovies = CatalogOverridePolicy.applyAdminOverrides(rawTrendingMovies, mappedCustom),
+                        trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, mappedCustom),
+                        newReleases = buildDailyNewReleasesUiList(rawNewReleases, list, mappedCustom),
+                        popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, mappedCustom),
+                        upcomingMovies = buildStrictUpcomingUiList(rawUpcomingMovies, mappedCustom),
+                        topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedMovies, mappedCustom),
+                        topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, mappedCustom),
+                        searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, mappedCustom),
+                        discoverResults = CatalogOverridePolicy.applyAdminOverrides(rawDiscoverResults, mappedCustom),
+                        languageCatalogItems = buildLanguageCatalogUiList(
+                            rawTmdbItems = rawLanguageCatalog,
+                            languageCode = current.selectedLanguageCode,
+                            mediaType = current.languageCatalogMediaType,
+                            sortBy = current.languageCatalogSortBy,
+                            mappedCustom = mappedCustom
+                        ),
+                        recommendedForYou = CatalogOverridePolicy.applyAdminOverrides(rawRecommendedForYou, mappedCustom),
+                        becauseYouWatchedItems = CatalogOverridePolicy.applyAdminOverrides(rawBecauseYouWatched, mappedCustom),
+                        popularInGenreItems = CatalogOverridePolicy.applyAdminOverrides(rawPopularInGenre, mappedCustom),
+                        similarForSelectedMedia = CatalogOverridePolicy.applyAdminOverrides(rawSimilarForSelected, mappedCustom),
+                        selectedMedia = current.selectedMedia?.let {
+                            CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
+                        },
+                        playingMedia = current.playingMedia?.let {
+                            CatalogOverridePolicy.resolveItemWithOverrides(it, mappedCustom)
+                        }
                     )
                 }
             }
@@ -295,87 +512,128 @@ class MovieViewModel(
     fun loadHomeData() {
         viewModelScope.launch {
             val targetBatchSize = _uiState.value.batchSize
+            lastDailyFeedDate = UpcomingReleasePolicy.todayIsoDate()
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                val trendingDeferred = async {
-                    repository.getTrendingBatch(startPage = 1, neededCount = targetBatchSize)
-                }
-                val popularDeferred = async {
-                    repository.getPopularMoviesBatch(startPage = 1, neededCount = targetBatchSize)
-                }
-                val tvDeferred = async {
-                    repository.getTopRatedTvBatch(startPage = 1, neededCount = targetBatchSize)
-                }
+                supervisorScope {
+                    val trendingDeferred = async { repository.getTrendingBatch(1, targetBatchSize) }
+                    val trendingMoviesDef = async { repository.getTrendingMoviesBatch(1, targetBatchSize) }
+                    val trendingTvDef = async { repository.getTrendingTvBatch(1, targetBatchSize) }
+                    val newReleasesDef = async { repository.getNewReleasesBatch(1, targetBatchSize) }
+                    val popularDeferred = async { repository.getPopularMoviesBatch(1, targetBatchSize) }
+                    val upcomingDeferred = async { repository.getUpcomingMoviesBatch(1, targetBatchSize) }
+                    val topRatedMoviesDef = async { repository.getTopRatedMoviesBatch(1, targetBatchSize) }
+                    val tvDeferred = async { repository.getTopRatedTvBatch(1, targetBatchSize) }
 
-                val trendingResult = trendingDeferred.await()
-                val popularResult = popularDeferred.await()
-                val tvResult = tvDeferred.await()
+                    val trendingResult = trendingDeferred.await()
+                    val trendingMoviesRes = trendingMoviesDef.await()
+                    val trendingTvRes = trendingTvDef.await()
+                    val newReleasesRes = newReleasesDef.await()
+                    val popularResult = popularDeferred.await()
+                    val upcomingRes = upcomingDeferred.await()
+                    val topRatedMoviesRes = topRatedMoviesDef.await()
+                    val tvResult = tvDeferred.await()
 
-                val allFailed = trendingResult.isFailure && popularResult.isFailure && tvResult.isFailure
+                    val allFailed = trendingResult.isFailure && popularResult.isFailure && tvResult.isFailure
 
-                val trendingBatch = trendingResult.getOrNull()
-                val popularBatch = popularResult.getOrNull()
-                val tvBatch = tvResult.getOrNull()
+                    val trendingBatch = trendingResult.getOrNull()
+                    val trendingMoviesBatch = trendingMoviesRes.getOrNull()
+                    val trendingTvBatch = trendingTvRes.getOrNull()
+                    val newReleasesBatch = newReleasesRes.getOrNull()
+                    val popularBatch = popularResult.getOrNull()
+                    val upcomingBatch = upcomingRes.getOrNull()
+                    val topRatedMoviesBatch = topRatedMoviesRes.getOrNull()
+                    val tvBatch = tvResult.getOrNull()
 
-                val trendingItems = trendingBatch?.items?.take(targetBatchSize).orEmpty()
-                val popularItems = popularBatch?.items?.take(targetBatchSize).orEmpty()
-                val tvItems = tvBatch?.items?.take(targetBatchSize).orEmpty()
+                    val trendingItems = trendingBatch?.items?.take(targetBatchSize).orEmpty()
+                    val trendingMovieItems = trendingMoviesBatch?.items?.take(targetBatchSize).orEmpty()
+                    val trendingTvItems = trendingTvBatch?.items?.take(targetBatchSize).orEmpty()
+                    val newReleaseItems = newReleasesBatch?.items?.take(targetBatchSize).orEmpty()
+                    val popularItems = popularBatch?.items?.take(targetBatchSize).orEmpty()
+                    val upcomingItems = upcomingBatch?.items?.take(targetBatchSize).orEmpty()
+                    val topRatedMovieItems = topRatedMoviesBatch?.items?.take(targetBatchSize).orEmpty()
+                    val tvItems = tvBatch?.items?.take(targetBatchSize).orEmpty()
 
-                if (trendingItems.isNotEmpty()) rawTrending = trendingItems
-                if (popularItems.isNotEmpty()) rawPopularMovies = popularItems
-                if (tvItems.isNotEmpty()) rawTopRatedTv = tvItems
+                    if (trendingItems.isNotEmpty()) rawTrending = trendingItems
+                    if (trendingMovieItems.isNotEmpty()) rawTrendingMovies = trendingMovieItems
+                    if (trendingTvItems.isNotEmpty()) rawTrendingTv = trendingTvItems
+                    if (newReleaseItems.isNotEmpty()) rawNewReleases = newReleaseItems
+                    if (popularItems.isNotEmpty()) rawPopularMovies = popularItems
+                    if (upcomingBatch != null) rawUpcomingMovies = upcomingItems
+                    if (topRatedMovieItems.isNotEmpty()) rawTopRatedMovies = topRatedMovieItems
+                    if (tvItems.isNotEmpty()) rawTopRatedTv = tvItems
 
-                if (trendingBatch != null) {
-                    trendingFeed = FeedPaginationState(
-                        nextPage = trendingBatch.lastFetchedPage + 1,
-                        totalPages = trendingBatch.totalPages,
-                        totalResults = trendingBatch.totalResults,
-                        buffer = trendingBatch.items.drop(trendingItems.size)
-                    )
-                }
-                if (popularBatch != null) {
-                    moviesFeed = FeedPaginationState(
-                        nextPage = popularBatch.lastFetchedPage + 1,
-                        totalPages = popularBatch.totalPages,
-                        totalResults = popularBatch.totalResults,
-                        buffer = popularBatch.items.drop(popularItems.size)
-                    )
-                }
-                if (tvBatch != null) {
-                    tvFeed = FeedPaginationState(
-                        nextPage = tvBatch.lastFetchedPage + 1,
-                        totalPages = tvBatch.totalPages,
-                        totalResults = tvBatch.totalResults,
-                        buffer = tvBatch.items.drop(tvItems.size)
-                    )
-                }
+                    trendingBatch?.let {
+                        trendingFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(trendingItems.size))
+                    }
+                    trendingMoviesBatch?.let {
+                        trendingMoviesFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(trendingMovieItems.size))
+                    }
+                    trendingTvBatch?.let {
+                        trendingTvFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(trendingTvItems.size))
+                    }
+                    newReleasesBatch?.let {
+                        newReleasesFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(newReleaseItems.size))
+                    }
+                    popularBatch?.let {
+                        moviesFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(popularItems.size))
+                    }
+                    upcomingBatch?.let {
+                        upcomingFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(upcomingItems.size))
+                    }
+                    topRatedMoviesBatch?.let {
+                        topRatedMoviesFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(topRatedMovieItems.size))
+                    }
+                    tvBatch?.let {
+                        tvFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(tvItems.size))
+                    }
 
-                _uiState.update { state ->
-                    val overrides = state.customMedia
-                    state.copy(
-                        trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
-                        popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, overrides),
-                        topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
-                        trendingTotalResults = trendingBatch?.totalResults ?: state.trendingTotalResults,
-                        popularMoviesTotalResults = popularBatch?.totalResults ?: state.popularMoviesTotalResults,
-                        topRatedTvTotalResults = tvBatch?.totalResults ?: state.topRatedTvTotalResults,
-                        hasMoreTrending = trendingFeed.hasMore(),
-                        hasMorePopularMovies = moviesFeed.hasMore(),
-                        hasMoreTopRatedTv = tvFeed.hasMore(),
-                        isLoading = false,
-                        errorMessage = if (allFailed) {
-                            "Unable to reach TMDb right now. Please check your internet connection and tap Retry."
-                        } else {
-                            null
-                        }
-                    )
-                }
+                    _uiState.update { state ->
+                        val overrides = state.customMedia
+                        val resolvedNewReleases = buildDailyNewReleasesUiList(rawNewReleases, rawCustomEntities, overrides)
+                        val resolvedUpcoming = buildStrictUpcomingUiList(rawUpcomingMovies, overrides)
+                        state.copy(
+                            trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                            trendingMovies = CatalogOverridePolicy.applyAdminOverrides(rawTrendingMovies, overrides),
+                            trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, overrides),
+                            newReleases = resolvedNewReleases,
+                            popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, overrides),
+                            upcomingMovies = resolvedUpcoming,
+                            topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedMovies, overrides),
+                            topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
+                            trendingTotalResults = trendingBatch?.totalResults ?: state.trendingTotalResults,
+                            trendingMoviesTotalResults = trendingMoviesBatch?.totalResults ?: state.trendingMoviesTotalResults,
+                            trendingTvTotalResults = trendingTvBatch?.totalResults ?: state.trendingTvTotalResults,
+                            newReleasesTotalResults = maxOf(newReleasesBatch?.totalResults ?: state.newReleasesTotalResults, resolvedNewReleases.size),
+                            popularMoviesTotalResults = popularBatch?.totalResults ?: state.popularMoviesTotalResults,
+                            upcomingMoviesTotalResults = maxOf(upcomingBatch?.totalResults ?: state.upcomingMoviesTotalResults, resolvedUpcoming.size),
+                            topRatedMoviesTotalResults = topRatedMoviesBatch?.totalResults ?: state.topRatedMoviesTotalResults,
+                            topRatedTvTotalResults = tvBatch?.totalResults ?: state.topRatedTvTotalResults,
+                            hasMoreTrending = trendingFeed.hasMore(),
+                            hasMoreTrendingMovies = trendingMoviesFeed.hasMore(),
+                            hasMoreTrendingTv = trendingTvFeed.hasMore(),
+                            hasMoreNewReleases = newReleasesFeed.hasMore(),
+                            hasMorePopularMovies = moviesFeed.hasMore(),
+                            hasMoreUpcomingMovies = upcomingFeed.hasMore(),
+                            hasMoreTopRatedMovies = topRatedMoviesFeed.hasMore(),
+                            hasMoreTopRatedTv = tvFeed.hasMore(),
+                            isLoading = false,
+                            errorMessage = if (allFailed) {
+                                "Unable to reach TMDb right now. Please check your internet connection and tap Retry."
+                            } else {
+                                null
+                            }
+                        )
+                    }
 
-                val tvItemsToEnrich = (trendingItems + tvItems)
-                    .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
-                    .take(20)
-                if (tvItemsToEnrich.isNotEmpty()) {
-                    enrichTvItemsInBackground(tvItemsToEnrich)
+                    refreshSmartRecommendations()
+                    val tvItemsToEnrich = (trendingItems + trendingTvItems + tvItems)
+                        .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                        .distinctBy { it.id }
+                        .take(20)
+                    if (tvItemsToEnrich.isNotEmpty()) {
+                        enrichTvItemsInBackground(tvItemsToEnrich)
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -388,6 +646,173 @@ class MovieViewModel(
         }
     }
 
+    fun refreshSmartRecommendations() {
+        viewModelScope.launch {
+            val cw = continueWatching.value
+            val wl = watchlist.value
+            val topGenre = RecommendationPolicy.resolveTopPreferredGenre(cw, wl)
+            val anchor = RecommendationPolicy.resolveBecauseYouWatchedAnchor(cw, wl)
+
+            val candidatePool = (rawTrending + rawPopularMovies + rawTopRatedMovies + rawTopRatedTv + rawTrendingTv)
+                .distinctBy { it.id }
+            val immediateRanked = RecommendationPolicy.rankRecommendedForYou(
+                candidatePool = candidatePool,
+                continueWatching = cw,
+                watchlist = wl
+            )
+            if (immediateRanked.isNotEmpty()) {
+                rawRecommendedForYou = immediateRanked
+                _uiState.update {
+                    it.copy(
+                        recommendedForYou = CatalogOverridePolicy.applyAdminOverrides(rawRecommendedForYou, it.customMedia),
+                        popularInGenreName = topGenre
+                    )
+                }
+            }
+
+            _uiState.update { it.copy(isLoadingRecommendations = true, popularInGenreName = topGenre) }
+            try {
+                supervisorScope {
+                    val becauseDef = async {
+                        if (anchor != null) {
+                            repository.fetchRecommendationsForMedia(anchor)
+                        } else {
+                            emptyList()
+                        }
+                    }
+                    val genreDef = async {
+                        repository.fetchPopularInGenre(topGenre)
+                    }
+
+                    val becauseFetched = becauseDef.await()
+                    val genreFetched = genreDef.await()
+
+                    val combinedForYou = RecommendationPolicy.rankRecommendedForYou(
+                        candidatePool = (becauseFetched + genreFetched + candidatePool).distinctBy { it.id },
+                        continueWatching = cw,
+                        watchlist = wl
+                    )
+
+                    if (combinedForYou.isNotEmpty()) rawRecommendedForYou = combinedForYou
+                    rawBecauseYouWatched = if (becauseFetched.isNotEmpty()) {
+                        becauseFetched
+                    } else {
+                        // Useful fallback when watch history is empty
+                        rawTopRatedMovies.take(12)
+                    }
+                    if (genreFetched.isNotEmpty()) rawPopularInGenre = genreFetched
+
+                    _uiState.update { state ->
+                        val overrides = state.customMedia
+                        state.copy(
+                            recommendedForYou = CatalogOverridePolicy.applyAdminOverrides(rawRecommendedForYou, overrides),
+                            becauseYouWatchedTitle = anchor?.title.orEmpty(),
+                            becauseYouWatchedItems = CatalogOverridePolicy.applyAdminOverrides(rawBecauseYouWatched, overrides),
+                            popularInGenreName = topGenre,
+                            popularInGenreItems = CatalogOverridePolicy.applyAdminOverrides(rawPopularInGenre, overrides),
+                            isLoadingRecommendations = false
+                        )
+                    }
+                }
+            } catch (_: Exception) {
+                _uiState.update { it.copy(isLoadingRecommendations = false) }
+            }
+        }
+    }
+
+    // Advanced Search & Discover Filters
+    fun applyDiscoverFilters(filters: DiscoverFilters) {
+        _uiState.update {
+            it.copy(
+                discoverFilters = filters,
+                selectedCategory = filters.mediaType,
+                sortBy = filters.sortBy,
+                selectedGenre = if (filters.selectedGenres.size == 1) filters.selectedGenres.first() else "All"
+            )
+        }
+        if (filters.hasDiscoverApiCriteria() || filters.mediaType != "All") {
+            fetchDiscoverBatch(filters)
+        } else {
+            rawDiscoverResults = emptyList()
+            discoverFeed = FeedPaginationState()
+            _uiState.update {
+                it.copy(
+                    discoverResults = emptyList(),
+                    discoverTotalResults = 0,
+                    hasMoreDiscover = false,
+                    isLoadingDiscover = false
+                )
+            }
+        }
+    }
+
+    fun resetAllExploreFilters() {
+        applyDiscoverFilters(DiscoverFilters())
+        if (_uiState.value.searchQuery.isNotBlank()) {
+            onSearchQueryChange("")
+        }
+    }
+
+    private fun fetchDiscoverBatch(filters: DiscoverFilters) {
+        viewModelScope.launch {
+            val targetBatch = _uiState.value.batchSize
+            _uiState.update { it.copy(isLoadingDiscover = true, searchErrorMessage = null) }
+            val result = repository.discoverCatalogBatch(
+                filters = filters,
+                startPage = 1,
+                neededCount = targetBatch
+            )
+            result.fold(
+                onSuccess = { batch ->
+                    val items = batch.items.take(targetBatch)
+                    rawDiscoverResults = items
+                    discoverFeed = FeedPaginationState(
+                        nextPage = batch.lastFetchedPage + 1,
+                        totalPages = batch.totalPages,
+                        totalResults = batch.totalResults,
+                        buffer = batch.items.drop(items.size)
+                    )
+                    _uiState.update { current ->
+                        current.copy(
+                            discoverResults = CatalogOverridePolicy.applyAdminOverrides(items, current.customMedia),
+                            discoverTotalResults = maxOf(batch.totalResults, items.size),
+                            hasMoreDiscover = discoverFeed.hasMore(),
+                            isLoadingDiscover = false
+                        )
+                    }
+                },
+                onFailure = {
+                    _uiState.update { it.copy(isLoadingDiscover = false) }
+                }
+            )
+        }
+    }
+
+    fun loadMoreDiscover() {
+        val state = _uiState.value
+        if (state.isLoadingMoreDiscover || !discoverFeed.hasMore()) return
+        val activeFilters = state.discoverFilters
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreDiscover = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawDiscoverResults,
+                currentFeed = discoverFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.discoverCatalogBatch(activeFilters, page, needed) }
+            )
+            rawDiscoverResults = updatedRaw
+            discoverFeed = newFeed
+            _uiState.update { current ->
+                current.copy(
+                    discoverResults = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    discoverTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
+                    hasMoreDiscover = newFeed.hasMore(),
+                    isLoadingMoreDiscover = false
+                )
+            }
+        }
+    }
+
     fun setBatchSize(newSize: Int) {
         val normalized = CatalogBatchPolicy.normalizeBatchSize(newSize)
         _uiState.update { it.copy(batchSize = normalized) }
@@ -396,12 +821,43 @@ class MovieViewModel(
     fun loadMoreCategory(categoryKey: String) {
         when (categoryKey) {
             "Trending" -> loadMoreTrending()
-            "Movies" -> loadMoreMovies()
-            "TV" -> loadMoreTv()
+            "TrendingMovies" -> loadMoreTrendingMovies()
+            "TrendingTv" -> loadMoreTrendingTv()
+            "NewReleases" -> loadMoreNewReleases()
+            "Movies", "PopularMovies", "Top10Movies" -> loadMoreMovies()
+            "UpcomingMovies" -> loadMoreUpcomingMovies()
+            "TopRatedMovies" -> loadMoreTopRatedMovies()
+            "TV", "TopRatedTv", "Top10Tv" -> loadMoreTv()
+            "Discover" -> loadMoreDiscover()
             "Specials" -> Unit
             else -> {
                 loadMoreMovies()
                 loadMoreTv()
+            }
+        }
+    }
+
+    private fun loadMoreNewReleases() {
+        val state = _uiState.value
+        if (state.isLoadingMoreNewReleases || !newReleasesFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreNewReleases = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawNewReleases,
+                currentFeed = newReleasesFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getNewReleasesBatch(page, needed) }
+            )
+            rawNewReleases = updatedRaw
+            newReleasesFeed = newFeed
+            _uiState.update { current ->
+                val resolved = buildDailyNewReleasesUiList(updatedRaw, rawCustomEntities, current.customMedia)
+                current.copy(
+                    newReleases = resolved,
+                    newReleasesTotalResults = maxOf(newFeed.totalResults, resolved.size),
+                    hasMoreNewReleases = newFeed.hasMore(),
+                    isLoadingMoreNewReleases = false
+                )
             }
         }
     }
@@ -428,11 +884,55 @@ class MovieViewModel(
                     isLoadingMoreTrending = false
                 )
             }
-            val newlyAddedTv = updatedRaw.drop(previousSize)
-                .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
-                .take(20)
-            if (newlyAddedTv.isNotEmpty()) {
-                enrichTvItemsInBackground(newlyAddedTv)
+            val newlyAddedTv = updatedRaw.drop(previousSize).filter { it.mediaType == "tv" && it.seasons.isEmpty() }.take(20)
+            if (newlyAddedTv.isNotEmpty()) enrichTvItemsInBackground(newlyAddedTv)
+        }
+    }
+
+    private fun loadMoreTrendingMovies() {
+        val state = _uiState.value
+        if (state.isLoadingMoreTrendingMovies || !trendingMoviesFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreTrendingMovies = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawTrendingMovies,
+                currentFeed = trendingMoviesFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getTrendingMoviesBatch(page, needed) }
+            )
+            rawTrendingMovies = updatedRaw
+            trendingMoviesFeed = newFeed
+            _uiState.update { current ->
+                current.copy(
+                    trendingMovies = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    trendingMoviesTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
+                    hasMoreTrendingMovies = newFeed.hasMore(),
+                    isLoadingMoreTrendingMovies = false
+                )
+            }
+        }
+    }
+
+    private fun loadMoreTrendingTv() {
+        val state = _uiState.value
+        if (state.isLoadingMoreTrendingTv || !trendingTvFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreTrendingTv = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawTrendingTv,
+                currentFeed = trendingTvFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getTrendingTvBatch(page, needed) }
+            )
+            rawTrendingTv = updatedRaw
+            trendingTvFeed = newFeed
+            _uiState.update { current ->
+                current.copy(
+                    trendingTv = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    trendingTvTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
+                    hasMoreTrendingTv = newFeed.hasMore(),
+                    isLoadingMoreTrendingTv = false
+                )
             }
         }
     }
@@ -461,6 +961,55 @@ class MovieViewModel(
         }
     }
 
+    private fun loadMoreUpcomingMovies() {
+        val state = _uiState.value
+        if (state.isLoadingMoreUpcomingMovies || !upcomingFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreUpcomingMovies = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawUpcomingMovies,
+                currentFeed = upcomingFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getUpcomingMoviesBatch(page, needed) }
+            )
+            rawUpcomingMovies = updatedRaw
+            upcomingFeed = newFeed
+            _uiState.update { current ->
+                val strictUpcoming = buildStrictUpcomingUiList(updatedRaw, current.customMedia)
+                current.copy(
+                    upcomingMovies = strictUpcoming,
+                    upcomingMoviesTotalResults = maxOf(newFeed.totalResults, strictUpcoming.size),
+                    hasMoreUpcomingMovies = newFeed.hasMore(),
+                    isLoadingMoreUpcomingMovies = false
+                )
+            }
+        }
+    }
+
+    private fun loadMoreTopRatedMovies() {
+        val state = _uiState.value
+        if (state.isLoadingMoreTopRatedMovies || !topRatedMoviesFeed.hasMore()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreTopRatedMovies = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawTopRatedMovies,
+                currentFeed = topRatedMoviesFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.getTopRatedMoviesBatch(page, needed) }
+            )
+            rawTopRatedMovies = updatedRaw
+            topRatedMoviesFeed = newFeed
+            _uiState.update { current ->
+                current.copy(
+                    topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(updatedRaw, current.customMedia),
+                    topRatedMoviesTotalResults = maxOf(newFeed.totalResults, updatedRaw.size),
+                    hasMoreTopRatedMovies = newFeed.hasMore(),
+                    isLoadingMoreTopRatedMovies = false
+                )
+            }
+        }
+    }
+
     private fun loadMoreTv() {
         val state = _uiState.value
         if (state.isLoadingMoreTv || !tvFeed.hasMore()) return
@@ -483,12 +1032,8 @@ class MovieViewModel(
                     isLoadingMoreTv = false
                 )
             }
-            val newlyAddedTv = updatedRaw.drop(previousSize)
-                .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
-                .take(20)
-            if (newlyAddedTv.isNotEmpty()) {
-                enrichTvItemsInBackground(newlyAddedTv)
-            }
+            val newlyAddedTv = updatedRaw.drop(previousSize).filter { it.mediaType == "tv" && it.seasons.isEmpty() }.take(20)
+            if (newlyAddedTv.isNotEmpty()) enrichTvItemsInBackground(newlyAddedTv)
         }
     }
 
@@ -503,7 +1048,8 @@ class MovieViewModel(
         _uiState.value = current.copy(
             currentScreen = screen,
             backStack = newStack,
-            isNavigatingBack = false
+            isNavigatingBack = false,
+            reportSubmitMessage = if (screen is Screen.ReportProblem) null else current.reportSubmitMessage
         )
     }
 
@@ -520,6 +1066,77 @@ class MovieViewModel(
             return true
         }
         return false
+    }
+
+    fun openReportProblem(
+        media: MediaItem? = null,
+        serverName: String = "",
+        episodeLabel: String = ""
+    ) {
+        navigateTo(Screen.ReportProblem(prefilledMedia = media, serverName = serverName, episodeLabel = episodeLabel))
+    }
+
+    fun submitProblemReport(
+        category: IssueReportCategory,
+        description: String,
+        media: MediaItem?,
+        serverName: String,
+        episodeLabel: String,
+        screenshotBase64: String
+    ) {
+        if (description.trim().length < 5) {
+            _uiState.update {
+                it.copy(
+                    reportSubmitMessage = "Please enter at least 5 characters describing the issue.",
+                    isReportError = true
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSubmittingReport = true, reportSubmitMessage = null, isReportError = false) }
+            val now = System.currentTimeMillis()
+            val entity = IssueReportEntity(
+                id = "rep_${UUID.randomUUID().toString().take(10)}",
+                category = category.storageKey,
+                description = description.trim(),
+                mediaId = media?.id.orEmpty(),
+                mediaTitle = media?.title.orEmpty(),
+                mediaType = media?.mediaType.orEmpty(),
+                serverName = serverName.trim(),
+                episodeLabel = episodeLabel.trim(),
+                screenshotPreviewBase64 = screenshotBase64,
+                status = "OPEN",
+                adminNotes = "",
+                createdAt = now,
+                updatedAt = now
+            )
+            val result = repository.submitIssueReport(entity)
+            result.fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            isSubmittingReport = false,
+                            reportSubmitMessage = "✓ Report submitted! Track status updates below.",
+                            isReportError = false
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            isSubmittingReport = false,
+                            reportSubmitMessage = "Saved locally; cloud upload pending (${err.localizedMessage ?: "offline"}).",
+                            isReportError = false
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun clearReportFeedback() {
+        _uiState.update { it.copy(reportSubmitMessage = null, isReportError = false) }
     }
 
     fun onSearchQueryChange(query: String) {
@@ -644,7 +1261,10 @@ class MovieViewModel(
     }
 
     fun clearSearchHistory() {
-        viewModelScope.launch { repository.clearTmdbSearchHistory() }
+        viewModelScope.launch {
+            repository.clearTmdbSearchHistory()
+            _uiState.update { it.copy(settingsFeedbackMessage = "Search history cleared.") }
+        }
     }
 
     fun selectDarkThemePalette(palette: DarkThemePalette) {
@@ -666,6 +1286,121 @@ class MovieViewModel(
         selectDarkThemePalette(next)
     }
 
+    fun selectThemeMode(mode: ThemeMode) {
+        _uiState.update { it.copy(themeMode = mode) }
+        viewModelScope.launch { userPreferences?.saveThemeMode(mode) }
+    }
+
+    fun selectAccentColor(option: AccentColorOption) {
+        _uiState.update { it.copy(accentColor = option) }
+        viewModelScope.launch { userPreferences?.saveAccentColor(option) }
+    }
+
+    fun selectAppLanguage(language: AppLanguageOption) {
+        val changed = repository.currentLanguageCode != language.tmdbCode
+        repository.currentLanguageCode = language.tmdbCode
+        _uiState.update {
+            it.copy(
+                appLanguage = language,
+                settingsFeedbackMessage = "Content language set to ${language.displayName}."
+            )
+        }
+        viewModelScope.launch {
+            userPreferences?.saveAppLanguage(language)
+            if (changed) {
+                loadHomeData()
+            }
+        }
+    }
+
+    fun updateNotificationPreferences(
+        enabled: Boolean = _uiState.value.notificationPrefs.enabled,
+        newEpisodesEnabled: Boolean = _uiState.value.notificationPrefs.newEpisodesEnabled,
+        newMoviesEnabled: Boolean = _uiState.value.notificationPrefs.newMoviesEnabled
+    ) {
+        val updated = NotificationPreferences(
+            enabled = enabled,
+            newEpisodesEnabled = newEpisodesEnabled,
+            newMoviesEnabled = newMoviesEnabled
+        )
+        _uiState.update { it.copy(notificationPrefs = updated) }
+        viewModelScope.launch {
+            userPreferences?.saveNotificationPreferences(updated)
+        }
+    }
+
+    fun checkNewReleasesAndNotify(silentIfNoPermission: Boolean = false) {
+        val ctx = appContext ?: return
+        val nPrefs = _uiState.value.notificationPrefs
+        if (!nPrefs.enabled) {
+            if (!silentIfNoPermission) {
+                _uiState.update { it.copy(settingsFeedbackMessage = "Notifications are disabled in Settings.") }
+            }
+            return
+        }
+        if (!EpisodeNotificationHelper.hasNotificationPermission(ctx)) {
+            if (!silentIfNoPermission) {
+                _uiState.update { it.copy(settingsFeedbackMessage = "Grant notification permission above to receive release alerts.") }
+            }
+            return
+        }
+        viewModelScope.launch {
+            val alerts = repository.checkForNewReleaseAlerts(
+                watchlist = watchlist.value,
+                customMedia = repository.customMedia.firstOrNull().orEmpty(),
+                checkEpisodes = nPrefs.newEpisodesEnabled,
+                checkNewMovies = nPrefs.newMoviesEnabled
+            )
+            var posted = 0
+            alerts.forEach { alert ->
+                if (EpisodeNotificationHelper.postReleaseNotification(ctx, alert)) {
+                    posted++
+                }
+            }
+            if (!silentIfNoPermission) {
+                val msg = if (posted > 0) {
+                    "Sent $posted new release alert(s) to your notification shade."
+                } else {
+                    "You're all caught up! No new unreleased episode alerts right now."
+                }
+                _uiState.update { it.copy(settingsFeedbackMessage = msg) }
+            }
+        }
+    }
+
+    fun refreshCacheSize() {
+        val ctx = appContext ?: return
+        val bytes = repository.getImageCacheSizeBytes(ctx)
+        _uiState.update { it.copy(cacheSizeLabel = formatByteSize(bytes)) }
+    }
+
+    fun clearAppCache() {
+        val ctx = appContext ?: return
+        viewModelScope.launch {
+            val clearedBytes = repository.clearCaches(ctx)
+            val afterBytes = repository.getImageCacheSizeBytes(ctx)
+            _uiState.update {
+                it.copy(
+                    cacheSizeLabel = formatByteSize(afterBytes),
+                    settingsFeedbackMessage = "Cleared ${formatByteSize(clearedBytes)} of cached posters & API data."
+                )
+            }
+        }
+    }
+
+    fun dismissSettingsFeedback() {
+        _uiState.update { it.copy(settingsFeedbackMessage = null) }
+    }
+
+    private fun formatByteSize(bytes: Long): String {
+        val safe = bytes.coerceAtLeast(0L)
+        return when {
+            safe < 1024L -> "$safe B"
+            safe < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", safe / 1024.0)
+            else -> String.format(Locale.US, "%.1f MB", safe / (1024.0 * 1024.0))
+        }
+    }
+
     fun setDefaultPlayerServer(server: PlayerServer) {
         _uiState.update { it.copy(playerServer = server) }
         viewModelScope.launch {
@@ -678,22 +1413,20 @@ class MovieViewModel(
     }
 
     fun openExploreWithGenre(genre: String) {
-        _uiState.update {
-            it.copy(
-                selectedGenre = genre.ifBlank { "All" },
-                selectedCategory = "All"
-            )
-        }
+        val updatedFilters = DiscoverFilters(
+            mediaType = "All",
+            selectedGenres = if (genre.equals("All", ignoreCase = true) || genre.isBlank()) emptySet() else setOf(genre)
+        )
+        applyDiscoverFilters(updatedFilters)
         navigateTo(Screen.Explore)
     }
 
     fun openExploreSection(category: String = "All", genre: String = "All") {
-        _uiState.update {
-            it.copy(
-                selectedCategory = category,
-                selectedGenre = genre
-            )
-        }
+        val updatedFilters = DiscoverFilters(
+            mediaType = category,
+            selectedGenres = if (genre.equals("All", ignoreCase = true) || genre.isBlank()) emptySet() else setOf(genre)
+        )
+        applyDiscoverFilters(updatedFilters)
         navigateTo(Screen.Explore)
     }
 
@@ -705,21 +1438,242 @@ class MovieViewModel(
         navigateTo(Screen.CategoryList(title, categoryKey, genreFilter))
     }
 
+    fun openLanguageCatalog(languageCode: String, languageName: String) {
+        val cleanCode = languageCode.trim().lowercase(Locale.US)
+        if (cleanCode.isBlank()) return
+        val current = _uiState.value
+        val sameLanguage = current.selectedLanguageCode.equals(cleanCode, ignoreCase = true) &&
+            rawLanguageCatalog.isNotEmpty() &&
+            current.languageCatalogError == null
+        navigateTo(Screen.LanguageCatalog(cleanCode, languageName))
+        if (sameLanguage) return
+
+        rawLanguageCatalog = emptyList()
+        languageCatalogFeed = FeedPaginationState()
+        _uiState.update {
+            it.copy(
+                selectedLanguageCode = cleanCode,
+                selectedLanguageName = languageName,
+                languageCatalogMediaType = "All",
+                languageCatalogSortBy = "popular",
+                languageCatalogItems = buildLanguageCatalogUiList(
+                    rawTmdbItems = emptyList(),
+                    languageCode = cleanCode,
+                    mediaType = "All",
+                    sortBy = "popular",
+                    mappedCustom = it.customMedia
+                ),
+                languageCatalogTotalResults = 0,
+                hasMoreLanguageCatalog = false,
+                isLoadingMoreLanguageCatalog = false,
+                languageCatalogError = null
+            )
+        }
+        fetchLanguageCatalogInitial(
+            languageCode = cleanCode,
+            mediaType = "All",
+            sortBy = "popular"
+        )
+    }
+
+    fun setLanguageCatalogMediaType(mediaType: String) {
+        val current = _uiState.value
+        if (current.selectedLanguageCode.isBlank() || current.languageCatalogMediaType == mediaType) return
+        rawLanguageCatalog = emptyList()
+        languageCatalogFeed = FeedPaginationState()
+        _uiState.update {
+            it.copy(
+                languageCatalogMediaType = mediaType,
+                languageCatalogItems = emptyList(),
+                languageCatalogTotalResults = 0,
+                hasMoreLanguageCatalog = false,
+                languageCatalogError = null
+            )
+        }
+        fetchLanguageCatalogInitial(
+            languageCode = current.selectedLanguageCode,
+            mediaType = mediaType,
+            sortBy = current.languageCatalogSortBy
+        )
+    }
+
+    fun setLanguageCatalogSortBy(sortBy: String) {
+        val current = _uiState.value
+        if (current.selectedLanguageCode.isBlank() || current.languageCatalogSortBy == sortBy) return
+        rawLanguageCatalog = emptyList()
+        languageCatalogFeed = FeedPaginationState()
+        _uiState.update {
+            it.copy(
+                languageCatalogSortBy = sortBy,
+                languageCatalogItems = emptyList(),
+                languageCatalogTotalResults = 0,
+                hasMoreLanguageCatalog = false,
+                languageCatalogError = null
+            )
+        }
+        fetchLanguageCatalogInitial(
+            languageCode = current.selectedLanguageCode,
+            mediaType = current.languageCatalogMediaType,
+            sortBy = sortBy
+        )
+    }
+
+    fun retryLanguageCatalog() {
+        val current = _uiState.value
+        if (current.selectedLanguageCode.isBlank()) return
+        fetchLanguageCatalogInitial(
+            languageCode = current.selectedLanguageCode,
+            mediaType = current.languageCatalogMediaType,
+            sortBy = current.languageCatalogSortBy
+        )
+    }
+
+    private fun fetchLanguageCatalogInitial(
+        languageCode: String,
+        mediaType: String,
+        sortBy: String
+    ) {
+        languageCatalogJob?.cancel()
+        languageCatalogJob = viewModelScope.launch {
+            val targetBatch = _uiState.value.batchSize
+            val filters = DiscoverFilters(
+                mediaType = mediaType,
+                originalLanguage = languageCode,
+                sortBy = sortBy
+            )
+            _uiState.update {
+                it.copy(
+                    isLoadingLanguageCatalog = true,
+                    languageCatalogError = null
+                )
+            }
+            val result = repository.discoverCatalogBatch(
+                filters = filters,
+                startPage = 1,
+                neededCount = targetBatch
+            )
+            result.fold(
+                onSuccess = { batch ->
+                    val items = batch.items.take(targetBatch)
+                    rawLanguageCatalog = items
+                    languageCatalogFeed = FeedPaginationState(
+                        nextPage = batch.lastFetchedPage + 1,
+                        totalPages = batch.totalPages,
+                        totalResults = batch.totalResults,
+                        buffer = batch.items.drop(items.size)
+                    )
+                    _uiState.update { state ->
+                        val resolved = buildLanguageCatalogUiList(
+                            rawTmdbItems = items,
+                            languageCode = languageCode,
+                            mediaType = mediaType,
+                            sortBy = sortBy,
+                            mappedCustom = state.customMedia
+                        )
+                        state.copy(
+                            languageCatalogItems = resolved,
+                            languageCatalogTotalResults = maxOf(batch.totalResults, resolved.size),
+                            hasMoreLanguageCatalog = languageCatalogFeed.hasMore(),
+                            isLoadingLanguageCatalog = false,
+                            languageCatalogError = null
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { state ->
+                        val customFallback = buildLanguageCatalogUiList(
+                            rawTmdbItems = emptyList(),
+                            languageCode = languageCode,
+                            mediaType = mediaType,
+                            sortBy = sortBy,
+                            mappedCustom = state.customMedia
+                        )
+                        state.copy(
+                            languageCatalogItems = customFallback,
+                            languageCatalogTotalResults = customFallback.size,
+                            hasMoreLanguageCatalog = false,
+                            isLoadingLanguageCatalog = false,
+                            languageCatalogError = if (customFallback.isEmpty()) {
+                                "Unable to load ${state.selectedLanguageName} titles (${err.localizedMessage ?: "offline"})."
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun loadMoreLanguageCatalog() {
+        val state = _uiState.value
+        if (state.selectedLanguageCode.isBlank() ||
+            state.isLoadingLanguageCatalog ||
+            state.isLoadingMoreLanguageCatalog ||
+            !languageCatalogFeed.hasMore()
+        ) return
+
+        val langCode = state.selectedLanguageCode
+        val mediaType = state.languageCatalogMediaType
+        val sortBy = state.languageCatalogSortBy
+        val filters = DiscoverFilters(
+            mediaType = mediaType,
+            originalLanguage = langCode,
+            sortBy = sortBy
+        )
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreLanguageCatalog = true) }
+            val (updatedRaw, newFeed) = consumeNextBatch(
+                existingVisible = rawLanguageCatalog,
+                currentFeed = languageCatalogFeed,
+                batchSize = _uiState.value.batchSize,
+                fetcher = { page, needed -> repository.discoverCatalogBatch(filters, page, needed) }
+            )
+            rawLanguageCatalog = updatedRaw
+            languageCatalogFeed = newFeed
+            _uiState.update { current ->
+                val resolved = buildLanguageCatalogUiList(
+                    rawTmdbItems = updatedRaw,
+                    languageCode = langCode,
+                    mediaType = mediaType,
+                    sortBy = sortBy,
+                    mappedCustom = current.customMedia
+                )
+                current.copy(
+                    languageCatalogItems = resolved,
+                    languageCatalogTotalResults = maxOf(newFeed.totalResults, resolved.size),
+                    hasMoreLanguageCatalog = newFeed.hasMore(),
+                    isLoadingMoreLanguageCatalog = false
+                )
+            }
+        }
+    }
+
     fun selectGenre(genre: String) {
-        _uiState.update { it.copy(selectedGenre = genre) }
+        val current = _uiState.value.discoverFilters
+        val updatedGenres = if (genre.equals("All", ignoreCase = true)) {
+            emptySet()
+        } else {
+            setOf(genre)
+        }
+        applyDiscoverFilters(current.copy(selectedGenres = updatedGenres))
     }
 
     fun selectCategory(category: String) {
-        _uiState.update { it.copy(selectedCategory = category) }
+        val current = _uiState.value.discoverFilters
+        applyDiscoverFilters(current.copy(mediaType = category))
     }
 
     fun selectSortBy(sort: String) {
-        _uiState.update { it.copy(sortBy = sort) }
+        val current = _uiState.value.discoverFilters
+        applyDiscoverFilters(current.copy(sortBy = sort))
     }
 
     fun openDetails(media: MediaItem) {
         val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
-        _uiState.update { it.copy(selectedMedia = resolvedMedia) }
+        rawSimilarForSelected = emptyList()
+        _uiState.update { it.copy(selectedMedia = resolvedMedia, similarForSelectedMedia = emptyList()) }
         navigateTo(Screen.Details(resolvedMedia))
 
         val resolvedId = resolvedMedia.resolvedTmdbId()
@@ -750,6 +1704,19 @@ class MovieViewModel(
                         } else {
                             current
                         }
+                    }
+                }
+            }
+        }
+        if (resolvedId != null) {
+            viewModelScope.launch {
+                val similar = repository.fetchSimilarMedia(resolvedMedia)
+                if (similar.isNotEmpty() && _uiState.value.selectedMedia?.id == resolvedMedia.id) {
+                    rawSimilarForSelected = similar
+                    _uiState.update { current ->
+                        current.copy(
+                            similarForSelectedMedia = CatalogOverridePolicy.applyAdminOverrides(similar, current.customMedia)
+                        )
                     }
                 }
             }
@@ -922,14 +1889,24 @@ class MovieViewModel(
                 }.awaitAll().toMap()
             }
             rawTrending = rawTrending.map { enrichedMap[it.id] ?: it }
+            rawTrendingTv = rawTrendingTv.map { enrichedMap[it.id] ?: it }
             rawTopRatedTv = rawTopRatedTv.map { enrichedMap[it.id] ?: it }
             rawSearchResults = rawSearchResults.map { enrichedMap[it.id] ?: it }
+            rawLanguageCatalog = rawLanguageCatalog.map { enrichedMap[it.id] ?: it }
             _uiState.update { current ->
                 val overrides = current.customMedia
                 current.copy(
                     trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                    trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, overrides),
                     topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
                     searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, overrides),
+                    languageCatalogItems = buildLanguageCatalogUiList(
+                        rawTmdbItems = rawLanguageCatalog,
+                        languageCode = current.selectedLanguageCode,
+                        mediaType = current.languageCatalogMediaType,
+                        sortBy = current.languageCatalogSortBy,
+                        mappedCustom = overrides
+                    ),
                     selectedMedia = current.selectedMedia?.let { sel ->
                         CatalogOverridePolicy.resolveItemWithOverrides(enrichedMap[sel.id] ?: sel, overrides)
                     },
@@ -943,8 +1920,10 @@ class MovieViewModel(
 
     private fun applyEnrichedMediaToState(enriched: MediaItem) {
         rawTrending = rawTrending.map { if (it.id == enriched.id) enriched else it }
+        rawTrendingTv = rawTrendingTv.map { if (it.id == enriched.id) enriched else it }
         rawTopRatedTv = rawTopRatedTv.map { if (it.id == enriched.id) enriched else it }
         rawSearchResults = rawSearchResults.map { if (it.id == enriched.id) enriched else it }
+        rawLanguageCatalog = rawLanguageCatalog.map { if (it.id == enriched.id) enriched else it }
         _uiState.update { current ->
             val overrides = current.customMedia
             val resolvedEnriched = CatalogOverridePolicy.resolveItemWithOverrides(enriched, overrides)
@@ -960,8 +1939,16 @@ class MovieViewModel(
                     current.playingMedia
                 },
                 trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
+                trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, overrides),
                 topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
-                searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, overrides)
+                searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, overrides),
+                languageCatalogItems = buildLanguageCatalogUiList(
+                    rawTmdbItems = rawLanguageCatalog,
+                    languageCode = current.selectedLanguageCode,
+                    mediaType = current.languageCatalogMediaType,
+                    sortBy = current.languageCatalogSortBy,
+                    mappedCustom = overrides
+                )
             )
         }
         viewModelScope.launch {
@@ -1033,12 +2020,13 @@ class MovieViewModel(
 
 class MovieViewModelFactory(
     private val repository: MovieRepository,
-    private val userPreferences: UserPreferences? = null
+    private val userPreferences: UserPreferences? = null,
+    private val appContext: Context? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MovieViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return MovieViewModel(repository, userPreferences) as T
+            return MovieViewModel(repository, userPreferences, appContext) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

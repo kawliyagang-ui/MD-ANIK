@@ -5,6 +5,7 @@ import com.example.data.model.PlayerServer
 import com.example.data.repository.applyToMediaItem
 import com.example.data.repository.toEpisodeInfoList
 import com.example.ui.theme.DarkThemePalette
+import com.example.ui.theme.ThemeMode
 import com.example.ui.theme.ThemeTogglePolicy
 import com.example.ui.theme.buildMaterialColorScheme
 import com.example.ui.theme.paletteColorsFor
@@ -875,7 +876,455 @@ class ExampleUnitTest {
         )
         assertEquals("TV-MA", tvResp.extractBestCertification())
     }
+
+    @Test
+    fun testContentFeedHeaderTotalsUnderFiltersAndSearch() {
+        // Home database total aggregates movies + TV + admin custom items
+        assertEquals(
+            12505,
+            CatalogBatchPolicy.resolveHomeDatabaseTotal(
+                moviesTotalResults = 8000,
+                tvTotalResults = 4500,
+                trendingTotalResults = 1000,
+                customMediaCount = 5,
+                loadedUniqueCount = 120
+            )
+        )
+        assertEquals(
+            10,
+            CatalogBatchPolicy.resolveHomeDatabaseTotal(
+                moviesTotalResults = 0,
+                tvTotalResults = 0,
+                trendingTotalResults = 0,
+                customMediaCount = 3,
+                loadedUniqueCount = 10
+            )
+        )
+
+        // Explore unfiltered catalog uses full database total
+        assertEquals(
+            501,
+            CatalogBatchPolicy.resolveExploreFilteredTotal(
+                searchQuery = "",
+                selectedCategory = "movie",
+                selectedGenre = "All",
+                catalogTotalAvailable = 501,
+                searchTotalResults = 0,
+                filteredShownCount = 50
+            )
+        )
+        // Applying a genre filter switches to filtered count
+        assertEquals(
+            14,
+            CatalogBatchPolicy.resolveExploreFilteredTotal(
+                searchQuery = "",
+                selectedCategory = "All",
+                selectedGenre = "Sci-Fi",
+                catalogTotalAvailable = 90000,
+                searchTotalResults = 0,
+                filteredShownCount = 14
+            )
+        )
+        // Applying a search query uses TMDB search total when type/genre filters are All
+        assertEquals(
+            148,
+            CatalogBatchPolicy.resolveExploreFilteredTotal(
+                searchQuery = "inception",
+                selectedCategory = "All",
+                selectedGenre = "All",
+                catalogTotalAvailable = 90000,
+                searchTotalResults = 148,
+                filteredShownCount = 50
+            )
+        )
+        // Narrowing search results by category filter updates to filtered shown count
+        assertEquals(
+            9,
+            CatalogBatchPolicy.resolveExploreFilteredTotal(
+                searchQuery = "inception",
+                selectedCategory = "tv",
+                selectedGenre = "All",
+                catalogTotalAvailable = 90000,
+                searchTotalResults = 148,
+                filteredShownCount = 9
+            )
+        )
+
+        assertEquals("12,505 in database", CatalogBatchPolicy.formatTotalChipText(12505, isFiltered = false))
+        assertEquals("14 matching", CatalogBatchPolicy.formatTotalChipText(14, isFiltered = true))
+        assertEquals("Syncing...", CatalogBatchPolicy.formatTotalChipText(14, isFiltered = true, isLoading = true))
+    }
+
+    @Test
+    fun testDiscoverFiltersMatchingSortingAndTmdbParams() {
+        val sample = listOf(
+            MediaItem(
+                id = "m1",
+                title = "Old Boy",
+                overview = "Mystery thriller",
+                posterPath = "/1.jpg",
+                mediaType = "movie",
+                releaseDate = "2003-11-21",
+                voteAverage = 8.3,
+                genres = listOf("Thriller", "Mystery"),
+                originalLanguage = "ko",
+                originCountry = listOf("KR")
+            ),
+            MediaItem(
+                id = "m2",
+                title = "New Sci-Fi Hit",
+                overview = "Space adventure",
+                posterPath = "/2.jpg",
+                mediaType = "movie",
+                releaseDate = "2025-05-10",
+                voteAverage = 7.4,
+                genres = listOf("Sci-Fi", "Action"),
+                originalLanguage = "en",
+                originCountry = listOf("US")
+            ),
+            MediaItem(
+                id = "t1",
+                title = "Seoul Series",
+                overview = "Drama show",
+                posterPath = "/3.jpg",
+                mediaType = "tv",
+                releaseDate = "2024-02-01",
+                voteAverage = 9.1,
+                genres = listOf("Drama", "Mystery"),
+                originalLanguage = "ko",
+                originCountry = listOf("KR")
+            )
+        )
+
+        val defaultFilters = DiscoverFilters()
+        assertFalse(defaultFilters.hasAdvancedFilters())
+        assertEquals(0, defaultFilters.activeFilterCount())
+
+        val koreanMystery = DiscoverFilters(
+            mediaType = "tv",
+            selectedGenres = setOf("Mystery"),
+            releaseYear = 2024,
+            minRating = 8.0,
+            originalLanguage = "ko",
+            originCountry = "KR",
+            sortBy = "rating"
+        )
+        assertTrue(koreanMystery.hasAdvancedFilters())
+        assertEquals(7, koreanMystery.activeFilterCount())
+        assertEquals("9648", koreanMystery.tvGenreIdsQuery())
+        assertEquals("vote_average.desc", koreanMystery.toTmdbTvSortParam())
+
+        val matched = sample.filter { koreanMystery.matchesItem(it) }
+        assertEquals(listOf("t1"), matched.map { it.id })
+
+        val movieSortFilters = DiscoverFilters(
+            mediaType = "movie",
+            selectedGenres = setOf("Sci-Fi", "Action"),
+            sortBy = "newest"
+        )
+        assertEquals("primary_release_date.desc", movieSortFilters.toTmdbMovieSortParam())
+        assertEquals("878,28", movieSortFilters.movieGenreIdsQuery())
+        val sortedByRating = koreanMystery.sortItems(sample)
+        assertEquals(listOf("t1", "m1", "m2"), sortedByRating.map { it.id })
+        val sortedByNewest = movieSortFilters.sortItems(sample)
+        assertEquals(listOf("m2", "t1", "m1"), sortedByNewest.map { it.id })
+    }
+
+    @Test
+    fun testRecommendationPolicyRankingAndFallback() {
+        val pool = listOf(
+            MediaItem(id = "1", title = "Already Watched", overview = "", posterPath = "/1.jpg", voteAverage = 9.5, genres = listOf("Sci-Fi")),
+            MediaItem(id = "2", title = "Top Sci-Fi Pick", overview = "", posterPath = "/2.jpg", voteAverage = 8.2, genres = listOf("Sci-Fi", "Action")),
+            MediaItem(id = "3", title = "Pure Comedy", overview = "", posterPath = "/3.jpg", voteAverage = 8.9, genres = listOf("Comedy")),
+            MediaItem(id = "4", title = "Action Hit", overview = "", posterPath = "/4.jpg", voteAverage = 7.9, genres = listOf("Action"))
+        )
+
+        // Empty history fallback ranks by rating
+        val emptyHistoryRanked = RecommendationPolicy.rankRecommendedForYou(
+            candidatePool = pool,
+            continueWatching = emptyList(),
+            watchlist = emptyList()
+        )
+        assertEquals(listOf("1", "3", "2", "4"), emptyHistoryRanked.map { it.id })
+        assertEquals("Action", RecommendationPolicy.resolveTopPreferredGenre(emptyList(), emptyList()))
+        assertEquals(null, RecommendationPolicy.resolveBecauseYouWatchedAnchor(emptyList(), emptyList()))
+
+        // With ContinueWatching + Watchlist history, unseen titles matching preferred genres rise & watched is excluded
+        val cw = listOf(
+            ContinueWatchingEntity(
+                id = "1",
+                tmdbId = 101L,
+                title = "Already Watched",
+                overview = "",
+                posterPath = "/1.jpg",
+                mediaType = "movie",
+                genres = "Sci-Fi, Action",
+                progressPercent = 65
+            )
+        )
+        val wl = listOf(
+            WatchlistEntity(
+                id = "2",
+                tmdbId = 102L,
+                title = "Top Sci-Fi Pick",
+                overview = "",
+                posterPath = "/2.jpg",
+                mediaType = "movie",
+                genres = "Sci-Fi"
+            )
+        )
+        assertEquals("Sci-Fi", RecommendationPolicy.resolveTopPreferredGenre(cw, wl))
+        assertEquals("Already Watched", RecommendationPolicy.resolveBecauseYouWatchedAnchor(cw, wl)?.title)
+
+        val personalized = RecommendationPolicy.rankRecommendedForYou(pool, cw, wl)
+        assertFalse(personalized.any { it.id == "1" })
+        assertEquals("2", personalized.first().id)
+    }
+
+    @Test
+    fun testIssueReportEnumsAndFirestoreMapperRoundtrip() {
+        assertEquals(8, IssueReportCategory.entries.size)
+        assertEquals(IssueReportCategory.VIDEO_NOT_WORKING, IssueReportCategory.fromKey("video_not_working"))
+        assertEquals(IssueReportCategory.BROKEN_STREAM_LINK, IssueReportCategory.fromKey("Broken Streaming Link"))
+        assertEquals(IssueReportCategory.OTHER, IssueReportCategory.fromKey("nonexistent"))
+
+        assertEquals(IssueReportStatus.IN_REVIEW, IssueReportStatus.fromKey("IN_REVIEW"))
+        assertEquals(IssueReportStatus.RESOLVED, IssueReportStatus.fromKey("resolved"))
+        assertEquals(IssueReportStatus.OPEN, IssueReportStatus.fromKey(null))
+
+        val report = IssueReportEntity(
+            id = "rep_abc123",
+            category = IssueReportCategory.WRONG_SUBTITLE.storageKey,
+            description = "English subtitles are out of sync by 4 seconds.",
+            mediaId = "693134",
+            mediaTitle = "Dune: Part Two",
+            mediaType = "movie",
+            serverName = "Vidly Pro",
+            episodeLabel = "",
+            screenshotPreviewBase64 = "ZmFrZUJhc2U2NA==",
+            status = IssueReportStatus.IN_REVIEW.storageKey,
+            adminNotes = "Switching subtitle mirror.",
+            createdAt = 1_700_000_000_000L,
+            updatedAt = 1_700_000_500_000L
+        )
+        val map = CatalogSyncMappers.issueReportToMap(report)
+        val decoded = CatalogSyncMappers.issueReportFromMap("rep_abc123", map)!!
+
+        assertEquals(report.id, decoded.id)
+        assertEquals(report.category, decoded.category)
+        assertEquals(report.description, decoded.description)
+        assertEquals(report.mediaTitle, decoded.mediaTitle)
+        assertEquals(report.serverName, decoded.serverName)
+        assertEquals(report.screenshotPreviewBase64, decoded.screenshotPreviewBase64)
+        assertEquals("IN_REVIEW", decoded.status)
+        assertEquals("Switching subtitle mirror.", decoded.adminNotes)
+    }
+
+    @Test
+    fun testUpgradeThemesAccentColorsAndLanguages() {
+        assertEquals(ThemeMode.LIGHT, ThemeMode.fromKey("light"))
+        assertEquals(ThemeMode.SYSTEM, ThemeMode.fromKey("system"))
+        assertEquals(ThemeMode.DARK, ThemeMode.fromKey("invalid"))
+
+        assertEquals(AppLanguageOption.JAPANESE, AppLanguageOption.fromCode("ja-JP"))
+        assertEquals(AppLanguageOption.ENGLISH, AppLanguageOption.fromCode(null))
+
+        val lightCobalt = paletteColorsFor(
+            palette = DarkThemePalette.VELVET_CINEMA,
+            isLight = true,
+            accentOption = com.example.ui.theme.AccentColorOption.ELECTRIC_BLUE
+        )
+        assertTrue(lightCobalt.isLight)
+        assertEquals(com.example.ui.theme.LightCinemaColors.background, lightCobalt.background)
+        assertEquals(com.example.ui.theme.AccentColorOption.ELECTRIC_BLUE.primaryColor, lightCobalt.primary)
+
+        val darkCrimson = paletteColorsFor(
+            palette = DarkThemePalette.CRISP_SLATE,
+            isLight = false,
+            accentOption = com.example.ui.theme.AccentColorOption.CRIMSON_RED
+        )
+        assertFalse(darkCrimson.isLight)
+        assertEquals(com.example.ui.theme.AccentColorOption.CRIMSON_RED.primaryColor, darkCrimson.primary)
+        val lightScheme = buildMaterialColorScheme(lightCobalt)
+        assertEquals(lightCobalt.background, lightScheme.background)
+        assertEquals(lightCobalt.primary, lightScheme.primary)
+    }
+
+    @Test
+    fun testUpcomingReleasePolicyStrictFutureMoviesAndTvHighPopularity() {
+        val today = "2026-11-16"
+        val candidates = listOf(
+            // Past movie (already released) -> MUST BE EXCLUDED
+            MediaItem(
+                id = "past_movie",
+                title = "Already Out Movie",
+                overview = "",
+                posterPath = "/1.jpg",
+                mediaType = "movie",
+                releaseDate = "2026-11-15",
+                popularity = 420.0
+            ),
+            // Released TODAY -> MUST BE EXCLUDED from Upcoming
+            MediaItem(
+                id = "today_tv",
+                title = "Released Today Series",
+                overview = "",
+                posterPath = "/2.jpg",
+                mediaType = "tv",
+                releaseDate = "2026-11-16",
+                popularity = 510.0
+            ),
+            // Unparseable year-only / blank date -> MUST BE EXCLUDED
+            MediaItem(
+                id = "year_only",
+                title = "Vague Date",
+                overview = "",
+                posterPath = "/3.jpg",
+                mediaType = "movie",
+                releaseDate = "2027",
+                popularity = 300.0
+            ),
+            // Future date, but low popularity -> MUST BE EXCLUDED
+            MediaItem(
+                id = "future_low_pop",
+                title = "Obscure Future Short",
+                overview = "",
+                posterPath = "/4.jpg",
+                mediaType = "movie",
+                releaseDate = "2026-12-01",
+                popularity = 2.4
+            ),
+            // Future high-popularity TV series -> INCLUDED (#2 by popularity)
+            MediaItem(
+                id = "future_tv_hit",
+                title = "Dune: Prophecy S2",
+                overview = "",
+                posterPath = "/5.jpg",
+                mediaType = "tv",
+                releaseDate = "2026-12-10",
+                popularity = 180.5
+            ),
+            // Future high-popularity movie -> INCLUDED (#1 by popularity)
+            MediaItem(
+                id = "future_movie_hit",
+                title = "Avatar: Fire & Ash",
+                overview = "",
+                posterPath = "/6.jpg",
+                mediaType = "movie",
+                releaseDate = "2026-12-19",
+                popularity = 395.2
+            )
+        )
+
+        val upcoming = UpcomingReleasePolicy.filterStrictUpcoming(
+            items = candidates,
+            todayIso = today
+        )
+
+        assertEquals(listOf("future_movie_hit", "future_tv_hit"), upcoming.map { it.id })
+        assertTrue(upcoming.all { UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) })
+        assertTrue(upcoming.all { it.popularity >= UpcomingReleasePolicy.MIN_UPCOMING_POPULARITY })
+    }
+
+    @Test
+    fun testNewReleasePolicyDailyUpdatesAndNoFutureLeakage() {
+        val nowMillis = 1_794_844_800_000L // fixed epoch timestamp
+        val today = UpcomingReleasePolicy.todayIsoDate(nowMillis)
+        val yesterday = UpcomingReleasePolicy.daysAgoIsoDate(1, nowMillis)
+        val tomorrow = UpcomingReleasePolicy.tomorrowIsoDate(nowMillis)
+
+        val tmdbPool = listOf(
+            // Future release must NOT appear in New Releases
+            MediaItem(
+                id = "future_item",
+                title = "Future Movie",
+                overview = "",
+                posterPath = "/f.jpg",
+                mediaType = "movie",
+                releaseDate = tomorrow,
+                popularity = 500.0
+            ),
+            // Released yesterday (movie)
+            MediaItem(
+                id = "yesterday_movie",
+                title = "Yesterday Drop",
+                overview = "",
+                posterPath = "/y.jpg",
+                mediaType = "movie",
+                releaseDate = yesterday,
+                popularity = 60.0
+            ),
+            // Released today (TV series)
+            MediaItem(
+                id = "today_tv_drop",
+                title = "Daily Series Drop",
+                overview = "",
+                posterPath = "/t.jpg",
+                mediaType = "tv",
+                releaseDate = today,
+                popularity = 42.0
+            )
+        )
+
+        val adminUploadedToday = CustomMediaEntity(
+            id = "custom_daily_upload",
+            title = "Admin Daily Upload",
+            overview = "Uploaded today",
+            posterPath = "https://example.com/p.jpg",
+            mediaType = "movie",
+            releaseDate = today,
+            voteAverage = 8.5,
+            createdAt = nowMillis
+        )
+
+        val merged = NewReleasePolicy.mergeDailyNewReleases(
+            dailyTmdbItems = tmdbPool,
+            customMediaEntities = listOf(adminUploadedToday),
+            todayIso = today,
+            nowMillis = nowMillis
+        )
+
+        assertFalse(merged.any { it.id == "future_item" })
+        assertEquals(
+            listOf("custom_daily_upload", "today_tv_drop", "yesterday_movie"),
+            merged.map { it.id }
+        )
+    }
+
+    @Test
+    fun testBrowseLanguagesCatalogAndDiscoveryFiltering() {
+        val languages = TmdbFilterCatalog.browseLanguages
+        assertTrue(languages.size >= 20)
+        assertEquals(languages.size, languages.distinctBy { it.code }.size)
+        assertTrue(languages.all { it.code.isNotBlank() && it.name.isNotBlank() && it.nativeName.isNotBlank() })
+
+        // Verify originalLanguages in Explore stays in sync with browseLanguages
+        val expectedCodes = listOf("") + languages.map { it.code }
+        assertEquals(expectedCodes, TmdbFilterCatalog.originalLanguages.map { it.code })
+
+        // Lookup by code (case-insensitive)
+        val hindi = TmdbFilterCatalog.browseLanguageByCode("HI")
+        assertEquals("Hindi", hindi?.name)
+        assertEquals("HI", hindi?.badgeCode)
+
+        val tamil = TmdbFilterCatalog.browseLanguageByCode("ta")
+        assertEquals("Tamil", tamil?.name)
+
+        // DiscoverFilters filters items cleanly for a specific language
+        val catalog = listOf(
+            MediaItem(id = "hi_1", title = "Hindi Film", overview = "", posterPath = "/1.jpg", mediaType = "movie", originalLanguage = "hi", voteAverage = 8.4),
+            MediaItem(id = "ta_1", title = "Tamil Film", overview = "", posterPath = "/2.jpg", mediaType = "movie", originalLanguage = "ta", voteAverage = 8.1),
+            MediaItem(id = "ko_1", title = "K-Drama", overview = "", posterPath = "/3.jpg", mediaType = "tv", originalLanguage = "ko", voteAverage = 9.0)
+        )
+        val hindiFilter = DiscoverFilters(originalLanguage = "hi")
+        assertEquals(listOf("hi_1"), catalog.filter { hindiFilter.matchesItem(it) }.map { it.id })
+
+        val koreanTvFilter = DiscoverFilters(mediaType = "tv", originalLanguage = "ko")
+        assertEquals(listOf("ko_1"), catalog.filter { koreanTvFilter.matchesItem(it) }.map { it.id })
+    }
 }
+
+
 
 
 

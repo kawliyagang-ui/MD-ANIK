@@ -36,9 +36,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -69,9 +72,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CatalogBatchPolicy
+import com.example.data.model.DiscoverFilters
 import com.example.data.model.MediaItem
 import com.example.data.model.TmdbSearchHistoryEntity
+import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
+import com.example.ui.components.CatalogCountChip
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
@@ -110,14 +116,12 @@ fun SearchScreen(
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
     val focusRequester = remember { FocusRequester() }
-    var selectedTypeFilter by remember { mutableStateOf("All") }
+    var searchFilters by remember { mutableStateOf(DiscoverFilters()) }
+    var showFilterSheet by remember { mutableStateOf(false) }
 
-    val filteredResults = remember(searchResults, selectedTypeFilter) {
-        when (selectedTypeFilter) {
-            "movie" -> searchResults.filter { it.mediaType.equals("movie", ignoreCase = true) }
-            "tv" -> searchResults.filter { it.mediaType.equals("tv", ignoreCase = true) }
-            else -> searchResults
-        }
+    val filteredResults = remember(searchResults, searchFilters) {
+        val matched = searchResults.filter { searchFilters.matchesItem(it) }
+        searchFilters.sortItems(matched)
     }
 
     LaunchedEffect(Unit) {
@@ -209,7 +213,7 @@ fun SearchScreen(
                     )
                 }
 
-                // Type Filter Pills when querying or results exist
+                // Type Filter + Advanced Filters Pills when querying or results exist
                 AnimatedVisibility(
                     visible = searchQuery.isNotBlank(),
                     enter = fadeIn(tween(180)) + expandVertically(),
@@ -218,15 +222,16 @@ fun SearchScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                             .padding(start = 8.dp, end = 8.dp, top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         listOf("All" to "All", "movie" to "Movies", "tv" to "TV Series").forEach { (key, label) ->
-                            val isSelected = selectedTypeFilter == key
+                            val isSelected = searchFilters.mediaType == key
                             FilterChip(
                                 selected = isSelected,
-                                onClick = { selectedTypeFilter = key },
+                                onClick = { searchFilters = searchFilters.copy(mediaType = key) },
                                 label = {
                                     Text(
                                         text = label,
@@ -243,7 +248,33 @@ fun SearchScreen(
                                 modifier = Modifier.testTag("search_type_filter_$key")
                             )
                         }
-                        Spacer(modifier = Modifier.weight(1f))
+                        val advCount = searchFilters.activeFilterCount()
+                        FilterChip(
+                            selected = advCount > 0,
+                            onClick = { showFilterSheet = true },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Filters",
+                                    tint = if (advCount > 0) Color.White else colors.gold,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = if (advCount > 0) "Filters ($advCount)" else "Filters",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = colors.accentMid,
+                                selectedLabelColor = Color.White,
+                                containerColor = colors.surfaceElevated,
+                                labelColor = colors.textPrimary
+                            ),
+                            modifier = Modifier.testTag("search_advanced_filters_button")
+                        )
                         BatchSizeChip(
                             batchSize = batchSize,
                             onToggleBatchSize = onBatchSizeChange,
@@ -342,7 +373,8 @@ fun SearchScreen(
         }
 
         // Status / Results Count Bar
-        val effectiveSearchTotal = if (selectedTypeFilter == "All") {
+        val isSearchOrTypeFiltered = searchQuery.isNotBlank() || searchFilters.hasAdvancedFilters()
+        val effectiveSearchTotal = if (!searchFilters.hasAdvancedFilters()) {
             maxOf(totalResultsCount, filteredResults.size)
         } else {
             filteredResults.size
@@ -353,7 +385,7 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 text = when {
@@ -385,6 +417,15 @@ fun SearchScreen(
                         color = colors.gold
                     )
                 }
+            }
+
+            if (searchQuery.isNotBlank()) {
+                CatalogCountChip(
+                    totalAvailable = effectiveSearchTotal,
+                    isFiltered = isSearchOrTypeFiltered,
+                    isLoading = isSearching,
+                    testTag = "search_header_count_chip"
+                )
             }
         }
 
@@ -572,5 +613,13 @@ fun SearchScreen(
                 }
             }
         }
+    }
+
+    if (showFilterSheet) {
+        AdvancedFilterSheet(
+            currentFilters = searchFilters,
+            onApplyFilters = { searchFilters = it },
+            onDismiss = { showFilterSheet = false }
+        )
     }
 }

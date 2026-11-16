@@ -23,7 +23,10 @@ data class TmdbItemDto(
     @param:Json(name = "release_date") val releaseDate: String? = null,
     @param:Json(name = "first_air_date") val firstAirDate: String? = null,
     @param:Json(name = "vote_average") val voteAverage: Double? = 0.0,
+    val popularity: Double? = 0.0,
     @param:Json(name = "genre_ids") val genreIds: List<Int>? = emptyList(),
+    @param:Json(name = "original_language") val originalLanguage: String? = null,
+    @param:Json(name = "origin_country") val originCountry: List<String>? = emptyList(),
     @param:Json(name = "number_of_seasons") val numberOfSeasons: Int? = null,
     @param:Json(name = "number_of_episodes") val numberOfEpisodes: Int? = null
 )
@@ -46,6 +49,16 @@ data class TmdbSeasonSummaryDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class TmdbAirEpisodeDto(
+    val id: Long? = null,
+    val name: String? = null,
+    val overview: String? = null,
+    @param:Json(name = "air_date") val airDate: String? = null,
+    @param:Json(name = "episode_number") val episodeNumber: Int? = null,
+    @param:Json(name = "season_number") val seasonNumber: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class TmdbTvDetailsDto(
     val id: Long,
     val name: String? = null,
@@ -55,8 +68,13 @@ data class TmdbTvDetailsDto(
     @param:Json(name = "first_air_date") val firstAirDate: String? = null,
     @param:Json(name = "vote_average") val voteAverage: Double? = 0.0,
     val genres: List<TmdbGenreDto>? = emptyList(),
+    @param:Json(name = "original_language") val originalLanguage: String? = null,
+    @param:Json(name = "origin_country") val originCountry: List<String>? = emptyList(),
     @param:Json(name = "number_of_seasons") val numberOfSeasons: Int? = null,
     @param:Json(name = "number_of_episodes") val numberOfEpisodes: Int? = null,
+    @param:Json(name = "last_episode_to_air") val lastEpisodeToAir: TmdbAirEpisodeDto? = null,
+    @param:Json(name = "next_episode_to_air") val nextEpisodeToAir: TmdbAirEpisodeDto? = null,
+    val status: String? = null,
     val seasons: List<TmdbSeasonSummaryDto>? = emptyList()
 )
 

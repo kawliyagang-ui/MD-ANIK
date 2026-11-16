@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.MediaItem
 import com.example.ui.components.BatchSizeChip
+import com.example.ui.components.CatalogCountChip
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.theme.CineTheme
@@ -97,6 +98,13 @@ fun CategoryListScreen(
             "newest" -> typeFiltered.sortedByDescending { it.releaseDate }
             else -> typeFiltered
         }
+    }
+
+    val isTypeFiltered = selectedType != "All"
+    val effectiveTotal = if (isTypeFiltered) {
+        displayedItems.size
+    } else {
+        maxOf(totalAvailableCount, displayedItems.size)
     }
 
     BackHandler(onBack = onBack)
@@ -148,7 +156,7 @@ fun CategoryListScreen(
                         Text(
                             text = CatalogBatchPolicy.formatAvailabilitySummary(
                                 shownCount = displayedItems.size,
-                                totalAvailable = maxOf(totalAvailableCount, displayedItems.size)
+                                totalAvailable = effectiveTotal
                             ),
                             fontSize = 11.sp,
                             color = colors.textSecondary
@@ -233,6 +241,12 @@ fun CategoryListScreen(
                         batchSize = batchSize,
                         onToggleBatchSize = onBatchSizeChange,
                         testTag = "category_batch_size_chip"
+                    )
+
+                    CatalogCountChip(
+                        totalAvailable = effectiveTotal,
+                        isFiltered = isTypeFiltered,
+                        testTag = "category_header_count_chip"
                     )
                 }
 

@@ -29,6 +29,7 @@ import com.example.ui.theme.CineTheme
 fun CineGradientButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     brush: Brush = CineTheme.gradients.primaryCta,
     shape: Shape = RoundedCornerShape(10.dp),
     fillWidth: Boolean = false,
@@ -38,13 +39,17 @@ fun CineGradientButton(
 ) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
-            contentColor = Color.White
+            contentColor = Color.White,
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = Color.White.copy(alpha = 0.65f)
         ),
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp,
-            pressedElevation = 0.dp
+            pressedElevation = 0.dp,
+            disabledElevation = 0.dp
         ),
         contentPadding = PaddingValues(0.dp),
         shape = shape,
@@ -55,7 +60,7 @@ fun CineGradientButton(
                 .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
                 .defaultMinSize(minHeight = minHeight)
                 .clip(shape)
-                .background(brush)
+                .background(brush, alpha = if (enabled) 1f else 0.55f)
                 .border(0.75.dp, Color.White.copy(alpha = 0.16f), shape)
                 .padding(contentPadding),
             contentAlignment = Alignment.Center

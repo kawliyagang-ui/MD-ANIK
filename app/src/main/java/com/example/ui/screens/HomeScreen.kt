@@ -25,16 +25,25 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MovieFilter
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
@@ -57,13 +66,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.AdminAnnouncementEntity
+import com.example.data.model.BrowseLanguageOption
 import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.MediaItem
+import com.example.data.model.TmdbFilterCatalog
 import com.example.data.model.mergeWithCatalog
 import com.example.data.model.toMediaItem
 import com.example.ui.components.AnnouncementBanner
+import com.example.ui.components.CatalogCountChip
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.GenreFilterBar
 import com.example.ui.components.HeroBanner
@@ -72,6 +84,7 @@ import com.example.ui.components.HomeCatalogSkeleton
 import com.example.ui.components.HomeGenreCatalog
 import com.example.ui.components.HorizontalMovieListSkeleton
 import com.example.ui.components.MovieCard
+import com.example.ui.components.TopTenCard
 import com.example.ui.theme.CineTheme
 
 @Composable
@@ -99,11 +112,27 @@ fun HomeScreen(
     onSearchClick: () -> Unit = {},
     trendingTotalResults: Int = trending.size,
     popularMoviesTotalResults: Int = popularMovies.size,
-    topRatedTvTotalResults: Int = topRatedTv.size
+    topRatedTvTotalResults: Int = topRatedTv.size,
+    trendingMovies: List<MediaItem> = emptyList(),
+    trendingMoviesTotalResults: Int = trendingMovies.size,
+    trendingTv: List<MediaItem> = emptyList(),
+    trendingTvTotalResults: Int = trendingTv.size,
+    newReleases: List<MediaItem> = emptyList(),
+    newReleasesTotalResults: Int = newReleases.size,
+    upcomingMovies: List<MediaItem> = emptyList(),
+    upcomingMoviesTotalResults: Int = upcomingMovies.size,
+    topRatedMovies: List<MediaItem> = emptyList(),
+    topRatedMoviesTotalResults: Int = topRatedMovies.size,
+    recommendedForYou: List<MediaItem> = emptyList(),
+    becauseYouWatchedTitle: String = "",
+    becauseYouWatchedItems: List<MediaItem> = emptyList(),
+    popularInGenreName: String = "Action",
+    popularInGenreItems: List<MediaItem> = emptyList(),
+    onLanguageClick: (code: String, name: String) -> Unit = { _, _ -> }
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
-    val isCatalogEmpty = trending.isEmpty() && popularMovies.isEmpty() && topRatedTv.isEmpty()
+    val isCatalogEmpty = trending.isEmpty() && popularMovies.isEmpty() && topRatedTv.isEmpty() && trendingMovies.isEmpty()
 
     if (isLoading && isCatalogEmpty && continueWatching.isEmpty() && customMedia.isEmpty()) {
         HomeCatalogSkeleton(modifier = modifier)
@@ -114,6 +143,12 @@ fun HomeScreen(
     val availableGenres = remember(trending) { HomeGenreCatalog.availableGenres(trending) }
     val filteredTrending = remember(trending, selectedHomeGenre) {
         HomeGenreCatalog.filterByGenre(trending, selectedHomeGenre)
+    }
+    val topTenMoviesList = remember(trendingMovies, popularMovies) {
+        (trendingMovies.ifEmpty { popularMovies }).take(10)
+    }
+    val topTenTvList = remember(trendingTv, topRatedTv) {
+        (trendingTv.ifEmpty { topRatedTv }).take(10)
     }
 
     Column(
@@ -166,6 +201,59 @@ fun HomeScreen(
 
         // Active Admin Announcement Notices
         AnnouncementBanner(announcements = announcements)
+
+        // Content Feed Header with Live Database / Filtered Item Count Chip
+        val allLoadedUnique = remember(
+            trending, trendingMovies, trendingTv, popularMovies, upcomingMovies, topRatedMovies, topRatedTv, customMedia
+        ) {
+            (trending + trendingMovies + trendingTv + popularMovies + upcomingMovies + topRatedMovies + topRatedTv + customMedia)
+                .distinctBy { it.id }
+        }
+        val isHomeGenreFiltered = !selectedHomeGenre.equals("All", ignoreCase = true)
+        val homeFeedTotalAvailable = remember(
+            isHomeGenreFiltered,
+            selectedHomeGenre,
+            popularMoviesTotalResults,
+            topRatedTvTotalResults,
+            trendingTotalResults,
+            customMedia.size,
+            allLoadedUnique
+        ) {
+            if (isHomeGenreFiltered) {
+                HomeGenreCatalog.filterByGenre(allLoadedUnique, selectedHomeGenre).size
+            } else {
+                CatalogBatchPolicy.resolveHomeDatabaseTotal(
+                    moviesTotalResults = popularMoviesTotalResults,
+                    tvTotalResults = topRatedTvTotalResults,
+                    trendingTotalResults = trendingTotalResults,
+                    customMediaCount = customMedia.size,
+                    loadedUniqueCount = allLoadedUnique.size
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("home_feed_header"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = if (isHomeGenreFiltered) "Content Feed • $selectedHomeGenre" else "Content Feed",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                ),
+                color = colors.textPrimary
+            )
+            CatalogCountChip(
+                totalAvailable = homeFeedTotalAvailable,
+                isFiltered = isHomeGenreFiltered,
+                isLoading = isLoading && isCatalogEmpty,
+                testTag = "home_catalog_total_chip"
+            )
+        }
 
         // Real TMDB Network Error / Empty Catalog State (never fake fallback content)
         if (isCatalogEmpty && !isLoading) {
@@ -223,8 +311,8 @@ fun HomeScreen(
 
         // Continue Watching Row (if any)
         if (continueWatching.isNotEmpty()) {
-            val catalogById = remember(trending, popularMovies, topRatedTv, customMedia) {
-                (trending + popularMovies + topRatedTv + customMedia).associateBy { it.id }
+            val catalogById = remember(allLoadedUnique) {
+                allLoadedUnique.associateBy { it.id }
             }
             MediaSectionRow(
                 title = "Continue Watching",
@@ -278,6 +366,113 @@ fun HomeScreen(
             HorizontalMovieListSkeleton(titleWidth = 162.dp)
         }
 
+        // New Releases (Daily Updated Movies & TV Series)
+        if (newReleases.isNotEmpty()) {
+            MediaSectionRow(
+                title = "New Releases",
+                countSummary = "DAILY • " + CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = newReleases.size,
+                    totalAvailable = maxOf(newReleasesTotalResults, newReleases.size)
+                ),
+                icon = Icons.Default.NewReleases,
+                iconColor = colors.gold,
+                onSeeAllClick = { onSeeAllClick("NewReleases") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("home_new_releases_row")
+                ) {
+                    items(newReleases, key = { "new_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Top 10 Movies (Netflix-style numbered poster cards)
+        if (topTenMoviesList.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Top 10 Movies",
+                countSummary = "TOP 10",
+                icon = Icons.Default.EmojiEvents,
+                iconColor = colors.gold,
+                onSeeAllClick = { onSeeAllClick("Top10Movies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("home_top10_movies_row")
+                ) {
+                    items(topTenMoviesList.size, key = { idx -> "top10_m_${topTenMoviesList[idx].id}" }) { idx ->
+                        val item = topTenMoviesList[idx]
+                        TopTenCard(
+                            rank = idx + 1,
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Top 10 TV Series (Netflix-style numbered poster cards)
+        if (topTenTvList.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Top 10 TV Series",
+                countSummary = "TOP 10",
+                icon = Icons.Default.EmojiEvents,
+                iconColor = colors.softRose,
+                onSeeAllClick = { onSeeAllClick("Top10Tv") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("home_top10_tv_row")
+                ) {
+                    items(topTenTvList.size, key = { idx -> "top10_tv_${topTenTvList[idx].id}" }) { idx ->
+                        val item = topTenTvList[idx]
+                        TopTenCard(
+                            rank = idx + 1,
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Smart Recommendations: Recommended For You
+        if (recommendedForYou.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Recommended For You",
+                countSummary = "SMART PICK",
+                icon = Icons.Default.AutoAwesome,
+                iconColor = colors.softRose,
+                onSeeAllClick = { onSeeAllClick("TopRatedMovies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("home_recommended_for_you_row")
+                ) {
+                    items(recommendedForYou, key = { "rec_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
         // Trending Now Section with Genre-Based Filtering UI
         if (trending.isNotEmpty()) {
             TrendingGenreSection(
@@ -297,6 +492,111 @@ fun HomeScreen(
                 onSeeAllClick = { onSeeAllClick("Trending") },
                 onBrowseGenreInExplore = { onBrowseGenreInExplore(selectedHomeGenre) }
             )
+        }
+
+        // Trending Movies Row
+        if (trendingMovies.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Trending Movies",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = trendingMovies.size,
+                    totalAvailable = maxOf(trendingMoviesTotalResults, trendingMovies.size)
+                ),
+                icon = Icons.AutoMirrored.Filled.TrendingUp,
+                iconColor = colors.softRose,
+                onSeeAllClick = { onSeeAllClick("TrendingMovies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(trendingMovies, key = { "tm_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Trending TV Shows Row
+        if (trendingTv.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Trending TV Shows",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = trendingTv.size,
+                    totalAvailable = maxOf(trendingTvTotalResults, trendingTv.size)
+                ),
+                icon = Icons.Default.Tv,
+                iconColor = colors.info,
+                onSeeAllClick = { onSeeAllClick("TrendingTv") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(trendingTv, key = { "ttv_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Smart Recommendations: Because You Watched
+        if (becauseYouWatchedItems.isNotEmpty()) {
+            val becauseTitle = if (becauseYouWatchedTitle.isNotBlank()) {
+                "Because You Watched $becauseYouWatchedTitle"
+            } else {
+                "Critically Acclaimed Picks"
+            }
+            MediaSectionRow(
+                title = becauseTitle,
+                icon = Icons.Default.ThumbUp,
+                iconColor = colors.gold,
+                onSeeAllClick = { onSeeAllClick("TopRatedMovies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(becauseYouWatchedItems, key = { "bcw_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Smart Recommendations: Popular In Your Genre
+        if (popularInGenreItems.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Popular in $popularInGenreName",
+                icon = Icons.Default.MovieFilter,
+                iconColor = colors.softRose,
+                onSeeAllClick = { onBrowseGenreInExplore(popularInGenreName) }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(popularInGenreItems, key = { "pig_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
         }
 
         // Custom Cinetra / Admin Added Titles
@@ -340,6 +640,67 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(popularMovies, key = { it.id }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Upcoming Movies & TV Series Row (Strict Future Releases + High Popularity)
+        if (upcomingMovies.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Upcoming Movies & Series",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = upcomingMovies.size,
+                    totalAvailable = maxOf(upcomingMoviesTotalResults, upcomingMovies.size)
+                ),
+                icon = Icons.Default.Event,
+                iconColor = colors.gold,
+                onSeeAllClick = { onSeeAllClick("UpcomingMovies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("home_upcoming_row")
+                ) {
+                    items(upcomingMovies, key = { "upc_${it.id}" }) { item ->
+                        MovieCard(
+                            media = item,
+                            onClick = { onMediaClick(item) },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
+
+        // Browse by Language Section directly below Upcoming
+        LanguagesBrowseSection(
+            languages = TmdbFilterCatalog.browseLanguages,
+            onLanguageClick = onLanguageClick
+        )
+
+        // Top Rated Movies Row
+        if (topRatedMovies.isNotEmpty()) {
+            MediaSectionRow(
+                title = "Top Rated Movies",
+                countSummary = CatalogBatchPolicy.formatCompactHeaderTotal(
+                    shownCount = topRatedMovies.size,
+                    totalAvailable = maxOf(topRatedMoviesTotalResults, topRatedMovies.size)
+                ),
+                icon = Icons.Default.Star,
+                iconColor = colors.gold,
+                onSeeAllClick = { onSeeAllClick("TopRatedMovies") }
+            ) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(topRatedMovies, key = { "trm_${it.id}" }) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -711,5 +1072,120 @@ private fun MediaSectionRow(
 
         Spacer(modifier = Modifier.height(4.dp))
         content()
+    }
+}
+
+@Composable
+private fun LanguagesBrowseSection(
+    languages: List<BrowseLanguageOption>,
+    onLanguageClick: (code: String, name: String) -> Unit
+) {
+    val colors = CineTheme.colors
+    val gradients = CineTheme.gradients
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+            .testTag("home_languages_section")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = colors.softRose,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Browse by Language",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    ),
+                    color = colors.textPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "${languages.size} languages",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.testTag("home_languages_row")
+        ) {
+            items(languages, key = { "lang_${it.code}" }) { lang ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .widthIn(min = 148.dp)
+                        .minimumInteractiveComponentSize()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.surfaceElevated)
+                        .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                        .clickable { onLanguageClick(lang.code, lang.name) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .testTag("home_language_card_${lang.code}")
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(gradients.softBadge)
+                            .border(1.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = lang.badgeCode,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Text(
+                            text = lang.name,
+                            color = colors.textPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = lang.nativeName,
+                            color = colors.textSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Browse ${lang.name}",
+                        tint = colors.gold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
     }
 }

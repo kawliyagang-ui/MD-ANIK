@@ -53,12 +53,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
+import com.example.data.model.DiscoverFilters
 import com.example.data.model.TmdbSearchHistoryEntity
+import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
+import com.example.ui.components.CatalogCountChip
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
@@ -93,10 +99,19 @@ fun ExploreScreen(
     isLoadingMore: Boolean = false,
     onBatchSizeChange: (Int) -> Unit = {},
     onLoadMore: () -> Unit = {},
+    discoverFilters: DiscoverFilters = DiscoverFilters(),
+    discoverResults: List<MediaItem> = emptyList(),
+    discoverTotalResults: Int = 0,
+    isLoadingDiscover: Boolean = false,
+    isLoadingMoreDiscover: Boolean = false,
+    hasMoreDiscover: Boolean = false,
+    onApplyDiscoverFilters: (DiscoverFilters) -> Unit = {},
+    onLoadMoreDiscover: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
+    var showFilterSheet by remember { mutableStateOf(false) }
     val genres = remember {
         listOf(
             "All", "Action", "Adventure", "Animation", "Comedy", "Crime",
@@ -108,26 +123,69 @@ fun ExploreScreen(
         listOf("All", "movie", "tv")
     }
 
-    // Determine displayed items
-    val baseList = if (searchQuery.isNotBlank()) searchResults else allTitles
+    // Determine displayed items: Search > TMDB Discover API (when advanced criteria active) > Loaded Catalog
+    val isSearchActive = searchQuery.isNotBlank()
+    val useDiscoverMode = !isSearchActive && (discoverFilters.hasDiscoverApiCriteria() || discoverResults.isNotEmpty())
+    val baseList = when {
+        isSearchActive -> searchResults
+        useDiscoverMode -> discoverResults
+        else -> allTitles
+    }
 
-    val filteredList = remember(baseList, selectedCategory, selectedGenre, sortBy) {
-        var list = baseList
-
-        if (selectedCategory != "All") {
-            list = list.filter { it.mediaType.equals(selectedCategory, ignoreCase = true) }
-        }
-
-        if (selectedGenre != "All") {
-            list = list.filter { item ->
-                item.genres.any { it.contains(selectedGenre, ignoreCase = true) }
+    val filteredList = remember(baseList, discoverFilters, selectedCategory, selectedGenre, sortBy, useDiscoverMode) {
+        if (useDiscoverMode) {
+            discoverFilters.sortItems(baseList)
+        } else {
+            var list = baseList
+            if (selectedCategory != "All") {
+                list = list.filter { it.mediaType.equals(selectedCategory, ignoreCase = true) }
             }
+            if (selectedGenre != "All") {
+                list = list.filter { item ->
+                    item.genres.any { it.contains(selectedGenre, ignoreCase = true) }
+                }
+            }
+            discoverFilters.sortItems(list.filter { discoverFilters.matchesItem(it) })
         }
+    }
 
-        when (sortBy) {
-            "rating" -> list.sortedByDescending { it.voteAverage }
-            "newest" -> list.sortedByDescending { it.releaseDate }
-            else -> list // Default order
+    val hasActiveFilterOrSearch = isSearchActive || discoverFilters.hasAdvancedFilters() ||
+        !selectedCategory.equals("All", ignoreCase = true) ||
+        !selectedGenre.equals("All", ignoreCase = true)
+
+    val effectiveHasMore = when {
+        useDiscoverMode -> hasMoreDiscover
+        else -> hasMore
+    }
+    val effectiveIsLoadingMore = when {
+        useDiscoverMode -> isLoadingMoreDiscover
+        else -> isLoadingMore
+    }
+    val effectiveOnLoadMore: () -> Unit = when {
+        useDiscoverMode -> onLoadMoreDiscover
+        else -> onLoadMore
+    }
+
+    val displayTotal = remember(
+        searchQuery,
+        selectedCategory,
+        selectedGenre,
+        totalAvailableCount,
+        filteredList.size,
+        useDiscoverMode,
+        discoverTotalResults
+    ) {
+        if (useDiscoverMode) {
+            maxOf(discoverTotalResults, filteredList.size)
+        } else {
+            CatalogBatchPolicy.resolveExploreFilteredTotal(
+                searchQuery = searchQuery,
+                selectedCategory = selectedCategory,
+                selectedGenre = selectedGenre,
+                catalogTotalAvailable = totalAvailableCount,
+                searchTotalResults = totalAvailableCount,
+                filteredShownCount = filteredList.size
+            )
         }
     }
 
@@ -136,12 +194,39 @@ fun ExploreScreen(
             .fillMaxSize()
             .background(gradients.appBackdrop)
     ) {
-        // Search Header -> Tapping opens dedicated Search & Results Page
+        // Content Feed Header with Live Database Total Chip & Search Bar
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .testTag("explore_feed_header"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = when {
+                        isSearchActive -> "Search Results"
+                        hasActiveFilterOrSearch -> "Filtered Feed"
+                        else -> "Catalog Feed"
+                    },
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    ),
+                    color = colors.textPrimary
+                )
+                CatalogCountChip(
+                    totalAvailable = displayTotal,
+                    isFiltered = hasActiveFilterOrSearch,
+                    isLoading = isSearching || (isLoadingCatalog && filteredList.isEmpty()),
+                    testTag = "explore_catalog_total_chip"
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -292,6 +377,35 @@ fun ExploreScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                // Advanced Filter Panel button
+                val advCount = discoverFilters.activeFilterCount()
+                FilterChip(
+                    selected = advCount > 0,
+                    onClick = { showFilterSheet = true },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Advanced Filters",
+                            tint = if (advCount > 0) Color.White else colors.softRose,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = if (advCount > 0) "Filters ($advCount)" else "Filters",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = colors.accentMid,
+                        selectedLabelColor = Color.White,
+                        containerColor = colors.surfaceElevated,
+                        labelColor = colors.textPrimary
+                    ),
+                    modifier = Modifier.testTag("explore_advanced_filters_button")
+                )
+
                 // Sort toggle (Popular / Rating / Newest)
                 FilterChip(
                     selected = sortBy != "popular",
@@ -347,8 +461,36 @@ fun ExploreScreen(
                     onToggleBatchSize = onBatchSizeChange,
                     testTag = "explore_batch_size_chip"
                 )
+                if (discoverFilters.releaseYear != null) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(releaseYear = null)) },
+                        label = { Text("Year: ${discoverFilters.releaseYear} ✕", fontSize = 11.sp) }
+                    )
+                }
+                if (discoverFilters.minRating > 0.0) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(minRating = 0.0)) },
+                        label = { Text("${discoverFilters.minRating.toInt()}+ ★ ✕", fontSize = 11.sp) }
+                    )
+                }
+                if (discoverFilters.originalLanguage.isNotBlank()) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originalLanguage = "")) },
+                        label = { Text("Lang: ${discoverFilters.originalLanguage.uppercase()} ✕", fontSize = 11.sp) }
+                    )
+                }
+                if (discoverFilters.originCountry.isNotBlank()) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originCountry = "")) },
+                        label = { Text("Country: ${discoverFilters.originCountry} ✕", fontSize = 11.sp) }
+                    )
+                }
                 genres.forEach { genre ->
-                    val isSelected = selectedGenre == genre
+                    val isSelected = selectedGenre == genre || genre in discoverFilters.selectedGenres
                     FilterChip(
                         selected = isSelected,
                         onClick = { onGenreSelect(genre) },
@@ -367,13 +509,8 @@ fun ExploreScreen(
 
         // Search status & result count
         val showSkeletonGrid = (isSearching && filteredList.isEmpty()) ||
+            (isLoadingDiscover && filteredList.isEmpty()) ||
             (isLoadingCatalog && searchQuery.isBlank() && filteredList.isEmpty())
-
-        val displayTotal = if (selectedGenre == "All") {
-            maxOf(totalAvailableCount, filteredList.size)
-        } else {
-            filteredList.size
-        }
 
         Row(
             modifier = Modifier
@@ -396,7 +533,7 @@ fun ExploreScreen(
                 fontWeight = FontWeight.Medium
             )
 
-            if (isSearching || isLoadingMore || (isLoadingCatalog && filteredList.isEmpty())) {
+            if (isSearching || effectiveIsLoadingMore || isLoadingDiscover || (isLoadingCatalog && filteredList.isEmpty())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
                         color = colors.softRose,
@@ -406,7 +543,8 @@ fun ExploreScreen(
                     Text(
                         text = when {
                             isSearching -> "Fetching results"
-                            isLoadingMore -> "Loading batch"
+                            isLoadingDiscover -> "Filtering catalog"
+                            effectiveIsLoadingMore -> "Loading batch"
                             else -> "Syncing TMDb"
                         },
                         fontSize = 11.sp,
@@ -460,7 +598,7 @@ fun ExploreScreen(
                     }
                 }
             }
-        } else if (filteredList.isEmpty() && !isSearching) {
+        } else if (filteredList.isEmpty() && !isSearching && !isLoadingDiscover) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -497,7 +635,7 @@ fun ExploreScreen(
                         color = colors.textSecondary,
                         textAlign = TextAlign.Center
                     )
-                    if (selectedCategory != "All" || selectedGenre != "All" || searchQuery.isNotBlank()) {
+                    if (hasActiveFilterOrSearch) {
                         Spacer(modifier = Modifier.height(16.dp))
                         OutlinedButton(
                             onClick = onResetFilters,
@@ -516,16 +654,16 @@ fun ExploreScreen(
             }
         } else {
             val gridState = rememberLazyGridState()
-            val shouldAutoLoadMore by remember(hasMore, isLoadingMore, filteredList.size) {
+            val shouldAutoLoadMore by remember(effectiveHasMore, effectiveIsLoadingMore, filteredList.size) {
                 derivedStateOf {
                     val total = gridState.layoutInfo.totalItemsCount
                     val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    hasMore && !isLoadingMore && total > 8 && lastVisible >= total - 4
+                    effectiveHasMore && !effectiveIsLoadingMore && total > 8 && lastVisible >= total - 4
                 }
             }
             LaunchedEffect(shouldAutoLoadMore) {
                 if (shouldAutoLoadMore) {
-                    onLoadMore()
+                    effectiveOnLoadMore()
                 }
             }
 
@@ -552,13 +690,21 @@ fun ExploreScreen(
                         shownCount = filteredList.size,
                         totalAvailable = displayTotal,
                         batchSize = batchSize,
-                        hasMore = hasMore,
-                        isLoadingMore = isLoadingMore,
-                        onLoadMore = onLoadMore,
+                        hasMore = effectiveHasMore,
+                        isLoadingMore = effectiveIsLoadingMore,
+                        onLoadMore = effectiveOnLoadMore,
                         testTag = "explore_load_more_button"
                     )
                 }
             }
         }
+    }
+
+    if (showFilterSheet) {
+        AdvancedFilterSheet(
+            currentFilters = discoverFilters,
+            onApplyFilters = onApplyDiscoverFilters,
+            onDismiss = { showFilterSheet = false }
+        )
     }
 }

@@ -43,7 +43,12 @@ data class MediaItem(
     val numberOfSeasons: Int = 1,
     val episodesPerSeason: Int = 10,
     val totalEpisodes: Int? = null,
-    val seasons: List<SeasonInfo> = emptyList()
+    val seasons: List<SeasonInfo> = emptyList(),
+    val originalLanguage: String = "",
+    val originCountry: List<String> = emptyList(),
+    val latestEpisodeLabel: String = "",
+    val nextAirDate: String = "",
+    val popularity: Double = 0.0
 ) {
     val fullPosterUrl: String
         get() = when {
