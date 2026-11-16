@@ -24,6 +24,7 @@ import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.PlayerServer
 import com.example.data.model.RecommendationPolicy
+import com.example.data.model.SearchSuggestionPolicy
 import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.data.model.UpcomingReleasePolicy
 import com.example.data.model.WatchlistEntity
@@ -191,6 +192,9 @@ data class UserUiState(
     val isLoading: Boolean = true,
     val isSearching: Boolean = false,
     val searchErrorMessage: String? = null,
+    val searchSuggestions: List<MediaItem> = emptyList(),
+    val isFetchingSuggestions: Boolean = false,
+    val showSearchSuggestions: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -224,6 +228,8 @@ class MovieViewModel(
     private var latestAdConfig: AdConfigEntity? = null
     private var hasLoadedAdConfig: Boolean = false
     private var searchJob: Job? = null
+    private var suggestionJob: Job? = null
+    private var searchHistoryCommitJob: Job? = null
     private var languageCatalogJob: Job? = null
     private var hasCheckedReleasesThisSession = false
 
@@ -237,6 +243,7 @@ class MovieViewModel(
     private var rawTopRatedMovies: List<MediaItem> = emptyList()
     private var rawTopRatedTv: List<MediaItem> = emptyList()
     private var rawSearchResults: List<MediaItem> = emptyList()
+    private var rawSearchSuggestions: List<MediaItem> = emptyList()
     private var rawDiscoverResults: List<MediaItem> = emptyList()
     private var rawLanguageCatalog: List<MediaItem> = emptyList()
     private var rawRecommendedForYou: List<MediaItem> = emptyList()
@@ -438,6 +445,14 @@ class MovieViewModel(
                         topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedMovies, mappedCustom),
                         topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, mappedCustom),
                         searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, mappedCustom),
+                        searchSuggestions = CatalogOverridePolicy.applyAdminOverrides(
+                            SearchSuggestionPolicy.rankSuggestions(
+                                tmdbItems = rawSearchSuggestions,
+                                customMedia = mappedCustom,
+                                query = current.searchQuery
+                            ),
+                            mappedCustom
+                        ),
                         discoverResults = CatalogOverridePolicy.applyAdminOverrides(rawDiscoverResults, mappedCustom),
                         languageCatalogItems = buildLanguageCatalogUiList(
                             rawTmdbItems = rawLanguageCatalog,
@@ -1141,8 +1156,11 @@ class MovieViewModel(
 
     fun onSearchQueryChange(query: String) {
         searchJob?.cancel()
+        suggestionJob?.cancel()
+        searchHistoryCommitJob?.cancel()
         if (query.isBlank()) {
             rawSearchResults = emptyList()
+            rawSearchSuggestions = emptyList()
             searchFeed = FeedPaginationState()
             _uiState.update {
                 it.copy(
@@ -1152,11 +1170,20 @@ class MovieViewModel(
                     hasMoreSearch = false,
                     isLoadingMoreSearch = false,
                     isSearching = false,
-                    searchErrorMessage = null
+                    searchErrorMessage = null,
+                    searchSuggestions = emptyList(),
+                    isFetchingSuggestions = false,
+                    showSearchSuggestions = false
                 )
             }
             return
         }
+        val trimmedQuery = query.trim()
+        val instantSeed = SearchSuggestionPolicy.rankSuggestions(
+            tmdbItems = (rawSearchSuggestions + rawTrending + rawPopularMovies + rawTopRatedMovies + rawTopRatedTv),
+            customMedia = _uiState.value.customMedia,
+            query = trimmedQuery
+        )
         _uiState.update {
             it.copy(
                 searchQuery = query,
@@ -1165,62 +1192,176 @@ class MovieViewModel(
                 searchTotalResults = 0,
                 hasMoreSearch = false,
                 isLoadingMoreSearch = false,
-                searchErrorMessage = null
+                searchErrorMessage = null,
+                searchSuggestions = instantSeed,
+                isFetchingSuggestions = true,
+                showSearchSuggestions = true
             )
         }
-        searchJob = viewModelScope.launch {
-            delay(350) // Debounce
-            val trimmedQuery = query.trim()
-            if (trimmedQuery.length >= 2) {
-                repository.saveTmdbSearch(trimmedQuery)
-            }
-            val targetBatch = _uiState.value.batchSize
-            val result = repository.searchTitlesBatch(
-                query = trimmedQuery,
-                startPage = 1,
-                neededCount = targetBatch
-            )
-            result.fold(
-                onSuccess = { batch ->
-                    val initialItems = batch.items.take(targetBatch)
-                    rawSearchResults = initialItems
-                    searchFeed = FeedPaginationState(
-                        nextPage = batch.lastFetchedPage + 1,
-                        totalPages = batch.totalPages,
-                        totalResults = batch.totalResults,
-                        buffer = batch.items.drop(initialItems.size)
+
+        // Fast real-time TMDB autocomplete suggestions (150ms debounce)
+        suggestionJob = viewModelScope.launch {
+            delay(150)
+            repository.fetchSearchSuggestions(trimmedQuery).fold(
+                onSuccess = { remoteSuggestions ->
+                    val ranked = SearchSuggestionPolicy.rankSuggestions(
+                        tmdbItems = remoteSuggestions,
+                        customMedia = _uiState.value.customMedia,
+                        query = trimmedQuery
                     )
+                    rawSearchSuggestions = ranked
                     _uiState.update { current ->
-                        current.copy(
-                            searchResults = CatalogOverridePolicy.applyAdminOverrides(initialItems, current.customMedia),
-                            searchTotalResults = maxOf(batch.totalResults, initialItems.size),
-                            hasMoreSearch = searchFeed.hasMore(),
-                            isSearching = false,
-                            searchErrorMessage = null
-                        )
-                    }
-                    val tvSearchItems = initialItems
-                        .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
-                        .take(15)
-                    if (tvSearchItems.isNotEmpty()) {
-                        enrichTvItemsInBackground(tvSearchItems)
+                        if (current.searchQuery.trim() != trimmedQuery) {
+                            current
+                        } else {
+                            current.copy(
+                                searchSuggestions = CatalogOverridePolicy.applyAdminOverrides(ranked, current.customMedia),
+                                isFetchingSuggestions = false
+                            )
+                        }
                     }
                 },
-                onFailure = { err ->
-                    rawSearchResults = emptyList()
-                    searchFeed = FeedPaginationState()
-                    _uiState.update {
-                        it.copy(
-                            searchResults = emptyList(),
-                            searchTotalResults = 0,
-                            hasMoreSearch = false,
-                            isSearching = false,
-                            searchErrorMessage = "TMDb search failed (${err.localizedMessage ?: "offline"}). Check connection and try again."
-                        )
+                onFailure = {
+                    _uiState.update { current ->
+                        current.copy(isFetchingSuggestions = false)
                     }
                 }
             )
         }
+
+        // Full paginated search results grid (380ms debounce)
+        searchJob = viewModelScope.launch {
+            delay(380)
+            executeFullSearchBatch(trimmedQuery)
+        }
+
+        // Commit query to search history once typing settles (prevents partial keystroke spam)
+        if (trimmedQuery.length >= 2) {
+            searchHistoryCommitJob = viewModelScope.launch {
+                delay(1100)
+                repository.saveTmdbSearch(trimmedQuery)
+            }
+        }
+    }
+
+    fun submitSearchQuery(query: String = _uiState.value.searchQuery) {
+        val trimmed = query.trim()
+        searchHistoryCommitJob?.cancel()
+        _uiState.update { it.copy(showSearchSuggestions = false) }
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            if (trimmed.length >= 2) {
+                repository.saveTmdbSearch(trimmed)
+            }
+            if (rawSearchResults.isEmpty() || _uiState.value.searchQuery.trim() != trimmed) {
+                searchJob?.cancel()
+                _uiState.update { it.copy(searchQuery = trimmed, isSearching = true, searchErrorMessage = null) }
+                executeFullSearchBatch(trimmed)
+            }
+        }
+    }
+
+    fun applySearchSuggestionQuery(suggestedTitle: String) {
+        val clean = suggestedTitle.trim()
+        if (clean.isBlank()) return
+        suggestionJob?.cancel()
+        searchJob?.cancel()
+        searchHistoryCommitJob?.cancel()
+        _uiState.update {
+            it.copy(
+                searchQuery = clean,
+                showSearchSuggestions = false,
+                isFetchingSuggestions = false,
+                isSearching = true,
+                searchErrorMessage = null
+            )
+        }
+        viewModelScope.launch {
+            if (clean.length >= 2) {
+                repository.saveTmdbSearch(clean)
+            }
+            executeFullSearchBatch(clean)
+        }
+    }
+
+    fun selectSearchSuggestion(media: MediaItem) {
+        searchHistoryCommitJob?.cancel()
+        _uiState.update { it.copy(showSearchSuggestions = false) }
+        if (media.title.trim().length >= 2) {
+            viewModelScope.launch {
+                repository.saveTmdbSearch(media.title.trim())
+            }
+        }
+        openDetails(media)
+    }
+
+    fun dismissSearchSuggestions() {
+        _uiState.update { it.copy(showSearchSuggestions = false) }
+    }
+
+    fun showSearchSuggestionsIfAvailable() {
+        if (_uiState.value.searchQuery.isNotBlank()) {
+            _uiState.update { it.copy(showSearchSuggestions = true) }
+        }
+    }
+
+    private suspend fun executeFullSearchBatch(trimmedQuery: String) {
+        val targetBatch = _uiState.value.batchSize
+        val result = repository.searchTitlesBatch(
+            query = trimmedQuery,
+            startPage = 1,
+            neededCount = targetBatch
+        )
+        result.fold(
+            onSuccess = { batch ->
+                val initialItems = batch.items.take(targetBatch)
+                rawSearchResults = initialItems
+                searchFeed = FeedPaginationState(
+                    nextPage = batch.lastFetchedPage + 1,
+                    totalPages = batch.totalPages,
+                    totalResults = batch.totalResults,
+                    buffer = batch.items.drop(initialItems.size)
+                )
+                _uiState.update { current ->
+                    val updatedSuggestions = if (current.searchSuggestions.isEmpty()) {
+                        SearchSuggestionPolicy.rankSuggestions(
+                            tmdbItems = initialItems,
+                            customMedia = current.customMedia,
+                            query = trimmedQuery
+                        )
+                    } else {
+                        current.searchSuggestions
+                    }
+                    current.copy(
+                        searchResults = CatalogOverridePolicy.applyAdminOverrides(initialItems, current.customMedia),
+                        searchTotalResults = maxOf(batch.totalResults, initialItems.size),
+                        hasMoreSearch = searchFeed.hasMore(),
+                        isSearching = false,
+                        searchErrorMessage = null,
+                        searchSuggestions = CatalogOverridePolicy.applyAdminOverrides(updatedSuggestions, current.customMedia)
+                    )
+                }
+                val tvSearchItems = initialItems
+                    .filter { it.mediaType == "tv" && it.seasons.isEmpty() }
+                    .take(15)
+                if (tvSearchItems.isNotEmpty()) {
+                    enrichTvItemsInBackground(tvSearchItems)
+                }
+            },
+            onFailure = { err ->
+                rawSearchResults = emptyList()
+                searchFeed = FeedPaginationState()
+                _uiState.update {
+                    it.copy(
+                        searchResults = emptyList(),
+                        searchTotalResults = 0,
+                        hasMoreSearch = false,
+                        isSearching = false,
+                        searchErrorMessage = "TMDb search failed (${err.localizedMessage ?: "offline"}). Check connection and try again."
+                    )
+                }
+            }
+        )
     }
 
     fun loadMoreSearchResults() {

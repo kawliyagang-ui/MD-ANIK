@@ -1322,6 +1322,78 @@ class ExampleUnitTest {
         val koreanTvFilter = DiscoverFilters(mediaType = "tv", originalLanguage = "ko")
         assertEquals(listOf("ko_1"), catalog.filter { koreanTvFilter.matchesItem(it) }.map { it.id })
     }
+
+    @Test
+    fun testSearchSuggestionPolicyRankingAndTypeFiltering() {
+        val tmdbCandidates = listOf(
+            MediaItem(
+                id = "1",
+                title = "The Dune Chronicles",
+                overview = "",
+                posterPath = "/1.jpg",
+                mediaType = "tv",
+                popularity = 95.0,
+                voteAverage = 7.9
+            ),
+            MediaItem(
+                id = "2",
+                title = "Dune: Part Two",
+                overview = "",
+                posterPath = "/2.jpg",
+                mediaType = "movie",
+                popularity = 410.0,
+                voteAverage = 8.4
+            ),
+            MediaItem(
+                id = "3",
+                title = "Dune",
+                overview = "",
+                posterPath = "/3.jpg",
+                mediaType = "movie",
+                popularity = 210.0,
+                voteAverage = 7.8
+            ),
+            MediaItem(
+                id = "4",
+                title = "Dune Messenger",
+                overview = "",
+                posterPath = "",
+                mediaType = "movie",
+                popularity = 350.0,
+                voteAverage = 7.5
+            )
+        )
+        val customCandidates = listOf(
+            MediaItem(
+                id = "custom_dune",
+                title = "Dune Special Cut",
+                overview = "",
+                posterPath = "/c.jpg",
+                mediaType = "movie",
+                popularity = 120.0,
+                voteAverage = 8.9
+            )
+        )
+
+        assertTrue(SearchSuggestionPolicy.rankSuggestions(tmdbCandidates, customCandidates, "   ").isEmpty())
+
+        val ranked = SearchSuggestionPolicy.rankSuggestions(
+            tmdbItems = tmdbCandidates,
+            customMedia = customCandidates,
+            query = "dune"
+        )
+        // Exact match "Dune" comes first; prefix matches prioritize poster+popularity; substring "The Dune Chronicles" last
+        assertEquals("3", ranked.first().id)
+        assertEquals("1", ranked.last().id)
+        assertTrue(ranked.any { it.id == "custom_dune" })
+
+        val onlyTv = SearchSuggestionPolicy.filterByMediaType(ranked, "tv")
+        assertEquals(listOf("1"), onlyTv.map { it.id })
+
+        val onlyMovies = SearchSuggestionPolicy.filterByMediaType(ranked, "movie")
+        assertFalse(onlyMovies.any { it.mediaType == "tv" })
+        assertEquals(4, onlyMovies.size)
+    }
 }
 
 

@@ -20,6 +20,7 @@ import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
+import com.example.data.model.SearchSuggestionPolicy
 import com.example.data.model.SeasonInfo
 import com.example.data.model.TmdbFilterCatalog
 import com.example.data.model.TmdbItemDto
@@ -56,6 +57,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 class MovieRepository(
@@ -76,6 +78,7 @@ class MovieRepository(
     private val tvDetailsCache = ConcurrentHashMap<Long, TmdbTvDetailsDto>()
     private val tvSeasonEpisodesCache = ConcurrentHashMap<Pair<Long, Int>, List<EpisodeInfo>>()
     private val certificationCache = ConcurrentHashMap<String, String>()
+    private val searchSuggestionCache = ConcurrentHashMap<String, List<MediaItem>>()
     @Volatile
     var currentLanguageCode: String = "en-US"
 
@@ -926,6 +929,51 @@ class MovieRepository(
             val response = TmdbClient.apiService.getTopRatedTv(TmdbClient.apiKey)
             val items = response.results.filter { it.posterPath != null }.map { it.toMediaItem(defaultType = "tv") }
             Result.success(items)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchSearchSuggestions(
+        query: String,
+        limit: Int = SearchSuggestionPolicy.MAX_SUGGESTIONS
+    ): Result<List<MediaItem>> = withContext(Dispatchers.IO) {
+        val cleanQuery = query.trim()
+        if (cleanQuery.length < SearchSuggestionPolicy.MIN_QUERY_LENGTH) {
+            return@withContext Result.success(emptyList())
+        }
+        val cacheKey = "${currentLanguageCode}_${cleanQuery.lowercase(Locale.US)}"
+        searchSuggestionCache[cacheKey]?.let { cached ->
+            return@withContext Result.success(cached.take(limit))
+        }
+        try {
+            val response = TmdbClient.apiService.searchMulti(
+                apiKey = TmdbClient.apiKey,
+                query = cleanQuery,
+                page = 1,
+                language = currentLanguageCode
+            )
+            val candidates = response.results
+                .asSequence()
+                .filter { dto ->
+                    val typeOk = dto.mediaType == "movie" || dto.mediaType == "tv" || dto.mediaType == null
+                    val titleOk = !dto.title.isNullOrBlank() || !dto.name.isNullOrBlank()
+                    typeOk && titleOk
+                }
+                .map { it.toMediaItem() }
+                .distinctBy { it.id }
+                .take(limit * 2)
+                .toList()
+
+            if (searchSuggestionCache.size > 80) {
+                searchSuggestionCache.clear()
+            }
+            if (candidates.isNotEmpty()) {
+                searchSuggestionCache[cacheKey] = candidates
+            }
+            Result.success(candidates.take(limit))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

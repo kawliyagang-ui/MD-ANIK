@@ -818,7 +818,15 @@ fun CinetraApp() {
                                     hasMore = userState.hasMoreSearch,
                                     isLoadingMore = userState.isLoadingMoreSearch,
                                     onBatchSizeChange = { movieViewModel.setBatchSize(it) },
-                                    onLoadMore = { movieViewModel.loadMoreSearchResults() }
+                                    onLoadMore = { movieViewModel.loadMoreSearchResults() },
+                                    searchSuggestions = userState.searchSuggestions,
+                                    isFetchingSuggestions = userState.isFetchingSuggestions,
+                                    showSuggestions = userState.showSearchSuggestions,
+                                    onSubmitSearch = { movieViewModel.submitSearchQuery(it) },
+                                    onSuggestionMediaClick = { movieViewModel.selectSearchSuggestion(it) },
+                                    onSuggestionFillQuery = { movieViewModel.applySearchSuggestionQuery(it) },
+                                    onDismissSuggestions = { movieViewModel.dismissSearchSuggestions() },
+                                    onSearchFieldFocusWithQuery = { movieViewModel.showSearchSuggestionsIfAvailable() }
                                 )
                             }
                             is Screen.CategoryList -> {

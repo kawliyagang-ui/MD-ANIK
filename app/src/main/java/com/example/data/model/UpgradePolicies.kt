@@ -481,3 +481,49 @@ object NewReleasePolicy {
     }
 }
 
+object SearchSuggestionPolicy {
+    const val MIN_QUERY_LENGTH = 1
+    const val MAX_SUGGESTIONS = 8
+
+    fun rankSuggestions(
+        tmdbItems: List<MediaItem>,
+        customMedia: List<MediaItem>,
+        query: String,
+        limit: Int = MAX_SUGGESTIONS
+    ): List<MediaItem> {
+        val cleanQuery = query.trim().lowercase(Locale.US)
+        if (cleanQuery.length < MIN_QUERY_LENGTH) return emptyList()
+
+        val customMatches = customMedia.filter { item ->
+            item.title.lowercase(Locale.US).contains(cleanQuery)
+        }
+        val combined = (customMatches + tmdbItems)
+            .asSequence()
+            .filter { it.title.isNotBlank() }
+            .distinctBy { it.id }
+            .toList()
+
+        return combined
+            .sortedWith(
+                compareByDescending<MediaItem> { it.title.lowercase(Locale.US) == cleanQuery }
+                    .thenByDescending { it.title.lowercase(Locale.US).startsWith(cleanQuery) }
+                    .thenByDescending { it.title.lowercase(Locale.US).contains(cleanQuery) }
+                    .thenByDescending { it.posterPath.isNotBlank() }
+                    .thenByDescending { it.popularity }
+                    .thenByDescending { it.voteAverage }
+            )
+            .take(limit)
+    }
+
+    fun filterByMediaType(
+        suggestions: List<MediaItem>,
+        mediaType: String
+    ): List<MediaItem> {
+        if (mediaType.equals("All", ignoreCase = true) || mediaType.isBlank()) {
+            return suggestions
+        }
+        return suggestions.filter { it.mediaType.equals(mediaType, ignoreCase = true) }
+    }
+}
+
+
