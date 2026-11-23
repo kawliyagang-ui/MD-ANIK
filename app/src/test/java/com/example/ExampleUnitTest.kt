@@ -1394,10 +1394,359 @@ class ExampleUnitTest {
         assertFalse(onlyMovies.any { it.mediaType == "tv" })
         assertEquals(4, onlyMovies.size)
     }
+
+    @Test
+    fun testWebTorrentPolicyAndStreamResolution() {
+        val sampleMagnet = "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel"
+        val torrentUrl = "https://webtorrent.io/torrents/sintel.torrent"
+        val hexHash = "08ada5a7a6183aae1e09d831df6748d566095a10"
+        val base32Hash = "BCVKLJ5GDA5K4HQJ3AZ56Z6NKS3ASWQW"
+
+        assertTrue(com.example.ui.components.WebTorrentPolicy.isMagnetUri(sampleMagnet))
+        assertTrue(com.example.ui.components.WebTorrentPolicy.isTorrentFileUrl(torrentUrl))
+        assertTrue(com.example.ui.components.WebTorrentPolicy.isInfoHash(hexHash))
+        assertTrue(com.example.ui.components.WebTorrentPolicy.isInfoHash(base32Hash))
+        assertFalse(com.example.ui.components.WebTorrentPolicy.isWebTorrentSource("27205"))
+        assertFalse(com.example.ui.components.WebTorrentPolicy.isWebTorrentSource("https://vidly.pro/movie/27205"))
+
+        val normalizedMagnet = com.example.ui.components.WebTorrentPolicy.normalizeTorrentId(sampleMagnet, "Sintel")
+        assertTrue(normalizedMagnet.startsWith(sampleMagnet))
+        assertTrue(normalizedMagnet.contains("openwebtorrent"))
+
+        val normalizedFromHash = com.example.ui.components.WebTorrentPolicy.normalizeTorrentId(hexHash, "Sintel")
+        assertTrue(normalizedFromHash.startsWith("magnet:?xt=urn:btih:$hexHash"))
+        assertTrue(normalizedFromHash.contains("dn=Sintel"))
+        assertTrue(normalizedFromHash.contains("openwebtorrent"))
+
+        assertEquals("0 B/s", com.example.ui.components.WebTorrentPolicy.formatSpeed(0L))
+        assertEquals("512 B/s", com.example.ui.components.WebTorrentPolicy.formatSpeed(512L))
+        assertEquals("1.5 KB/s", com.example.ui.components.WebTorrentPolicy.formatSpeed(1536L))
+        assertEquals("2.00 MB/s", com.example.ui.components.WebTorrentPolicy.formatSpeed(2L * 1024L * 1024L))
+
+        assertEquals("1.5 MB", com.example.ui.components.WebTorrentPolicy.formatBytes(1536L * 1024L))
+        assertEquals("1.00 GB", com.example.ui.components.WebTorrentPolicy.formatBytes(1024L * 1024L * 1024L))
+
+        val html = com.example.ui.components.WebTorrentPolicy.buildWebTorrentPlayerHtml(
+            torrentId = sampleMagnet,
+            title = "Sintel",
+            season = 1,
+            episode = 2,
+            isTv = true
+        )
+        assertTrue(html.contains("new window.WebTorrent({"))
+        assertTrue(html.contains("stun:stun.l.google.com:19302"))
+        assertTrue(html.contains("stun:stun.cloudflare.com:3478"))
+        assertTrue(html.contains("installSafeRtcShim"))
+        assertTrue(html.contains("addIceCandidate"))
+        assertTrue(html.contains("setRemoteDescription"))
+        assertTrue(html.contains("file.renderTo(videoEl"))
+        assertTrue(html.contains("CinetraWebTorrentBridge"))
+        assertTrue(html.contains("CinetraPlayerBridge"))
+
+        // MediaItem with magnet link preserves magnet URI across servers
+        val magnetMovie = MediaItem(
+            id = "custom_sintel",
+            title = "Sintel",
+            overview = "Open movie",
+            posterPath = "",
+            mediaType = "movie",
+            vidlyId = sampleMagnet
+        )
+        assertTrue(magnetMovie.isWebTorrentStream())
+        assertTrue(magnetMovie.getStreamUrl(PlayerServer.VIDLY).startsWith("magnet:?xt=urn:btih:"))
+        assertTrue(magnetMovie.getStreamUrl(PlayerServer.WEBTORRENT).startsWith("magnet:?xt=urn:btih:"))
+
+        // Standard TMDB item under PlayerServer.WEBTORRENT returns blank to trigger inline magnet prompt
+        val regularMovie = MediaItem(
+            id = "27205",
+            tmdbId = 27205L,
+            title = "Inception",
+            overview = "Dream",
+            posterPath = "",
+            mediaType = "movie",
+            vidlyId = "27205"
+        )
+        assertFalse(regularMovie.isWebTorrentStream())
+        assertEquals("", regularMovie.getStreamUrl(PlayerServer.WEBTORRENT))
+
+        // PlayerControlsPolicy allows WebTorrent CDN/origin while still blocking ad popups
+        assertTrue(
+            com.example.ui.components.PlayerControlsPolicy.shouldAllowNavigation(
+                url = "https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js",
+                currentStreamUrl = "https://webtorrent.io/",
+                isForMainFrame = false
+            )
+        )
+    }
+
+    @Test
+    fun testMovieBoxApiParsingAndDownloadHelpers() {
+        val searchJson = """
+            {
+              "code": 0,
+              "data": {
+                "items": [
+                  {
+                    "subjectId": "8906247916759695608",
+                    "subjectType": 1,
+                    "title": "Inception",
+                    "releaseDate": "2010-07-16",
+                    "imdbRatingValue": "8.8",
+                    "detailPath": "inception-2010-abc",
+                    "hasResource": true,
+                    "cover": { "url": "https://img.example.com/inception.jpg" }
+                  },
+                  {
+                    "subjectId": "111222333",
+                    "subjectType": 2,
+                    "title": "Inception: The Documentary Series",
+                    "releaseDate": "2022-01-01",
+                    "detailPath": "inception-doc",
+                    "hasResource": true
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val subjects = com.example.data.remote.MovieBoxApiClient.parseSearchResponseJson(searchJson)
+        assertEquals(2, subjects.size)
+        assertEquals("8906247916759695608", subjects[0].subjectId)
+        assertEquals("inception-2010-abc", subjects[0].detailPath)
+        assertEquals("2010", subjects[0].releaseYear)
+
+        val targetMovie = MediaItem(
+            id = "27205",
+            tmdbId = 27205L,
+            title = "Inception",
+            overview = "Dreams",
+            posterPath = "",
+            mediaType = "movie",
+            releaseDate = "2010-07-16"
+        )
+        val bestSubject = com.example.data.remote.MovieBoxApiClient.pickBestSubjectCandidate(targetMovie, subjects)
+        assertEquals("8906247916759695608", bestSubject?.subjectId)
+
+        val downloadJson = """
+            {
+              "code": 0,
+              "data": {
+                "downloads": [
+                  { "id": "d_360", "url": "https://cdn.example.com/v_360.mp4", "resolution": 360, "size": 314572800 },
+                  { "id": "d_vip", "url": "", "resolution": 1080, "size": 2414667149, "vipLocked": true },
+                  { "id": "d_720", "url": "https://cdn.example.com/v_720.mp4", "resolution": 720, "size": 734003200 }
+                ],
+                "streams": [
+                  { "id": "s_720_dup", "url": "https://cdn2.example.com/v_720_alt.mp4", "resolutions": "720", "size": "734003200" },
+                  { "id": "s_1080", "url": "https://cdn.example.com/v_1080.mp4", "resolutions": "1080", "size": "1610612736" }
+                ],
+                "captions": [
+                  { "id": "c_en", "lan": "en", "lanName": "English", "url": "https://cdn.example.com/en.srt", "size": 45000 }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val bundle = com.example.data.remote.MovieBoxApiClient.parseDownloadResponseJson(
+            json = downloadJson,
+            subject = subjects[0],
+            sourceHost = "https://h5.inmoviebox.com"
+        )
+        assertEquals(3, bundle.options.size)
+        assertEquals(1080, bundle.options[0].resolution)
+        assertEquals("https://cdn.example.com/v_1080.mp4", bundle.options[0].downloadUrl)
+        assertEquals("https://h5.inmoviebox.com/", bundle.options[0].refererHeader)
+        assertEquals("https://cdn.example.com/v_720.mp4", bundle.options[1].downloadUrl)
+        assertEquals("1080p Full HD", bundle.options[0].resolutionLabel)
+        assertEquals(1, bundle.subtitles.size)
+        assertEquals("English", bundle.subtitles[0].languageName)
+
+        val picked720 = com.example.data.remote.MovieBoxApiClient.pickOptionForPreferredQuality(
+            bundle.options,
+            com.example.data.model.PreferredDownloadQuality.Q720P
+        )
+        assertEquals(720, picked720?.resolution)
+
+        // Mobile BFF signing & client token format (OpenStream La94/Li63 compatible)
+        val ts = 1763856000000L
+        val clientToken = com.example.data.remote.MovieBoxApiClient.computeClientToken(ts)
+        assertTrue(clientToken.startsWith("1763856000000,"))
+        assertEquals(32, clientToken.substringAfter(',').length)
+
+        val sigGetA = com.example.data.remote.MovieBoxApiClient.computeTrSignature(
+            method = "GET",
+            url = "https://api4sg.aoneroom.com/wefeed-mobile-bff/subject-api/play-info?se=1&subjectId=123&ep=2",
+            body = null,
+            timestampMillis = ts
+        )
+        val sigGetB = com.example.data.remote.MovieBoxApiClient.computeTrSignature(
+            method = "GET",
+            url = "https://api4sg.aoneroom.com/wefeed-mobile-bff/subject-api/play-info?ep=2&subjectId=123&se=1",
+            body = null,
+            timestampMillis = ts
+        )
+        assertTrue(sigGetA.startsWith("1763856000000|2|"))
+        // Sorted query params produce identical HmacMD5 signatures regardless of parameter order
+        assertEquals(sigGetA, sigGetB)
+
+        val sigPost = com.example.data.remote.MovieBoxApiClient.computeTrSignature(
+            method = "POST",
+            url = "https://api4sg.aoneroom.com/wefeed-mobile-bff/user-api/visitor-login",
+            body = "{}",
+            timestampMillis = ts
+        )
+        assertTrue(sigPost.startsWith("1763856000000|2|"))
+
+        // Bait clip filtering (OpenStream Lz84.b compatible)
+        assertTrue(
+            com.example.data.remote.MovieBoxApiClient.isBaitOrBlockedUrl(
+                "https://macdn.aoneroom.com/other/2026/10/10/80da52722ee7de7a4303290af6783424.mp4"
+            )
+        )
+        assertFalse(
+            com.example.data.remote.MovieBoxApiClient.isBaitOrBlockedUrl(
+                "https://bcdnxw.hakunaymatata.com/resource/2025/01/movie_1080p.mp4"
+            )
+        )
+
+        // Mobile BFF resource/v2 parsing with bait filtering, extCaptions & signCookie
+        val mobileResourceV2Json = """
+            {
+              "code": 0,
+              "data": {
+                "list": [
+                  {
+                    "resourceId": "r_bait",
+                    "resourceLink": "https://macdn.aoneroom.com/other/2026/10/10/80da52722ee7de7a4303290af6783424.mp4",
+                    "resolution": 480,
+                    "size": 844123
+                  },
+                  {
+                    "resourceId": "r_1080",
+                    "resourceLink": "https://bcdnxw.hakunaymatata.com/resource/real_1080.mp4",
+                    "resolutions": "480,720,1080",
+                    "size": 2414667149,
+                    "signCookie": "CloudFront-Policy=abc123",
+                    "extCaptions": [
+                      { "id": "ec_en", "lan": "en", "lanName": "English", "url": "https://cacdn.hakunaymatata.com/sub_en.srt", "size": 52100 }
+                    ]
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val mobileBundle = com.example.data.remote.MovieBoxApiClient.parseDownloadResponseJson(
+            json = mobileResourceV2Json,
+            subject = subjects[0],
+            sourceHost = com.example.data.remote.MovieBoxApiClient.DEFAULT_HOST,
+            refererOverride = com.example.data.model.MovieBoxDownloadOption.DEFAULT_REFERER
+        )
+        assertEquals(1, mobileBundle.options.size)
+        assertEquals(1080, mobileBundle.options[0].resolution)
+        assertEquals("https://bcdnxw.hakunaymatata.com/resource/real_1080.mp4", mobileBundle.options[0].downloadUrl)
+        assertEquals("CloudFront-Policy=abc123", mobileBundle.options[0].cookieHeader)
+        assertEquals(com.example.data.model.MovieBoxDownloadOption.DEFAULT_REFERER, mobileBundle.options[0].refererHeader)
+        assertEquals(1, mobileBundle.subtitles.size)
+        assertEquals("https://cacdn.hakunaymatata.com/sub_en.srt", mobileBundle.subtitles[0].url)
+
+        // Host classification & legacy host upgrade
+        assertTrue(com.example.data.remote.MovieBoxApiClient.isMobileBackendHost("https://api4sg.aoneroom.com"))
+        assertTrue(com.example.data.remote.MovieBoxApiClient.isMobileBackendHost("https://api.inmoviebox.com"))
+        assertFalse(com.example.data.remote.MovieBoxApiClient.isMobileBackendHost("https://h5.inmoviebox.com"))
+        assertFalse(com.example.data.remote.MovieBoxApiClient.isMobileBackendHost("https://h5-api.aoneroom.com"))
+        assertEquals(
+            com.example.data.remote.MovieBoxApiClient.DEFAULT_HOST,
+            com.example.data.remote.MovieBoxApiClient.upgradeLegacyHostIfNeeded("https://h5-api.aoneroom.com")
+        )
+        assertEquals(
+            com.example.data.remote.MovieBoxApiClient.DEFAULT_HOST,
+            com.example.data.remote.MovieBoxApiClient.upgradeLegacyHostIfNeeded("https://h5.aoneroom.com/")
+        )
+        assertEquals(
+            "https://my-custom-proxy.example.com",
+            com.example.data.remote.MovieBoxApiClient.upgradeLegacyHostIfNeeded("my-custom-proxy.example.com/")
+        )
+        val hostsForLegacy = com.example.data.remote.MovieBoxApiClient.candidateHosts("https://h5-api.aoneroom.com")
+        assertEquals(com.example.data.remote.MovieBoxApiClient.DEFAULT_HOST, hostsForLegacy.first())
+
+        // TV season title matching (e.g. Breaking Bad S1-S5)
+        val bbTv = MediaItem(
+            id = "1396",
+            tmdbId = 1396L,
+            title = "Breaking Bad",
+            overview = "",
+            posterPath = "",
+            mediaType = "tv",
+            releaseDate = "2008-01-20"
+        )
+        val bbCand = com.example.data.model.MovieBoxSubject(
+            subjectId = "6207982430134357800",
+            subjectType = 2,
+            title = "Breaking Bad S1",
+            releaseDate = "2008-01-20",
+            detailPath = "breaking-bad-ej6Bp0MCAo7",
+            hasResource = true
+        )
+        assertTrue(com.example.data.remote.MovieBoxApiClient.scoreSubjectCandidate(bbTv, bbCand) >= 175)
+
+        assertEquals(
+            "27205_movie_1080p_full_hd",
+            com.example.data.download.DownloadEngine.buildDownloadId("27205", "movie", 1, 1, "1080p Full HD")
+        )
+        assertEquals(
+            "Breaking_Bad_S2E5_720p_HD.mp4",
+            com.example.data.download.DownloadEngine.buildSafeFileName("Breaking Bad!", "tv", 2, 5, "720p HD", "mp4")
+        )
+        assertEquals(50, com.example.data.download.DownloadEngine.computeProgressPercent(500L, 1000L))
+        assertEquals("1.50 GB", com.example.data.model.formatDownloadBytes(1610612736L))
+    }
+
+    @Test
+    fun testPlayerSubresourceAdAndTrackerBlocking() {
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://mc.yandex.ru/metrika/tag.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://pl123.effectivegatecpm.com/ad.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://s10.histats.com/js15_as.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://stats.bingr.one/script.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://cdn.example.com/disable-devtool.min.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://vidly.pro/sw.js?v=1"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://vidsrc.to/service-worker.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://stats.bingr.one/script.js"))
+        assertFalse(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://vidly.pro/movie/693134"))
+        assertFalse(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://vidly.pro/movie/693134"))
+        assertFalse(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://www.youtube.com/embed/abc123"))
+        assertFalse(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js"))
+    }
+
+    @Test
+    fun testDownloadEngineHeaderProfilesAndRangeHelpers() {
+        val profiles = com.example.data.download.DownloadEngine.buildHeaderProfiles(
+            refererHeader = "https://videodownloader.site/",
+            userAgentHeader = "Mozilla/5.0 Test",
+            cookieHeader = "CloudFront-Policy=abc",
+            targetUrl = "https://bcdnxw.hakunaymatata.com/resource/movie.mp4"
+        )
+        assertTrue(profiles.size >= 3)
+        assertEquals("https://videodownloader.site/", profiles[0]["Referer"])
+        assertEquals("https://videodownloader.site", profiles[0]["Origin"])
+        assertEquals("CloudFront-Policy=abc", profiles[0]["Cookie"])
+        // Fallback profile omits Origin when CDN rejects Origin header
+        assertEquals("https://videodownloader.site/", profiles[1]["Referer"])
+        assertFalse(profiles[1].containsKey("Origin"))
+
+        assertEquals(
+            1223914409L,
+            com.example.data.download.DownloadEngine.parseTotalBytesFromContentRange("bytes 0-1023/1223914409")
+        )
+        assertEquals(
+            -1L,
+            com.example.data.download.DownloadEngine.parseTotalBytesFromContentRange("bytes 0-1023/*")
+        )
+        assertTrue(com.example.data.download.DownloadEngine.isHtmlOrJsonErrorContentType("text/html; charset=utf-8"))
+        assertTrue(com.example.data.download.DownloadEngine.isHtmlOrJsonErrorContentType("application/json"))
+        assertFalse(com.example.data.download.DownloadEngine.isHtmlOrJsonErrorContentType("video/mp4"))
+        assertTrue(
+            com.example.data.download.DownloadEngine.mapHttpStatusToReadableError(429).contains("429")
+        )
+    }
 }
-
-
-
-
-
-

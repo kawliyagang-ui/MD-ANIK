@@ -69,6 +69,10 @@ data class MediaItem(
     val streamId: String
         get() = if (vidlyId.isNotBlank()) vidlyId else (tmdbId?.toString() ?: id)
 
+    fun isWebTorrentStream(): Boolean {
+        return com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(streamId)
+    }
+
     fun resolvedTmdbId(): Long? {
         return tmdbId ?: vidlyId.toLongOrNull() ?: id.toLongOrNull()
     }
@@ -112,6 +116,11 @@ data class MediaItem(
 
     fun getStreamUrl(server: PlayerServer = PlayerServer.VIDLY, season: Int = 1, episode: Int = 1): String {
         val sId = streamId.trim()
+        val isWebTorrentId = com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(sId)
+        if (isWebTorrentId) {
+            return com.example.ui.components.WebTorrentPolicy.normalizeTorrentId(sId, title)
+        }
+
         val isCustomHttpUrl = sId.startsWith("http://", ignoreCase = true) ||
             sId.startsWith("https://", ignoreCase = true)
         val numericOrFallbackId = if (isCustomHttpUrl) {
@@ -151,6 +160,9 @@ data class MediaItem(
                     "https://multiembed.mov/?video_id=$numericOrFallbackId&tmdb=1"
                 }
             }
+            PlayerServer.WEBTORRENT -> {
+                if (isCustomHttpUrl) sId else ""
+            }
         }
     }
 }
@@ -159,7 +171,8 @@ enum class PlayerServer(val displayName: String, val speed: String) {
     VIDLY("Vidly Pro (Primary)", "Ultra Fast"),
     VIDSRC("VidSrc Backup", "HD 1080p"),
     AUTOEMBED("AutoEmbed Backup", "Adaptive"),
-    MULTIEMBED("MultiEmbed Server", "High Speed")
+    MULTIEMBED("MultiEmbed Server", "High Speed"),
+    WEBTORRENT("WebTorrent P2P", "Magnet / .torrent")
 }
 
 // Extension to map CustomMediaEntity to MediaItem

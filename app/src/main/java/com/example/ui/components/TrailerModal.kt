@@ -10,12 +10,16 @@ import android.net.Uri
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
+import android.annotation.TargetApi
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import java.io.ByteArrayInputStream
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -39,6 +43,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +55,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -101,6 +109,8 @@ fun TrailerModal(
 
     val embedUrl = youtubeKey?.let { "https://www.youtube.com/embed/$it?autoplay=1&playsinline=1&fs=1" }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var webViewSlotKey by remember(youtubeKey) { mutableIntStateOf(0) }
+    var rendererCrashed by remember(youtubeKey) { mutableStateOf(false) }
     var isWebLoading by remember(youtubeKey) { mutableStateOf(true) }
     var isFullScreen by remember { mutableStateOf(false) }
     var customFullscreenView by remember { mutableStateOf<View?>(null) }
@@ -157,11 +167,6 @@ fun TrailerModal(
                 originalOrientation = initialOrientation,
                 originalCutoutMode = initialCutoutMode
             )
-            webViewRef?.apply {
-                stopLoading()
-                loadUrl("about:blank")
-                destroy()
-            }
             webViewRef = null
         }
     }
@@ -346,9 +351,11 @@ fun TrailerModal(
                         }
                         else -> {
                             val dialogRootView = LocalView.current
+                            key(webViewSlotKey) {
                             AndroidView(
                                 modifier = Modifier.fillMaxSize(),
                                 factory = { ctx ->
+                                    WebViewFullscreenHost.trimHostMemoryForWebView(ctx)
                                     WebView(ctx).apply {
                                         layoutParams = ViewGroup.LayoutParams(
                                             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -368,6 +375,7 @@ fun TrailerModal(
                                         webViewClient = object : WebViewClient() {
                                             override fun onPageFinished(view: WebView?, url: String?) {
                                                 isWebLoading = false
+                                                rendererCrashed = false
                                             }
 
                                             override fun shouldOverrideUrlLoading(
@@ -381,6 +389,38 @@ fun TrailerModal(
                                                     isForMainFrame = request.isForMainFrame,
                                                     isRedirect = request.isRedirect
                                                 )
+                                            }
+
+                                            override fun shouldInterceptRequest(
+                                                view: WebView?,
+                                                request: WebResourceRequest?
+                                            ): WebResourceResponse? {
+                                                val targetUrl = request?.url?.toString() ?: return null
+                                                return if (PlayerControlsPolicy.shouldBlockPlayerSubresource(targetUrl)) {
+                                                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                                                } else {
+                                                    null
+                                                }
+                                            }
+
+                                            @TargetApi(Build.VERSION_CODES.O)
+                                            override fun onRenderProcessGone(
+                                                view: WebView?,
+                                                detail: RenderProcessGoneDetail?
+                                            ): Boolean {
+                                                if (webViewRef === view) {
+                                                    webViewRef = null
+                                                }
+                                                val cb = customViewCallback
+                                                customViewCallback = null
+                                                detachCustomViewOnly()
+                                                runCatching { cb?.onCustomViewHidden() }
+                                                isFullScreen = false
+                                                isWebLoading = false
+                                                WebViewFullscreenHost.trimHostMemoryForWebView(view?.context ?: context)
+                                                WebViewFullscreenHost.safelyDestroyWebView(view)
+                                                rendererCrashed = true
+                                                return true
                                             }
                                         }
                                         webChromeClient = object : WebChromeClient() {
@@ -439,8 +479,47 @@ fun TrailerModal(
                                         isWebLoading = true
                                         webView.loadUrl(embedUrl)
                                     }
+                                },
+                                onRelease = { wv ->
+                                    if (webViewRef === wv) {
+                                        webViewRef = null
+                                    }
+                                    if (!rendererCrashed) {
+                                        runCatching { wv.loadUrl("about:blank") }
+                                    }
+                                    WebViewFullscreenHost.safelyDestroyWebView(wv)
                                 }
                             )
+                            }
+
+                            if (rendererCrashed) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.85f))
+                                        .padding(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "Trailer player interrupted.",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            rendererCrashed = false
+                                            isWebLoading = true
+                                            webViewSlotKey += 1
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                                    ) {
+                                        Text("Reload Trailer", color = Color.White)
+                                    }
+                                }
+                            }
 
                             if (isFullScreen && customFullscreenView == null) {
                                 IconButton(

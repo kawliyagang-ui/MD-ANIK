@@ -201,6 +201,9 @@ object PlayerControlsPolicy {
             "adsterra",
             "doubleclick.net",
             "googlesyndication",
+            "googletagmanager",
+            "google-analytics.com",
+            "analytics.google.com",
             "popads.net",
             "popcash.net",
             "propellerads",
@@ -210,9 +213,105 @@ object PlayerControlsPolicy {
             "onclickalgo",
             "acscdn",
             "clickadu",
-            "hilltopads"
+            "hilltopads",
+            "mc.yandex.ru",
+            "yandex.ru/metrika",
+            "histats.com",
+            "adsco.re",
+            "whos.amung.us",
+            "mgid.com",
+            "adskeeper",
+            "pubfuture",
+            "coinhive",
+            "cryptoloot",
+            "minero.cc",
+            "clarity.ms",
+            "hotjar.com",
+            "stats.bingr.one",
+            "cloudflareinsights.com",
+            "sentry.io",
+            "sentry-cdn.com",
+            "datadoghq",
+            "bugsnag",
+            "logrocket",
+            "mixpanel.com",
+            "amplitude.com",
+            "fullstory.com",
+            "mouseflow.com",
+            "luckyorange.com",
+            "plausible.io",
+            "posthog.com",
+            "matomo.",
+            "disable-devtool",
+            "devtools-detector",
+            "ad-maven",
+            "admaven",
+            "monetag",
+            "propush",
+            "richads",
+            "galaksion",
+            "adcash",
+            "trafficstars",
+            "ero-advertising",
+            "tsyndicate",
+            "realsrv",
+            "pemsrv",
+            "rtmark",
+            "adtelligent",
+            "bidgear",
+            "taboola",
+            "outbrain",
+            "alwingulla",
+            "notifpush",
+            "pushengage",
+            "onesignal.com"
         )
         return adKeywords.any { lower.contains(it) }
+    }
+
+    private fun isServiceWorkerScriptPath(url: String): Boolean {
+        val path = url.trim().lowercase(Locale.US)
+            .substringBefore('?')
+            .substringBefore('#')
+        return path.endsWith("/sw.js") ||
+            path.endsWith("/service-worker.js") ||
+            path.endsWith("/serviceworker.js") ||
+            path.endsWith("/firebase-messaging-sw.js")
+    }
+
+    fun shouldBlockPlayerSubresource(url: String): Boolean {
+        val lower = url.trim().lowercase(Locale.US)
+        if (lower.isBlank()) return false
+        return isAdPopupUrl(lower) || isServiceWorkerScriptPath(lower)
+    }
+
+    fun shouldBlockServiceWorkerRequest(url: String): Boolean {
+        val lower = url.trim().lowercase(Locale.US)
+        if (lower.isBlank()) return false
+        if (isServiceWorkerScriptPath(lower)) return true
+        val swBlockKeywords = listOf(
+            "stats.bingr.one",
+            "mc.yandex.ru",
+            "histats.com",
+            "whos.amung.us",
+            "clarity.ms",
+            "hotjar.com",
+            "sentry.io",
+            "sentry-cdn.com",
+            "datadoghq",
+            "cloudflareinsights.com",
+            "disable-devtool",
+            "devtools-detector",
+            "coinhive",
+            "cryptoloot",
+            "minero.cc",
+            "monetag",
+            "propush",
+            "onesignal.com",
+            "pushengage",
+            "notifpush"
+        )
+        return swBlockKeywords.any { lower.contains(it) }
     }
 
     fun extractHost(url: String): String {
@@ -284,6 +383,9 @@ object PlayerControlsPolicy {
             "mixdrop",
             "streamtape",
             "voe.sx",
+            "webtorrent",
+            "jsdelivr",
+            "cloudflare",
             "youtube",
             "youtu.be",
             "vimeo",

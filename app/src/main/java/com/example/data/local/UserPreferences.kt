@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.AppLanguageOption
 import com.example.data.model.PlayerServer
+import com.example.data.model.PreferredDownloadQuality
+import com.example.data.remote.MovieBoxApiClient
 import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.DarkThemePalette
 import com.example.ui.theme.ThemeMode
@@ -25,6 +27,12 @@ data class NotificationPreferences(
     val newMoviesEnabled: Boolean = true
 )
 
+data class DownloadPreferences(
+    val movieBoxHostUrl: String = MovieBoxApiClient.DEFAULT_HOST,
+    val preferredQuality: PreferredDownloadQuality = PreferredDownloadQuality.Q720P,
+    val wifiOnly: Boolean = false
+)
+
 class UserPreferences(private val context: Context) {
 
     private val darkPaletteKey = stringPreferencesKey("dark_theme_palette")
@@ -36,6 +44,9 @@ class UserPreferences(private val context: Context) {
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
     private val notifyNewEpisodesKey = booleanPreferencesKey("notify_new_episodes")
     private val notifyNewMoviesKey = booleanPreferencesKey("notify_new_movies")
+    private val movieBoxHostKey = stringPreferencesKey("moviebox_host_url")
+    private val preferredDownloadQualityKey = stringPreferencesKey("preferred_download_quality")
+    private val downloadWifiOnlyKey = booleanPreferencesKey("download_wifi_only")
 
     val darkThemePaletteFlow: Flow<DarkThemePalette> = context.userPrefsDataStore.data
         .map { prefs -> DarkThemePalette.fromKey(prefs[darkPaletteKey]) }
@@ -67,6 +78,15 @@ class UserPreferences(private val context: Context) {
                 enabled = prefs[notificationsEnabledKey] ?: true,
                 newEpisodesEnabled = prefs[notifyNewEpisodesKey] ?: true,
                 newMoviesEnabled = prefs[notifyNewMoviesKey] ?: true
+            )
+        }
+
+    val downloadPreferencesFlow: Flow<DownloadPreferences> = context.userPrefsDataStore.data
+        .map { prefs ->
+            DownloadPreferences(
+                movieBoxHostUrl = MovieBoxApiClient.upgradeLegacyHostIfNeeded(prefs[movieBoxHostKey]),
+                preferredQuality = PreferredDownloadQuality.fromKey(prefs[preferredDownloadQualityKey]),
+                wifiOnly = prefs[downloadWifiOnlyKey] ?: false
             )
         }
 
@@ -108,6 +128,14 @@ class UserPreferences(private val context: Context) {
             prefs[notificationsEnabledKey] = prefsUpdate.enabled
             prefs[notifyNewEpisodesKey] = prefsUpdate.newEpisodesEnabled
             prefs[notifyNewMoviesKey] = prefsUpdate.newMoviesEnabled
+        }
+    }
+
+    suspend fun saveDownloadPreferences(update: DownloadPreferences) {
+        context.userPrefsDataStore.edit { prefs ->
+            prefs[movieBoxHostKey] = MovieBoxApiClient.normalizeHostUrl(update.movieBoxHostUrl)
+            prefs[preferredDownloadQualityKey] = update.preferredQuality.storageKey
+            prefs[downloadWifiOnlyKey] = update.wifiOnly
         }
     }
 }

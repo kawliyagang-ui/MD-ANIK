@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.util.Log
 import coil.imageLoader
+import com.example.data.download.DownloadEngine
 import com.example.data.local.MediaDao
 import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdminAnnouncementEntity
@@ -15,9 +16,14 @@ import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.DiscoverFilters
+import com.example.data.model.DownloadEntity
 import com.example.data.model.EpisodeInfo
 import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
+import com.example.data.model.MovieBoxDownloadBundle
+import com.example.data.model.MovieBoxDownloadOption
+import com.example.data.model.MovieBoxSubject
+import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.SearchSuggestionPolicy
@@ -35,6 +41,7 @@ import com.example.data.model.extractBestCertification
 import com.example.data.notifications.ReleaseAlertItem
 import com.example.data.remote.CuratedCatalog
 import com.example.data.remote.FirebaseInitializer
+import com.example.data.remote.MovieBoxApiClient
 import com.example.data.remote.TmdbClient
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -107,6 +114,11 @@ class MovieRepository(
     val adConfig: Flow<AdConfigEntity?> = mediaDao.getAdConfig()
     val adminSecurity: Flow<AdminSecurityEntity?> = mediaDao.getAdminSecurity()
     val issueReports: Flow<List<IssueReportEntity>> = mediaDao.getAllIssueReports()
+    val downloads: Flow<List<DownloadEntity>> = mediaDao.getAllDownloads()
+
+    private val downloadEngine: DownloadEngine? = context?.let {
+        DownloadEngine(it.applicationContext, mediaDao)
+    }
 
     init {
         startFirestoreRealtimeSync()
@@ -1467,6 +1479,100 @@ class MovieRepository(
         runCatching { loader.memoryCache?.clear() }
         runCatching { loader.diskCache?.clear() }
         previousBytes
+    }
+
+    // MovieBox API & Local Download System
+    suspend fun searchMovieBoxSubjects(
+        query: String,
+        mediaType: String = "all",
+        customHost: String = ""
+    ): Result<List<MovieBoxSubject>> {
+        return MovieBoxApiClient.searchSubjects(
+            query = query,
+            mediaType = mediaType,
+            customHost = customHost
+        )
+    }
+
+    suspend fun resolveMovieBoxDownloadBundle(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        customHost: String = ""
+    ): Result<MovieBoxDownloadBundle> {
+        val subjectResult = MovieBoxApiClient.resolveSubjectForMedia(media, customHost)
+        val subject = subjectResult.getOrElse { return Result.failure(it) }
+        return MovieBoxApiClient.fetchDownloadBundle(
+            subject = subject,
+            season = season,
+            episode = episode,
+            isTv = media.mediaType.equals("tv", ignoreCase = true) || subject.subjectType == 2,
+            customHost = customHost
+        )
+    }
+
+    suspend fun fetchMovieBoxDownloadBundleForSubject(
+        subject: MovieBoxSubject,
+        season: Int = 1,
+        episode: Int = 1,
+        isTv: Boolean = subject.subjectType == 2,
+        customHost: String = ""
+    ): Result<MovieBoxDownloadBundle> {
+        return MovieBoxApiClient.fetchDownloadBundle(
+            subject = subject,
+            season = season,
+            episode = episode,
+            isTv = isTv,
+            customHost = customHost
+        )
+    }
+
+    suspend fun startMovieBoxDownload(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        episodeTitle: String = "",
+        option: MovieBoxDownloadOption,
+        subtitle: MovieBoxSubtitleOption? = null,
+        providerName: String = "MovieBox API",
+        wifiOnly: Boolean = false
+    ): Result<DownloadEntity> {
+        val engine = downloadEngine ?: return Result.failure(
+            IllegalStateException("Download service requires an Android application context.")
+        )
+        return engine.enqueueDownload(
+            media = media,
+            season = season,
+            episode = episode,
+            episodeTitle = episodeTitle,
+            option = option,
+            subtitle = subtitle,
+            providerName = providerName,
+            wifiOnly = wifiOnly
+        )
+    }
+
+    suspend fun syncActiveDownloads(): List<DownloadEntity> {
+        return downloadEngine?.syncDownloads() ?: mediaDao.getAllDownloadsOnce()
+    }
+
+    suspend fun cancelAndDeleteDownload(downloadId: String) {
+        downloadEngine?.cancelAndRemoveDownload(downloadId)
+            ?: mediaDao.deleteDownloadById(downloadId)
+    }
+
+    suspend fun retryDownload(download: DownloadEntity, wifiOnly: Boolean = false): Result<DownloadEntity> {
+        val engine = downloadEngine ?: return Result.failure(
+            IllegalStateException("Download service unavailable.")
+        )
+        return engine.retryDownload(download, wifiOnly)
+    }
+
+    suspend fun exportDownloadToPublicFolder(download: DownloadEntity): Result<String> {
+        val engine = downloadEngine ?: return Result.failure(
+            IllegalStateException("Download service unavailable.")
+        )
+        return engine.exportToPublicDownloads(download)
     }
 }
 

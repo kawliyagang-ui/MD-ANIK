@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.os.Message
 import android.view.ViewGroup
+import android.annotation.TargetApi
+import android.os.Build
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -64,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -439,6 +443,10 @@ private fun AdsterraAdPageScreen(
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var pendingChildWebView by remember { mutableStateOf<WebView?>(null) }
+    var webViewSlotKey by remember { mutableIntStateOf(0) }
+    var rendererCrashCount by remember(config.adUrl, config.popUnderScript) { mutableIntStateOf(0) }
+    var rendererCrashed by remember { mutableStateOf(false) }
     var isPageLoading by remember { mutableStateOf(true) }
     var currentPageTitle by remember { mutableStateOf("${config.adNetwork} ${config.adFormat}") }
 
@@ -453,17 +461,6 @@ private fun AdsterraAdPageScreen(
         val mins = remainingSeconds / 60
         val secs = remainingSeconds % 60
         String.format(Locale.US, "%02d:%02d", mins, secs)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            webViewRef?.apply {
-                stopLoading()
-                loadUrl("about:blank")
-                destroy()
-            }
-            webViewRef = null
-        }
     }
 
     Column(
@@ -591,14 +588,17 @@ private fun AdsterraAdPageScreen(
                 "${config.adUrl}|${config.popUnderScript}"
             }
 
+            key(webViewSlotKey) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
+                    WebViewFullscreenHost.trimHostMemoryForWebView(ctx)
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        WebViewFullscreenHost.configureVideoWebViewBasics(this)
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -631,6 +631,31 @@ private fun AdsterraAdPageScreen(
                                 return !(target.startsWith("http://", ignoreCase = true) ||
                                     target.startsWith("https://", ignoreCase = true))
                             }
+
+                            @TargetApi(Build.VERSION_CODES.O)
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: RenderProcessGoneDetail?
+                            ): Boolean {
+                                val crashedBySite = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                    detail?.didCrash() == true
+                                if (webViewRef === view) {
+                                    webViewRef = null
+                                }
+                                WebViewFullscreenHost.safelyDestroyWebView(pendingChildWebView)
+                                pendingChildWebView = null
+                                isPageLoading = false
+                                WebViewFullscreenHost.trimHostMemoryForWebView(view?.context)
+                                WebViewFullscreenHost.safelyDestroyWebView(view)
+                                if (!crashedBySite && rendererCrashCount < 1) {
+                                    rendererCrashCount += 1
+                                    rendererCrashed = false
+                                    webViewSlotKey += 1
+                                } else {
+                                    rendererCrashed = true
+                                }
+                                return true
+                            }
                         }
                         webChromeClient = object : WebChromeClient() {
                             override fun onCreateWindow(
@@ -641,7 +666,12 @@ private fun AdsterraAdPageScreen(
                             ): Boolean {
                                 // Capture Adsterra pop-under window.open() and render inside this WebView
                                 val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
-                                val childWebView = WebView(ctx)
+                                val parentWebView = this@apply
+                                WebViewFullscreenHost.safelyDestroyWebView(pendingChildWebView)
+                                val childWebView = WebView(ctx).apply {
+                                    WebViewFullscreenHost.configureVideoWebViewBasics(this)
+                                }
+                                pendingChildWebView = childWebView
                                 childWebView.webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(
                                         childView: WebView?,
@@ -652,12 +682,35 @@ private fun AdsterraAdPageScreen(
                                             (popUrl.startsWith("http://", ignoreCase = true) ||
                                                 popUrl.startsWith("https://", ignoreCase = true))
                                         ) {
-                                            this@apply.loadUrl(popUrl)
+                                            parentWebView.loadUrl(popUrl)
                                         }
-                                        childWebView.destroy()
+                                        childWebView.post {
+                                            if (pendingChildWebView === childWebView) {
+                                                pendingChildWebView = null
+                                            }
+                                            WebViewFullscreenHost.safelyDestroyWebView(childWebView)
+                                        }
+                                        return true
+                                    }
+
+                                    @TargetApi(Build.VERSION_CODES.O)
+                                    override fun onRenderProcessGone(
+                                        childView: WebView?,
+                                        detail: RenderProcessGoneDetail?
+                                    ): Boolean {
+                                        if (pendingChildWebView === childView) {
+                                            pendingChildWebView = null
+                                        }
+                                        WebViewFullscreenHost.safelyDestroyWebView(childView)
                                         return true
                                     }
                                 }
+                                childWebView.postDelayed({
+                                    if (pendingChildWebView === childWebView) {
+                                        pendingChildWebView = null
+                                    }
+                                    WebViewFullscreenHost.safelyDestroyWebView(childWebView)
+                                }, 4000L)
                                 transport.webView = childWebView
                                 resultMsg.sendToTarget()
                                 return true
@@ -674,8 +727,51 @@ private fun AdsterraAdPageScreen(
                         webView.tag = contentKey
                         loadAdsterraContent(webView, config)
                     }
+                },
+                onRelease = { wv ->
+                    if (webViewRef === wv) {
+                        webViewRef = null
+                    }
+                    WebViewFullscreenHost.safelyDestroyWebView(pendingChildWebView)
+                    pendingChildWebView = null
+                    if (!rendererCrashed) {
+                        runCatching { wv.loadUrl("about:blank") }
+                    }
+                    WebViewFullscreenHost.safelyDestroyWebView(wv)
                 }
             )
+            }
+
+            if (rendererCrashed) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.background.copy(alpha = 0.92f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Sponsor page stopped unexpectedly.",
+                            color = colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                rendererCrashed = false
+                                rendererCrashCount = 0
+                                isPageLoading = true
+                                webViewSlotKey += 1
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                        ) {
+                            Text("Reload Page", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
 
             if (isPageLoading) {
                 Box(

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.local.DownloadPreferences
 import com.example.data.local.NotificationPreferences
 import com.example.data.local.UserPreferences
 import com.example.data.model.AdConfigEntity
@@ -16,13 +17,19 @@ import com.example.data.model.ContinueWatchingEntity
 import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.CustomMediaEntity
 import com.example.data.model.DiscoverFilters
+import com.example.data.model.DownloadEntity
 import com.example.data.model.EpisodeInfo
 import com.example.data.model.IssueReportCategory
 import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
+import com.example.data.model.MovieBoxDownloadBundle
+import com.example.data.model.MovieBoxDownloadOption
+import com.example.data.model.MovieBoxSubject
+import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
 import com.example.data.model.PlayerServer
+import com.example.data.model.PreferredDownloadQuality
 import com.example.data.model.RecommendationPolicy
 import com.example.data.model.SearchSuggestionPolicy
 import com.example.data.model.TmdbSearchHistoryEntity
@@ -30,6 +37,7 @@ import com.example.data.model.UpcomingReleasePolicy
 import com.example.data.model.WatchlistEntity
 import com.example.data.model.toMediaItem
 import com.example.data.notifications.EpisodeNotificationHelper
+import com.example.data.remote.MovieBoxApiClient
 import com.example.data.repository.MovieRepository
 import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.DarkThemePalette
@@ -55,6 +63,7 @@ sealed class Screen {
     object Home : Screen()
     object Explore : Screen()
     object Watchlist : Screen()
+    object Downloads : Screen()
     object ContinueWatching : Screen()
     object Settings : Screen()
     object Search : Screen()
@@ -74,7 +83,22 @@ sealed class Screen {
     ) : Screen()
     data class Details(val media: MediaItem) : Screen()
     data class Player(val media: MediaItem, val season: Int = 1, val episode: Int = 1) : Screen()
+    data class OfflinePlayer(val download: DownloadEntity) : Screen()
 }
+
+data class DownloadSheetUiState(
+    val isOpen: Boolean = false,
+    val targetMedia: MediaItem? = null,
+    val season: Int = 1,
+    val episode: Int = 1,
+    val episodeTitle: String = "",
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val bundle: MovieBoxDownloadBundle? = null,
+    val searchQuery: String = "",
+    val searchCandidates: List<MovieBoxSubject> = emptyList(),
+    val isSearchingCandidates: Boolean = false
+)
 
 sealed interface AdGateState {
     data object Loading : AdGateState
@@ -195,7 +219,15 @@ data class UserUiState(
     val searchSuggestions: List<MediaItem> = emptyList(),
     val isFetchingSuggestions: Boolean = false,
     val showSearchSuggestions: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    // MovieBox API & Download System
+    val downloadPrefs: DownloadPreferences = DownloadPreferences(),
+    val downloadSheet: DownloadSheetUiState = DownloadSheetUiState(),
+    val movieBoxSearchQuery: String = "",
+    val movieBoxSearchResults: List<MovieBoxSubject> = emptyList(),
+    val isSearchingMovieBox: Boolean = false,
+    val movieBoxSearchError: String? = null,
+    val downloadFeedbackMessage: String? = null
 )
 
 class MovieViewModel(
@@ -222,6 +254,9 @@ class MovieViewModel(
     val issueReports: StateFlow<List<IssueReportEntity>> = repository.issueReports
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val downloads: StateFlow<List<DownloadEntity>> = repository.downloads
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _adGateState = MutableStateFlow<AdGateState>(AdGateState.Loading)
     val adGateState: StateFlow<AdGateState> = _adGateState.asStateFlow()
 
@@ -231,6 +266,9 @@ class MovieViewModel(
     private var suggestionJob: Job? = null
     private var searchHistoryCommitJob: Job? = null
     private var languageCatalogJob: Job? = null
+    private var downloadFetchJob: Job? = null
+    private var movieBoxHubSearchJob: Job? = null
+    private var downloadSyncJob: Job? = null
     private var hasCheckedReleasesThisSession = false
 
     private var rawTrending: List<MediaItem> = emptyList()
@@ -273,6 +311,7 @@ class MovieViewModel(
         observeAdConfig()
         observeCustomMedia()
         observeHistoryForRecommendations()
+        observeDownloadsProgress()
         refreshCacheSize()
         loadHomeData()
     }
@@ -338,6 +377,11 @@ class MovieViewModel(
         viewModelScope.launch {
             prefs.notificationPreferencesFlow.collect { nPrefs ->
                 _uiState.update { it.copy(notificationPrefs = nPrefs) }
+            }
+        }
+        viewModelScope.launch {
+            prefs.downloadPreferencesFlow.collect { dPrefs ->
+                _uiState.update { it.copy(downloadPrefs = dPrefs) }
             }
         }
     }
@@ -1888,7 +1932,8 @@ class MovieViewModel(
         _uiState.value = _uiState.value.copy(
             playingMedia = resolvedMedia,
             currentSeason = safeSeason,
-            currentEpisode = safeEpisode
+            currentEpisode = safeEpisode,
+            playerServer = if (resolvedMedia.isWebTorrentStream()) PlayerServer.WEBTORRENT else _uiState.value.playerServer
         )
         viewModelScope.launch {
             repository.saveContinueWatching(
@@ -1904,6 +1949,36 @@ class MovieViewModel(
         if (resolvedMedia.mediaType == "tv") {
             ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
         }
+    }
+
+    fun openMagnetStream(torrentUri: String, title: String = "") {
+        val normalized = com.example.ui.components.WebTorrentPolicy.normalizeTorrentId(torrentUri, title)
+        if (!com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(normalized)) return
+        val resolvedTitle = title.trim().ifBlank {
+            if (normalized == com.example.ui.components.WebTorrentPolicy.SAMPLE_SINTEL_MAGNET) {
+                "Sintel (WebTorrent Open Demo)"
+            } else {
+                "WebTorrent P2P Stream"
+            }
+        }
+        val media = MediaItem(
+            id = "wt_${normalized.hashCode().toUInt()}",
+            title = resolvedTitle,
+            overview = "Peer-to-peer WebTorrent stream",
+            posterPath = "",
+            mediaType = "movie",
+            vidlyId = normalized,
+            isCustom = true
+        )
+        _uiState.update {
+            it.copy(
+                playingMedia = media,
+                currentSeason = 1,
+                currentEpisode = 1,
+                playerServer = PlayerServer.WEBTORRENT
+            )
+        }
+        navigateTo(Screen.Player(media, 1, 1))
     }
 
     fun switchPlayerServer(server: PlayerServer) {
@@ -2155,6 +2230,438 @@ class MovieViewModel(
     fun removeContinueWatching(id: String) {
         viewModelScope.launch {
             repository.removeContinueWatching(id)
+        }
+    }
+
+    // =========================================================================
+    // MovieBox API & Offline Download Manager
+    // =========================================================================
+
+    private fun observeDownloadsProgress() {
+        viewModelScope.launch {
+            downloads.collect { list ->
+                val hasActive = list.any { it.parsedStatus.isActive }
+                if (hasActive && downloadSyncJob?.isActive != true) {
+                    downloadSyncJob = viewModelScope.launch {
+                        while (true) {
+                            val synced = repository.syncActiveDownloads()
+                            if (synced.none { it.parsedStatus.isActive }) break
+                            delay(1000L)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun syncDownloadsNow() {
+        viewModelScope.launch {
+            repository.syncActiveDownloads()
+        }
+    }
+
+    fun openDownloadsScreen() {
+        syncDownloadsNow()
+        navigateTo(Screen.Downloads)
+    }
+
+    fun openOfflinePlayer(download: DownloadEntity) {
+        navigateTo(Screen.OfflinePlayer(download))
+    }
+
+    fun openMovieBoxDownloadSheet(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        episodeTitle: String = ""
+    ) {
+        val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
+            mediaType = media.mediaType,
+            season = season,
+            episode = episode
+        )
+        downloadFetchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                downloadSheet = DownloadSheetUiState(
+                    isOpen = true,
+                    targetMedia = media,
+                    season = safeSeason,
+                    episode = safeEpisode,
+                    episodeTitle = episodeTitle,
+                    isLoading = true,
+                    errorMessage = null,
+                    bundle = null,
+                    searchQuery = media.title,
+                    searchCandidates = emptyList(),
+                    isSearchingCandidates = false
+                )
+            )
+        }
+
+        val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
+        downloadFetchJob = viewModelScope.launch {
+            // Also populate alternate MovieBox search candidates in parallel
+            val candidatesDeferred = async {
+                repository.searchMovieBoxSubjects(media.title, "all", customHost).getOrDefault(emptyList())
+            }
+            val bundleResult = repository.resolveMovieBoxDownloadBundle(
+                media = media,
+                season = safeSeason,
+                episode = safeEpisode,
+                customHost = customHost
+            )
+            val candidates = candidatesDeferred.await()
+
+            bundleResult.fold(
+                onSuccess = { bundle ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                errorMessage = null,
+                                bundle = bundle,
+                                searchCandidates = candidates
+                            )
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                errorMessage = err.localizedMessage
+                                    ?: "Could not fetch MovieBox download links for \"${media.title}\".",
+                                bundle = null,
+                                searchCandidates = candidates
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun dismissMovieBoxDownloadSheet() {
+        downloadFetchJob?.cancel()
+        _uiState.update { it.copy(downloadSheet = DownloadSheetUiState()) }
+    }
+
+    fun searchMovieBoxCandidatesInSheet(query: String) {
+        val clean = query.trim()
+        _uiState.update {
+            it.copy(
+                downloadSheet = it.downloadSheet.copy(
+                    searchQuery = query,
+                    isSearchingCandidates = clean.isNotBlank()
+                )
+            )
+        }
+        if (clean.isBlank()) return
+        downloadFetchJob?.cancel()
+        val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
+        downloadFetchJob = viewModelScope.launch {
+            val res = repository.searchMovieBoxSubjects(clean, "all", customHost)
+            res.fold(
+                onSuccess = { items ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isSearchingCandidates = false,
+                                searchCandidates = items,
+                                errorMessage = if (items.isEmpty()) "No MovieBox titles matched \"$clean\"." else null
+                            )
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isSearchingCandidates = false,
+                                errorMessage = err.localizedMessage ?: "MovieBox search failed."
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun selectMovieBoxSubjectInSheet(subject: MovieBoxSubject) {
+        val sheet = _uiState.value.downloadSheet
+        val targetMedia = sheet.targetMedia ?: return
+        val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
+        val isTv = targetMedia.mediaType.equals("tv", ignoreCase = true) || subject.subjectType == 2
+        downloadFetchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                downloadSheet = it.downloadSheet.copy(
+                    isLoading = true,
+                    errorMessage = null
+                )
+            )
+        }
+        downloadFetchJob = viewModelScope.launch {
+            val res = repository.fetchMovieBoxDownloadBundleForSubject(
+                subject = subject,
+                season = sheet.season,
+                episode = sheet.episode,
+                isTv = isTv,
+                customHost = customHost
+            )
+            res.fold(
+                onSuccess = { bundle ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                errorMessage = null,
+                                bundle = bundle
+                            )
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                errorMessage = err.localizedMessage ?: "No downloadable files found."
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun enqueueMovieBoxOptionDownload(
+        option: MovieBoxDownloadOption,
+        subtitle: MovieBoxSubtitleOption? = null
+    ) {
+        val sheet = _uiState.value.downloadSheet
+        val media = sheet.targetMedia ?: return
+        val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
+        val hostLabel = sheet.bundle?.sourceHost
+            ?.removePrefix("https://")
+            ?.removePrefix("http://")
+            ?.ifBlank { "MovieBox API" }
+            ?: "MovieBox API"
+
+        viewModelScope.launch {
+            val res = repository.startMovieBoxDownload(
+                media = media,
+                season = sheet.season,
+                episode = sheet.episode,
+                episodeTitle = sheet.episodeTitle,
+                option = option,
+                subtitle = subtitle,
+                providerName = "MovieBox ($hostLabel)",
+                wifiOnly = wifiOnly
+            )
+            res.fold(
+                onSuccess = { entry ->
+                    _uiState.update {
+                        it.copy(
+                            downloadSheet = DownloadSheetUiState(),
+                            downloadFeedbackMessage = "Downloading ${entry.title} (${entry.qualityLabel}) via MovieBox API"
+                        )
+                    }
+                    syncDownloadsNow()
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            downloadSheet = it.downloadSheet.copy(
+                                errorMessage = err.localizedMessage ?: "Unable to start download."
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun searchMovieBoxHub(query: String) {
+        val clean = query.trim()
+        movieBoxHubSearchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                movieBoxSearchQuery = query,
+                isSearchingMovieBox = clean.isNotBlank(),
+                movieBoxSearchError = null
+            )
+        }
+        if (clean.isBlank()) {
+            _uiState.update { it.copy(movieBoxSearchResults = emptyList(), isSearchingMovieBox = false) }
+            return
+        }
+        val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
+        movieBoxHubSearchJob = viewModelScope.launch {
+            val res = repository.searchMovieBoxSubjects(clean, "all", customHost)
+            res.fold(
+                onSuccess = { items ->
+                    _uiState.update {
+                        it.copy(
+                            movieBoxSearchResults = items,
+                            isSearchingMovieBox = false,
+                            movieBoxSearchError = if (items.isEmpty()) "No MovieBox titles found for \"$clean\"." else null
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            isSearchingMovieBox = false,
+                            movieBoxSearchError = err.localizedMessage ?: "MovieBox API request failed."
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun openDownloadSheetForMovieBoxSubject(subject: MovieBoxSubject, season: Int = 1, episode: Int = 1) {
+        val media = MediaItem(
+            id = "mb_${subject.subjectId}",
+            title = subject.title,
+            overview = subject.description,
+            posterPath = subject.coverUrl,
+            backdropPath = subject.coverUrl,
+            mediaType = if (subject.subjectType == 2) "tv" else "movie",
+            releaseDate = subject.releaseDate,
+            voteAverage = subject.imdbRating.toDoubleOrNull() ?: 0.0,
+            isCustom = true
+        )
+        downloadFetchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                downloadSheet = DownloadSheetUiState(
+                    isOpen = true,
+                    targetMedia = media,
+                    season = season,
+                    episode = episode,
+                    isLoading = true,
+                    searchQuery = subject.title,
+                    searchCandidates = _uiState.value.movieBoxSearchResults
+                )
+            )
+        }
+        val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
+        downloadFetchJob = viewModelScope.launch {
+            val res = repository.fetchMovieBoxDownloadBundleForSubject(
+                subject = subject,
+                season = season,
+                episode = episode,
+                isTv = subject.subjectType == 2,
+                customHost = customHost
+            )
+            res.fold(
+                onSuccess = { bundle ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                bundle = bundle,
+                                errorMessage = null
+                            )
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update { current ->
+                        current.copy(
+                            downloadSheet = current.downloadSheet.copy(
+                                isLoading = false,
+                                errorMessage = err.localizedMessage ?: "No MovieBox downloads available."
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun cancelOrDeleteDownload(downloadId: String) {
+        viewModelScope.launch {
+            repository.cancelAndDeleteDownload(downloadId)
+            _uiState.update { it.copy(downloadFeedbackMessage = "Download removed.") }
+        }
+    }
+
+    fun retryDownload(download: DownloadEntity) {
+        val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
+        viewModelScope.launch {
+            repository.retryDownload(download, wifiOnly).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(downloadFeedbackMessage = "Retrying ${download.title}...") }
+                    syncDownloadsNow()
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(downloadFeedbackMessage = err.localizedMessage ?: "Retry failed.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun exportDownloadToPublicFolder(download: DownloadEntity) {
+        viewModelScope.launch {
+            repository.exportDownloadToPublicFolder(download).fold(
+                onSuccess = { msg ->
+                    _uiState.update { it.copy(downloadFeedbackMessage = msg) }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(downloadFeedbackMessage = err.localizedMessage ?: "Export failed.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun dismissDownloadFeedback() {
+        _uiState.update { it.copy(downloadFeedbackMessage = null) }
+    }
+
+    fun updateDownloadPreferences(
+        movieBoxHostUrl: String = _uiState.value.downloadPrefs.movieBoxHostUrl,
+        preferredQuality: PreferredDownloadQuality = _uiState.value.downloadPrefs.preferredQuality,
+        wifiOnly: Boolean = _uiState.value.downloadPrefs.wifiOnly
+    ) {
+        val updated = DownloadPreferences(
+            movieBoxHostUrl = MovieBoxApiClient.normalizeHostUrl(movieBoxHostUrl),
+            preferredQuality = preferredQuality,
+            wifiOnly = wifiOnly
+        )
+        _uiState.update {
+            it.copy(
+                downloadPrefs = updated,
+                settingsFeedbackMessage = "MovieBox & Download settings saved (${updated.preferredQuality.displayName})."
+            )
+        }
+        viewModelScope.launch {
+            userPreferences?.saveDownloadPreferences(updated)
+        }
+    }
+
+    fun testMovieBoxHostConnection(hostUrl: String) {
+        viewModelScope.launch {
+            MovieBoxApiClient.testHostConnection(hostUrl).fold(
+                onSuccess = { msg ->
+                    _uiState.update { it.copy(settingsFeedbackMessage = "MovieBox API: $msg") }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            settingsFeedbackMessage = "MovieBox connection failed: ${err.localizedMessage ?: "Network error"}"
+                        )
+                    }
+                }
+            )
         }
     }
 }

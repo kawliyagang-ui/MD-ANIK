@@ -12,7 +12,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -20,25 +25,100 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import coil.imageLoader
 import com.example.R
+import java.io.ByteArrayInputStream
+import java.util.Collections
+import java.util.WeakHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Coordinates mobile full-screen video presentation on top of a Window's root ViewGroup
  * alongside landscape orientation, display-cutout edge-to-edge coverage, keep-screen-on,
- * and sticky immersive system bars.
+ * sticky immersive system bars, and low-memory WebView lifecycle management.
  */
 object WebViewFullscreenHost {
 
+    private val swFilterInstalled = AtomicBoolean(false)
+    private val destroyedWebViews = Collections.synchronizedSet(
+        Collections.newSetFromMap(WeakHashMap<WebView, Boolean>())
+    )
+
+    fun trimHostMemoryForWebView(context: Context?) {
+        val appContext = context?.applicationContext ?: return
+        runCatching {
+            appContext.imageLoader.memoryCache?.clear()
+        }
+    }
+
+    private fun installServiceWorkerFilterOnce() {
+        if (!swFilterInstalled.compareAndSet(false, true)) return
+        runCatching {
+            val controller = ServiceWorkerController.getInstance()
+            controller.serviceWorkerWebSettings.apply {
+                allowContentAccess = false
+                allowFileAccess = false
+            }
+            controller.setServiceWorkerClient(object : ServiceWorkerClient() {
+                override fun shouldInterceptRequest(request: WebResourceRequest?): WebResourceResponse? {
+                    val targetUrl = request?.url?.toString() ?: return null
+                    return if (PlayerControlsPolicy.shouldBlockServiceWorkerRequest(targetUrl)) {
+                        WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                    } else {
+                        null
+                    }
+                }
+            })
+        }
+    }
+
+    @Suppress("DEPRECATION")
     fun configureVideoWebViewBasics(webView: WebView) {
+        installServiceWorkerFilterOnce()
         webView.setBackgroundColor(Color.BLACK)
         webView.overScrollMode = View.OVER_SCROLL_NEVER
         webView.isFocusable = true
         webView.isFocusableInTouchMode = true
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        // Use default accelerated compositing without allocating an extra offscreen hardware FBO layer
+        webView.setLayerType(View.LAYER_TYPE_NONE, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching {
+                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+            }
+        }
+        runCatching {
+            webView.settings.apply {
+                allowFileAccess = false
+                allowContentAccess = false
+                setGeolocationEnabled(false)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    offscreenPreRaster = false
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    safeBrowsingEnabled = false
+                }
+            }
+        }
         runCatching {
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
             cookieManager.setAcceptThirdPartyCookies(webView, true)
+        }
+    }
+
+    fun safelyDestroyWebView(webView: WebView?) {
+        if (webView == null) return
+        if (!destroyedWebViews.add(webView)) return
+        runCatching {
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.removeJavascriptInterface("CinetraPlayerBridge")
+            webView.removeJavascriptInterface("CinetraWebTorrentBridge")
+            webView.webChromeClient = null
+            webView.webViewClient = WebViewClient()
+            webView.stopLoading()
+            webView.clearHistory()
+            webView.removeAllViews()
+            webView.destroy()
         }
     }
 

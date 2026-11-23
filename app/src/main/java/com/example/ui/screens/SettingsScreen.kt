@@ -38,11 +38,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -93,10 +95,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.local.DownloadPreferences
 import com.example.data.local.NotificationPreferences
 import com.example.data.model.AppLanguageOption
 import com.example.data.model.PlayerServer
+import com.example.data.model.PreferredDownloadQuality
 import com.example.data.notifications.EpisodeNotificationHelper
+import com.example.data.remote.MovieBoxApiClient
 import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.CineTheme
 import com.example.ui.theme.DarkThemePalette
@@ -130,7 +135,13 @@ fun SettingsScreen(
     onCheckReleasesNow: () -> Unit = {},
     onClearCache: () -> Unit = {},
     onReportProblemClick: () -> Unit = {},
-    onDismissFeedback: () -> Unit = {}
+    onLaunchMagnetStream: (String) -> Unit = {},
+    onDismissFeedback: () -> Unit = {},
+    downloadsCount: Int = 0,
+    downloadPreferences: DownloadPreferences = DownloadPreferences(),
+    onOpenDownloads: () -> Unit = {},
+    onSaveDownloadPreferences: (movieBoxHostUrl: String, preferredQuality: PreferredDownloadQuality, wifiOnly: Boolean) -> Unit = { _, _, _ -> },
+    onTestMovieBoxHost: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val colors = CineTheme.colors
@@ -733,6 +744,299 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(vertical = 2.dp)
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // WebTorrent P2P Direct Magnet / .torrent Streamer Card
+        item {
+            var magnetInput by remember { mutableStateOf("") }
+            var magnetError by remember { mutableStateOf<String?>(null) }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Dns,
+                            contentDescription = null,
+                            tint = colors.gold,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "WebTorrent P2P Streamer",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colors.textPrimary
+                            )
+                            Text(
+                                text = "Stream any magnet:? URI, .torrent link, or infoHash via WebRTC.",
+                                fontSize = 12.sp,
+                                color = colors.textSecondary
+                            )
+                        }
+                    }
+
+                    androidx.compose.material3.OutlinedTextField(
+                        value = magnetInput,
+                        onValueChange = {
+                            magnetInput = it
+                            magnetError = null
+                        },
+                        label = { Text("Magnet URI or .torrent URL") },
+                        placeholder = {
+                            Text(
+                                text = "magnet:?xt=urn:btih:... or https://.../file.torrent",
+                                fontSize = 11.sp,
+                                color = colors.textMuted
+                            )
+                        },
+                        singleLine = true,
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.border,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary,
+                            focusedLabelColor = colors.primary,
+                            unfocusedLabelColor = colors.textSecondary,
+                            cursorColor = colors.primary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_webtorrent_input")
+                    )
+
+                    if (magnetError != null) {
+                        Text(
+                            text = magnetError.orEmpty(),
+                            fontSize = 11.sp,
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val trimmed = magnetInput.trim()
+                                if (com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(trimmed)) {
+                                    magnetError = null
+                                    onLaunchMagnetStream(trimmed)
+                                } else {
+                                    magnetError = "Enter a valid magnet:? URI, .torrent URL, or 40-char infoHash."
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.primary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("settings_webtorrent_play_button")
+                        ) {
+                            Text("Stream Magnet", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                magnetError = null
+                                onLaunchMagnetStream(com.example.ui.components.WebTorrentPolicy.SAMPLE_SINTEL_MAGNET)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("settings_webtorrent_demo_button")
+                        ) {
+                            Text("Sintel Demo", color = colors.gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // MovieBox API & Offline Download Manager Card
+        item {
+            var hostInput by remember(downloadPreferences.movieBoxHostUrl) {
+                mutableStateOf(downloadPreferences.movieBoxHostUrl)
+            }
+            var qualitySelection by remember(downloadPreferences.preferredQuality) {
+                mutableStateOf(downloadPreferences.preferredQuality)
+            }
+            var wifiOnlySelection by remember(downloadPreferences.wifiOnly) {
+                mutableStateOf(downloadPreferences.wifiOnly)
+            }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            tint = colors.softRose,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "MovieBox API & Downloads",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = colors.textPrimary
+                            )
+                            Text(
+                                text = "$downloadsCount saved items • Configure MovieBox mirror & download quality",
+                                fontSize = 12.sp,
+                                color = colors.textSecondary
+                            )
+                        }
+                    }
+
+                    androidx.compose.material3.OutlinedTextField(
+                        value = hostInput,
+                        onValueChange = { hostInput = it },
+                        label = { Text("MovieBox API Host / Proxy URL") },
+                        placeholder = { Text(MovieBoxApiClient.DEFAULT_HOST, fontSize = 11.sp, color = colors.textMuted) },
+                        singleLine = true,
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.border,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_moviebox_host_input")
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MovieBoxApiClient.MIRROR_HOSTS.forEach { mirror ->
+                            val cleanLabel = mirror.removePrefix("https://")
+                            FilterChip(
+                                selected = MovieBoxApiClient.normalizeHostUrl(hostInput) == mirror,
+                                onClick = { hostInput = mirror },
+                                label = { Text(cleanLabel, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Preferred Video Quality",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textPrimary
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        PreferredDownloadQuality.entries.forEach { q ->
+                            FilterChip(
+                                selected = qualitySelection == q,
+                                onClick = {
+                                    qualitySelection = q
+                                    onSaveDownloadPreferences(hostInput, q, wifiOnlySelection)
+                                },
+                                label = { Text(q.displayName, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    NotificationToggleRow(
+                        title = "Download Over Wi-Fi Only",
+                        subtitle = "Pause large MovieBox video downloads on cellular data",
+                        checked = wifiOnlySelection,
+                        onToggle = { checked ->
+                            wifiOnlySelection = checked
+                            onSaveDownloadPreferences(hostInput, qualitySelection, checked)
+                        },
+                        testTag = "settings_download_wifi_only"
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onSaveDownloadPreferences(hostInput, qualitySelection, wifiOnlySelection) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.primary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("settings_moviebox_save_button")
+                        ) {
+                            Text("Save Host", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { onTestMovieBoxHost(hostInput) },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("settings_moviebox_test_button")
+                        ) {
+                            Text("Test API", color = colors.gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenDownloads,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("settings_open_downloads_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            tint = colors.softRose,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Open Downloads Manager ($downloadsCount)",
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }

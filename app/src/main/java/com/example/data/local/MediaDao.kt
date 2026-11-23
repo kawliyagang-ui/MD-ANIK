@@ -193,4 +193,26 @@ interface MediaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrackedRelease(release: com.example.data.model.TrackedReleaseEntity)
+
+    // Downloads (MovieBox API & Offline Library)
+    @Query("SELECT * FROM downloads ORDER BY createdAt DESC")
+    fun getAllDownloads(): Flow<List<com.example.data.model.DownloadEntity>>
+
+    @Query("SELECT * FROM downloads")
+    suspend fun getAllDownloadsOnce(): List<com.example.data.model.DownloadEntity>
+
+    @Query("SELECT * FROM downloads WHERE id = :id LIMIT 1")
+    suspend fun getDownloadById(id: String): com.example.data.model.DownloadEntity?
+
+    @Query("SELECT * FROM downloads WHERE systemDownloadId = :systemDownloadId LIMIT 1")
+    suspend fun getDownloadBySystemId(systemDownloadId: Long): com.example.data.model.DownloadEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDownload(download: com.example.data.model.DownloadEntity)
+
+    @Query("DELETE FROM downloads WHERE id = :id")
+    suspend fun deleteDownloadById(id: String)
+
+    @Query("DELETE FROM downloads")
+    suspend fun clearAllDownloads()
 }

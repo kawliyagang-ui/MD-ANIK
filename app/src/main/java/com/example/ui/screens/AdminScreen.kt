@@ -685,8 +685,8 @@ private fun AdminAnalyticsTab(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 ServiceStatusRow(
-                    service = "Stream Providers (Vidly / Backup)",
-                    status = "4 CONFIGURED",
+                    service = "Stream Providers (Vidly / WebTorrent)",
+                    status = "5 CONFIGURED",
                     statusColor = colors.gold
                 )
             }
@@ -1290,16 +1290,23 @@ private fun AdminAddContentTab(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Vidly ID (Maps to https://vidly.pro/movie/{id})
+        // Stream ID, URL, or WebTorrent Magnet / .torrent
+        val isWtInput = com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(state.formVidlyId)
+        val isCustomHttpInput = state.formVidlyId.trim().startsWith("http://", ignoreCase = true) ||
+            state.formVidlyId.trim().startsWith("https://", ignoreCase = true)
         OutlinedTextField(
             value = state.formVidlyId,
             onValueChange = { viewModel.updateVidlyId(it) },
-            label = { Text("Vidly ID or Link *") },
-            placeholder = { Text("e.g. 27205 (TMDb ID or custom vidly id)", color = colors.textMuted) },
+            label = { Text("Stream ID, URL, or Magnet / .torrent *") },
+            placeholder = { Text("e.g. 27205, https://..., or magnet:?xt=urn:btih:...", color = colors.textMuted) },
             supportingText = {
                 Text(
-                    text = "Mapped to: https://vidly.pro/${if (state.formMediaType == "tv") "tv" else "movie"}/${state.formVidlyId.ifBlank { "{id}" }}",
-                    color = colors.gold,
+                    text = when {
+                        isWtInput -> "✓ WebTorrent P2P stream detected (Magnet / .torrent / InfoHash)"
+                        isCustomHttpInput -> "Direct custom stream URL: ${state.formVidlyId.trim()}"
+                        else -> "Mapped to: https://vidly.pro/${if (state.formMediaType == "tv") "tv" else "movie"}/${state.formVidlyId.ifBlank { "{id}" }}"
+                    },
+                    color = if (isWtInput) colors.success else colors.gold,
                     fontSize = 11.sp
                 )
             },
@@ -1706,10 +1713,17 @@ private fun AdminManageContentTab(
                                     color = colors.gold
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
+                                val streamLabel = if (com.example.ui.components.WebTorrentPolicy.isWebTorrentSource(item.vidlyId)) {
+                                    "Stream: WebTorrent P2P (Magnet / .torrent)"
+                                } else {
+                                    "Vidly ID: ${item.vidlyId}"
+                                }
                                 Text(
-                                    text = "Vidly ID: ${item.vidlyId}",
+                                    text = streamLabel,
                                     fontSize = 11.sp,
-                                    color = colors.textSecondary
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 

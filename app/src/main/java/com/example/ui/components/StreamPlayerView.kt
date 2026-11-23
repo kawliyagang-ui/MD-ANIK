@@ -13,13 +13,17 @@ import android.media.AudioManager
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
+import android.annotation.TargetApi
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import java.io.ByteArrayInputStream
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -53,6 +57,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -75,6 +80,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -131,7 +137,8 @@ fun StreamPlayerView(
     initialWatchedSeconds: Long = 0L,
     initialDurationSeconds: Long = 0L,
     onProgressUpdate: (watchedSeconds: Long, durationSeconds: Long) -> Unit = { _, _ -> },
-    onReportIssue: (() -> Unit)? = null
+    onReportIssue: (() -> Unit)? = null,
+    onDownloadClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val hostView = LocalView.current
@@ -172,6 +179,11 @@ fun StreamPlayerView(
     }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webViewSlotKey by remember { mutableIntStateOf(0) }
+    var rendererCrashCount by remember(media.id, selectedServer, currentSeason, currentEpisode) {
+        mutableIntStateOf(0)
+    }
+    var rendererCrashed by remember { mutableStateOf(false) }
     var customFullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenHostContainer by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -189,17 +201,49 @@ fun StreamPlayerView(
     var trackedDurationSeconds by remember(media.id, currentSeason, currentEpisode) {
         mutableLongStateOf(initialDurationSeconds.coerceAtLeast(0L))
     }
+    var manualTorrentUri by remember(media.id, currentSeason, currentEpisode) {
+        mutableStateOf("")
+    }
+    var webTorrentTelemetry by remember(media.id, currentSeason, currentEpisode) {
+        mutableStateOf(WebTorrentTelemetry())
+    }
+    var webTorrentFiles by remember(media.id, currentSeason, currentEpisode) {
+        mutableStateOf<List<TorrentFileEntry>>(emptyList())
+    }
     val latestOnProgressUpdate by rememberUpdatedState(onProgressUpdate)
     val latestStreamUrl by rememberUpdatedState(
         media.getStreamUrl(selectedServer, currentSeason, currentEpisode)
     )
     val currentStreamUrl = latestStreamUrl
-
-    val subtitleText = remember(media.mediaType, currentSeason, currentEpisode, selectedServer) {
-        if (media.mediaType == "tv") {
-            "Season $currentSeason • Episode $currentEpisode"
+    val effectiveStreamUrl = remember(manualTorrentUri, currentStreamUrl, media.title) {
+        if (manualTorrentUri.isNotBlank()) {
+            WebTorrentPolicy.normalizeTorrentId(manualTorrentUri, media.title)
         } else {
-            "Now Streaming • ${selectedServer.displayName}"
+            currentStreamUrl
+        }
+    }
+    val hasPlayableWebTorrentSource = remember(effectiveStreamUrl) {
+        WebTorrentPolicy.isWebTorrentSource(effectiveStreamUrl)
+    }
+    val isWebTorrentMode = remember(hasPlayableWebTorrentSource, selectedServer, effectiveStreamUrl) {
+        hasPlayableWebTorrentSource ||
+            (selectedServer == PlayerServer.WEBTORRENT &&
+                !PlayerControlsPolicy.isDirectMediaFileUrl(effectiveStreamUrl) &&
+                !effectiveStreamUrl.startsWith("http", ignoreCase = true))
+    }
+    val playerLoadKey = remember(effectiveStreamUrl, currentSeason, currentEpisode, isWebTorrentMode) {
+        if (isWebTorrentMode) {
+            "wt::$effectiveStreamUrl::$currentSeason::$currentEpisode"
+        } else {
+            effectiveStreamUrl
+        }
+    }
+
+    val subtitleText = remember(media.mediaType, currentSeason, currentEpisode, selectedServer, hasPlayableWebTorrentSource) {
+        when {
+            media.mediaType == "tv" -> "Season $currentSeason • Episode $currentEpisode"
+            hasPlayableWebTorrentSource -> "Now Streaming • WebTorrent P2P"
+            else -> "Now Streaming • ${selectedServer.displayName}"
         }
     }
 
@@ -230,12 +274,14 @@ fun StreamPlayerView(
 
     // Sync WebView lifecycle on background/foreground transitions
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, webViewInstance) {
+    DisposableEffect(lifecycleOwner, webViewInstance, rendererCrashed) {
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> webViewInstance?.onResume()
-                Lifecycle.Event.ON_PAUSE -> webViewInstance?.onPause()
-                else -> Unit
+            if (!rendererCrashed) {
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> runCatching { webViewInstance?.onResume() }
+                    Lifecycle.Event.ON_PAUSE -> runCatching { webViewInstance?.onPause() }
+                    else -> Unit
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -284,16 +330,18 @@ fun StreamPlayerView(
     }
 
     // Track real active watch seconds & probe player duration/position every 5s
-    LaunchedEffect(media.id, currentSeason, currentEpisode, isPlaying, isLoadingPage) {
-        if (!isLoadingPage && isPlaying) {
+    LaunchedEffect(media.id, currentSeason, currentEpisode, isPlaying, isLoadingPage, rendererCrashed) {
+        if (!isLoadingPage && isPlaying && !rendererCrashed) {
             while (true) {
                 delay(1000L)
                 trackedWatchedSeconds += 1L
-                if (trackedWatchedSeconds % 5L == 0L) {
-                    webViewInstance?.evaluateJavascript(
-                        PlayerControlsPolicy.buildProgressProbeScript(),
-                        null
-                    )
+                if (trackedWatchedSeconds % 5L == 0L && !rendererCrashed) {
+                    runCatching {
+                        webViewInstance?.evaluateJavascript(
+                            PlayerControlsPolicy.buildProgressProbeScript(),
+                            null
+                        )
+                    }
                     latestOnProgressUpdate(trackedWatchedSeconds, trackedDurationSeconds)
                 }
             }
@@ -395,11 +443,6 @@ fun StreamPlayerView(
                 originalOrientation = initialOrientation,
                 originalCutoutMode = initialCutoutMode
             )
-            webViewInstance?.apply {
-                stopLoading()
-                loadUrl("about:blank")
-                destroy()
-            }
             webViewInstance = null
         }
     }
@@ -463,6 +506,19 @@ fun StreamPlayerView(
                         )
                     }
 
+                    if (onDownloadClick != null) {
+                        IconButton(
+                            onClick = onDownloadClick,
+                            modifier = Modifier.testTag("player_download_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = "Download via MovieBox",
+                                tint = colors.gold
+                            )
+                        }
+                    }
+
                     IconButton(
                         onClick = { setFullScreenMode(true) },
                         modifier = Modifier.testTag("player_fullscreen_button")
@@ -475,7 +531,16 @@ fun StreamPlayerView(
                     }
 
                     IconButton(
-                        onClick = { webViewInstance?.reload() },
+                        onClick = {
+                            if (rendererCrashed) {
+                                rendererCrashed = false
+                                rendererCrashCount = 0
+                                isLoadingPage = true
+                                webViewSlotKey += 1
+                            } else {
+                                webViewInstance?.reload()
+                            }
+                        },
                         modifier = Modifier.testTag("player_reload_button")
                     ) {
                         Icon(
@@ -487,8 +552,11 @@ fun StreamPlayerView(
 
                     IconButton(
                         onClick = {
-                            val browserIntent = Intent(Intent.ACTION_VIEW, currentStreamUrl.toUri())
-                            context.startActivity(browserIntent)
+                            val targetUri = effectiveStreamUrl.ifBlank { WebTorrentPolicy.WEBTORRENT_BASE_URL }
+                            runCatching {
+                                val browserIntent = Intent(Intent.ACTION_VIEW, targetUri.toUri())
+                                context.startActivity(browserIntent)
+                            }
                         },
                         modifier = Modifier.testTag("player_open_browser_button")
                     ) {
@@ -515,9 +583,11 @@ fun StreamPlayerView(
                     .background(Color.Black)
             }
         ) {
+            key(webViewSlotKey) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
+                    WebViewFullscreenHost.trimHostMemoryForWebView(ctx)
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -531,7 +601,6 @@ fun StreamPlayerView(
                             loadsImagesAutomatically = true
                             useWideViewPort = true
                             loadWithOverviewMode = true
-                            allowContentAccess = true
                             javaScriptCanOpenWindowsAutomatically = false
                             setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -541,6 +610,7 @@ fun StreamPlayerView(
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 isLoadingPage = true
+                                rendererCrashed = false
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
@@ -567,6 +637,46 @@ fun StreamPlayerView(
                                     isRedirect = request.isRedirect
                                 )
                                 return !allow
+                            }
+
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): WebResourceResponse? {
+                                val targetUrl = request?.url?.toString() ?: return null
+                                return if (PlayerControlsPolicy.shouldBlockPlayerSubresource(targetUrl)) {
+                                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                                } else {
+                                    null
+                                }
+                            }
+
+                            @TargetApi(Build.VERSION_CODES.O)
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: RenderProcessGoneDetail?
+                            ): Boolean {
+                                val crashedBySite = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                    detail?.didCrash() == true
+                                if (webViewInstance === view) {
+                                    webViewInstance = null
+                                }
+                                val cb = customViewCallback
+                                customViewCallback = null
+                                detachCustomFullscreenOnly()
+                                runCatching { cb?.onCustomViewHidden() }
+                                isFullScreen = false
+                                isLoadingPage = false
+                                WebViewFullscreenHost.trimHostMemoryForWebView(view?.context ?: context)
+                                WebViewFullscreenHost.safelyDestroyWebView(view)
+                                if (!crashedBySite && rendererCrashCount < 1) {
+                                    rendererCrashCount += 1
+                                    rendererCrashed = false
+                                    webViewSlotKey += 1
+                                } else {
+                                    rendererCrashed = true
+                                }
+                                return true
                             }
                         }
                         webChromeClient = object : WebChromeClient() {
@@ -627,40 +737,191 @@ fun StreamPlayerView(
                             }
                         }
                         addJavascriptInterface(jsBridge, "CinetraPlayerBridge")
-                        if (PlayerControlsPolicy.isDirectMediaFileUrl(currentStreamUrl)) {
-                            loadDataWithBaseURL(
-                                currentStreamUrl,
-                                PlayerControlsPolicy.buildDirectVideoHtml(currentStreamUrl),
-                                "text/html",
-                                "UTF-8",
-                                null
-                            )
-                        } else {
-                            loadUrl(currentStreamUrl)
+                        val wtBridge = object {
+                            @JavascriptInterface
+                            fun onTorrentStatus(
+                                statusText: String,
+                                peers: Int,
+                                downloadSpeedBytes: Long,
+                                uploadSpeedBytes: Long,
+                                progressPercent: Int,
+                                activeFileName: String,
+                                errorMsg: String,
+                                ready: Boolean
+                            ) {
+                                post {
+                                    webTorrentTelemetry = WebTorrentTelemetry(
+                                        statusText = statusText,
+                                        peers = peers.coerceAtLeast(0),
+                                        downloadSpeedBytes = downloadSpeedBytes.coerceAtLeast(0L),
+                                        uploadSpeedBytes = uploadSpeedBytes.coerceAtLeast(0L),
+                                        progressPercent = progressPercent.coerceIn(0, 100),
+                                        activeFileName = activeFileName,
+                                        errorMessage = errorMsg.takeIf { it.isNotBlank() },
+                                        isReady = ready
+                                    )
+                                }
+                            }
+
+                            @JavascriptInterface
+                            fun onTorrentFiles(filesJson: String) {
+                                val parsed = WebTorrentPolicy.parseTorrentFilesJson(filesJson)
+                                post {
+                                    webTorrentFiles = parsed
+                                }
+                            }
                         }
-                        tag = currentStreamUrl
+                        addJavascriptInterface(wtBridge, "CinetraWebTorrentBridge")
+
+                        when {
+                            hasPlayableWebTorrentSource -> {
+                                loadDataWithBaseURL(
+                                    WebTorrentPolicy.WEBTORRENT_BASE_URL,
+                                    WebTorrentPolicy.buildWebTorrentPlayerHtml(
+                                        torrentId = effectiveStreamUrl,
+                                        title = media.title,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isTv = media.mediaType == "tv"
+                                    ),
+                                    "text/html",
+                                    "UTF-8",
+                                    null
+                                )
+                            }
+                            isWebTorrentMode -> {
+                                isLoadingPage = false
+                                loadUrl("about:blank")
+                            }
+                            PlayerControlsPolicy.isDirectMediaFileUrl(effectiveStreamUrl) -> {
+                                loadDataWithBaseURL(
+                                    effectiveStreamUrl,
+                                    PlayerControlsPolicy.buildDirectVideoHtml(effectiveStreamUrl),
+                                    "text/html",
+                                    "UTF-8",
+                                    null
+                                )
+                            }
+                            else -> {
+                                loadUrl(effectiveStreamUrl)
+                            }
+                        }
+                        tag = playerLoadKey
                         webViewInstance = this
                     }
                 },
                 update = { webView ->
-                    if (webView.tag != currentStreamUrl) {
-                        webView.tag = currentStreamUrl
+                    if (webView.tag != playerLoadKey) {
+                        webView.tag = playerLoadKey
+                        runCatching {
+                            webView.evaluateJavascript("window.__wtDestroy && window.__wtDestroy()", null)
+                        }
+                        webTorrentTelemetry = WebTorrentTelemetry()
+                        webTorrentFiles = emptyList()
                         isPlaying = true
-                        isLoadingPage = true
-                        if (PlayerControlsPolicy.isDirectMediaFileUrl(currentStreamUrl)) {
-                            webView.loadDataWithBaseURL(
-                                currentStreamUrl,
-                                PlayerControlsPolicy.buildDirectVideoHtml(currentStreamUrl),
-                                "text/html",
-                                "UTF-8",
-                                null
-                            )
-                        } else {
-                            webView.loadUrl(currentStreamUrl)
+                        isLoadingPage = !isWebTorrentMode || hasPlayableWebTorrentSource
+                        when {
+                            hasPlayableWebTorrentSource -> {
+                                webView.loadDataWithBaseURL(
+                                    WebTorrentPolicy.WEBTORRENT_BASE_URL,
+                                    WebTorrentPolicy.buildWebTorrentPlayerHtml(
+                                        torrentId = effectiveStreamUrl,
+                                        title = media.title,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isTv = media.mediaType == "tv"
+                                    ),
+                                    "text/html",
+                                    "UTF-8",
+                                    null
+                                )
+                            }
+                            isWebTorrentMode -> {
+                                isLoadingPage = false
+                                webView.loadUrl("about:blank")
+                            }
+                            PlayerControlsPolicy.isDirectMediaFileUrl(effectiveStreamUrl) -> {
+                                webView.loadDataWithBaseURL(
+                                    effectiveStreamUrl,
+                                    PlayerControlsPolicy.buildDirectVideoHtml(effectiveStreamUrl),
+                                    "text/html",
+                                    "UTF-8",
+                                    null
+                                )
+                            }
+                            else -> {
+                                webView.loadUrl(effectiveStreamUrl)
+                            }
+                        }
+                    }
+                },
+                onRelease = { wv ->
+                    if (webViewInstance === wv) {
+                        webViewInstance = null
+                    }
+                    if (!rendererCrashed) {
+                        runCatching {
+                            wv.evaluateJavascript("window.__wtDestroy && window.__wtDestroy()", null)
+                            wv.loadUrl("about:blank")
+                        }
+                    }
+                    WebViewFullscreenHost.safelyDestroyWebView(wv)
+                }
+            )
+            }
+
+            if (rendererCrashed) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.88f))
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Stream player stopped unexpectedly.",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.size(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = {
+                                    rendererCrashed = false
+                                    rendererCrashCount = 0
+                                    isLoadingPage = true
+                                    webViewSlotKey += 1
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                            ) {
+                                Text("Reload Player", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val servers = PlayerServer.entries
+                                    val nextServer = servers[(servers.indexOf(selectedServer) + 1) % servers.size]
+                                    rendererCrashed = false
+                                    rendererCrashCount = 0
+                                    isLoadingPage = true
+                                    onServerSelect(nextServer)
+                                }
+                            ) {
+                                Text("Switch Server", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
-            )
+            }
+
+            if (isWebTorrentMode && !hasPlayableWebTorrentSource) {
+                WebTorrentIdleStage(
+                    onLaunchDemo = {
+                        manualTorrentUri = WebTorrentPolicy.SAMPLE_SINTEL_MAGNET
+                    }
+                )
+            }
 
             // Non-blocking corner exit-fullscreen control when in app full-screen mode
             if (isFullScreen && customFullscreenView == null) {
@@ -724,7 +985,7 @@ fun StreamPlayerView(
         }
 
 
-        // Normal Mode: Servers + Episodes
+        // Normal Mode: WebTorrent Deck (when active) + Servers + Episodes
         if (!isFullScreen) {
             Column(
                 modifier = Modifier
@@ -733,6 +994,28 @@ fun StreamPlayerView(
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(16.dp)
             ) {
+                if (isWebTorrentMode) {
+                    WebTorrentControlDeck(
+                        activeTorrentSource = if (hasPlayableWebTorrentSource) effectiveStreamUrl else "",
+                        telemetry = webTorrentTelemetry,
+                        torrentFiles = webTorrentFiles,
+                        onStartTorrent = { newSource ->
+                            manualTorrentUri = newSource.trim()
+                        },
+                        onSelectTorrentFile = { fileIndex ->
+                            webViewInstance?.evaluateJavascript(
+                                "window.__wtSelectFile && window.__wtSelectFile($fileIndex)",
+                                null
+                            )
+                        },
+                        onClearManualTorrent = {
+                            manualTorrentUri = ""
+                        },
+                        canClearManualTorrent = manualTorrentUri.isNotBlank()
+                    )
+                    Spacer(modifier = Modifier.size(16.dp))
+                }
+
                 // Server Switcher Section
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -960,14 +1243,14 @@ fun StreamPlayerView(
                 ) {
                     Column {
                         Text(
-                            text = "Source Stream Link:",
+                            text = if (isWebTorrentMode) "WebTorrent P2P Source:" else "Source Stream Link:",
                             fontSize = 11.sp,
                             color = colors.textSecondary,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.size(2.dp))
                         Text(
-                            text = currentStreamUrl,
+                            text = effectiveStreamUrl.ifBlank { "Awaiting magnet:? or .torrent link" },
                             fontSize = 12.sp,
                             color = colors.gold,
                             maxLines = 2,
@@ -975,7 +1258,11 @@ fun StreamPlayerView(
                         )
                         Spacer(modifier = Modifier.size(8.dp))
                         Text(
-                            text = "Cinetra embeds Vidly Pro and backup streaming providers. If ads appear in the embed, use an ad blocker or try server 2/3.",
+                            text = if (isWebTorrentMode) {
+                                "Cinetra streams magnet:? and .torrent links peer-to-peer via WebTorrent (WebRTC) directly in the player."
+                            } else {
+                                "Cinetra embeds Vidly Pro and backup streaming providers. If ads appear in the embed, use an ad blocker or try server 2/3."
+                            },
                             fontSize = 11.sp,
                             color = colors.textSecondary
                         )

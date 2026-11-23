@@ -143,6 +143,11 @@ fun CinetraAdminApp(
                         continueWatchingCount = continueWatchingCount,
                         onPreviewMedia = { item ->
                             previewMediaItem = item
+                            previewServer = if (item.isWebTorrentStream()) {
+                                PlayerServer.WEBTORRENT
+                            } else {
+                                PlayerServer.VIDLY
+                            }
                             previewSeason = 1
                             previewEpisode = 1
                         },

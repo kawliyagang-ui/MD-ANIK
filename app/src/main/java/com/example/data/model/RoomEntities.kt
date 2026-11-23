@@ -129,3 +129,51 @@ data class TrackedReleaseEntity(
     val title: String,
     val notifiedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "downloads")
+data class DownloadEntity(
+    @PrimaryKey val id: String,
+    val systemDownloadId: Long = -1L,
+    val mediaId: String,
+    val tmdbId: Long? = null,
+    val title: String,
+    val posterPath: String = "",
+    val backdropPath: String = "",
+    val mediaType: String = "movie",
+    val season: Int = 1,
+    val episode: Int = 1,
+    val episodeTitle: String = "",
+    val qualityLabel: String = "720p HD",
+    val format: String = "MP4",
+    val providerName: String = "MovieBox API",
+    val sourceUrl: String,
+    val localFilePath: String = "",
+    val localUri: String = "",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = "",
+    val status: String = DownloadStatus.QUEUED.storageValue,
+    val bytesDownloaded: Long = 0L,
+    val totalBytes: Long = 0L,
+    val progressPercent: Int = 0,
+    val errorReason: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    val parsedStatus: DownloadStatus
+        get() = DownloadStatus.fromStorage(status)
+
+    val fullPosterUrl: String
+        get() = when {
+            posterPath.isBlank() -> ""
+            posterPath.startsWith("http") -> posterPath
+            else -> "https://image.tmdb.org/t/p/w500$posterPath"
+        }
+
+    val episodeSubtitle: String
+        get() = if (mediaType.equals("tv", ignoreCase = true)) {
+            val epSuffix = if (episodeTitle.isNotBlank()) " • $episodeTitle" else ""
+            "S$season:E$episode$epSuffix"
+        } else {
+            "Movie • $qualityLabel"
+        }
+}

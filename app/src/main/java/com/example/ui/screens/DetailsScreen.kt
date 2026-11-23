@@ -28,11 +28,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -85,7 +88,8 @@ fun DetailsScreen(
     continueWatchingItem: ContinueWatchingEntity? = null,
     similarMedia: List<MediaItem> = emptyList(),
     onSimilarMediaClick: (MediaItem) -> Unit = {},
-    onReportProblemClick: () -> Unit = {}
+    onReportProblemClick: () -> Unit = {},
+    onDownloadClick: (season: Int, episode: Int, episodeTitle: String) -> Unit = { _, _, _ -> }
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
@@ -283,6 +287,46 @@ fun DetailsScreen(
                                     softWrap = false
                                 )
                             }
+                        }
+
+                        // MovieBox API Offline Download CTA
+                        OutlinedButton(
+                            onClick = {
+                                val epName = episodeEntries
+                                    .firstOrNull { it.episodeNumber == targetWatchPair.second }
+                                    ?.name
+                                    .orEmpty()
+                                onDownloadClick(targetWatchPair.first, targetWatchPair.second, epName)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = colors.primaryContainer.copy(alpha = 0.55f),
+                                contentColor = colors.textPrimary
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("details_download_moviebox_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = "Download via MovieBox API",
+                                tint = colors.softRose,
+                                modifier = Modifier.size(19.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (media.mediaType == "tv") {
+                                    "Download S${targetWatchPair.first}:E${targetWatchPair.second} (MovieBox HD)"
+                                } else {
+                                    "Download Offline (MovieBox HD)"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         if (media.mediaType == "tv" && (media.latestEpisodeLabel.isNotBlank() || isInWatchlist)) {
@@ -524,7 +568,18 @@ fun DetailsScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            IconButton(
+                                onClick = { onDownloadClick(selectedSeason, epNum, epInfo.name) },
+                                modifier = Modifier.testTag("details_download_ep_${selectedSeason}_$epNum")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Download Episode $epNum via MovieBox",
+                                    tint = colors.gold
+                                )
+                            }
 
                             CineGradientButton(
                                 onClick = { onWatchClick(selectedSeason, epNum) },
