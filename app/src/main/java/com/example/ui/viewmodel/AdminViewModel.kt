@@ -9,6 +9,7 @@ import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.AdminSecurityPolicy
 import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.EpisodeDirectLinksCodec
 import com.example.data.model.IssueReportEntity
 import com.example.data.model.MediaItem
 import com.example.data.model.PasswordChangeValidation
@@ -54,6 +55,9 @@ data class AdminUiState(
     val formCertification: String = "",
     val isFetchingCertification: Boolean = false,
     val formVidlyId: String = "",
+    val formDirectVideoUrl: String = "",
+    val formDownloadUrl: String = "",
+    val formEpisodeLinksText: String = "",
     val formSeasons: String = "1",
     val formEpisodes: String = "10",
     val isEditing: Boolean = false,
@@ -349,6 +353,11 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formCertification = initialCert,
             isFetchingCertification = initialCert.isBlank() && resolvedId != null,
             formVidlyId = existingCustom?.vidlyId?.takeIf { it.isNotBlank() } ?: item.streamId,
+            formDirectVideoUrl = existingCustom?.directVideoUrl?.takeIf { it.isNotBlank() } ?: item.directVideoUrl,
+            formDownloadUrl = existingCustom?.downloadUrl?.takeIf { it.isNotBlank() } ?: item.downloadUrl,
+            formEpisodeLinksText = EpisodeDirectLinksCodec.formatMultilineInput(
+                existingCustom?.episodeLinksJson?.takeIf { it.isNotBlank() } ?: item.episodeLinksJson
+            ),
             formSeasons = (existingCustom?.numberOfSeasons ?: item.numberOfSeasons).toString(),
             formEpisodes = (existingCustom?.episodesPerSeason ?: item.episodesPerSeason).toString(),
             selectedTmdbPreview = null,
@@ -382,6 +391,9 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
     fun updateGenres(v: String) { _uiState.value = _uiState.value.copy(formGenres = v) }
     fun updateCertification(v: String) { _uiState.value = _uiState.value.copy(formCertification = v) }
     fun updateVidlyId(v: String) { _uiState.value = _uiState.value.copy(formVidlyId = v) }
+    fun updateDirectVideoUrl(v: String) { _uiState.value = _uiState.value.copy(formDirectVideoUrl = v) }
+    fun updateDownloadUrl(v: String) { _uiState.value = _uiState.value.copy(formDownloadUrl = v) }
+    fun updateEpisodeLinksText(v: String) { _uiState.value = _uiState.value.copy(formEpisodeLinksText = v) }
     fun updateSeasons(v: String) { _uiState.value = _uiState.value.copy(formSeasons = v) }
     fun updateEpisodes(v: String) { _uiState.value = _uiState.value.copy(formEpisodes = v) }
 
@@ -400,6 +412,9 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formCertification = "",
             isFetchingCertification = false,
             formVidlyId = "",
+            formDirectVideoUrl = "",
+            formDownloadUrl = "",
+            formEpisodeLinksText = "",
             formSeasons = "1",
             formEpisodes = "10",
             isEditing = false,
@@ -409,9 +424,13 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
 
     fun saveContent() {
         val s = _uiState.value
-        if (s.formTitle.isBlank() || s.formVidlyId.isBlank()) {
+        val hasAnyLink = s.formVidlyId.isNotBlank() ||
+            s.formDirectVideoUrl.isNotBlank() ||
+            s.formDownloadUrl.isNotBlank() ||
+            (s.formMediaType == "tv" && s.formEpisodeLinksText.isNotBlank())
+        if (s.formTitle.isBlank() || !hasAnyLink) {
             _uiState.value = s.copy(
-                formStatusMessage = "Title and Vidly ID / Link are required!",
+                formStatusMessage = "Title and at least a Stream ID or Direct/Download URL are required!",
                 isFormSuccess = false
             )
             return
@@ -419,6 +438,11 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSavingContent = true)
+            val parsedEpisodeJson = if (s.formMediaType == "tv") {
+                EpisodeDirectLinksCodec.parseMultilineInput(s.formEpisodeLinksText)
+            } else {
+                ""
+            }
             val entity = CustomMediaEntity(
                 id = if (s.isEditing && s.formId.isNotBlank()) s.formId else "custom_${UUID.randomUUID().toString().take(8)}",
                 title = s.formTitle.trim(),
@@ -431,6 +455,9 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
                 genres = s.formGenres.trim(),
                 certification = s.formCertification.trim().uppercase(Locale.US),
                 vidlyId = s.formVidlyId.trim(),
+                directVideoUrl = s.formDirectVideoUrl.trim(),
+                downloadUrl = s.formDownloadUrl.trim(),
+                episodeLinksJson = parsedEpisodeJson,
                 tmdbId = s.formTmdbId ?: s.formVidlyId.trim().toLongOrNull(),
                 numberOfSeasons = (s.formSeasons.toIntOrNull() ?: 1).coerceAtLeast(1),
                 episodesPerSeason = (s.formEpisodes.toIntOrNull() ?: 10).coerceAtLeast(1)
@@ -478,6 +505,9 @@ class AdminViewModel(private val repository: MovieRepository) : ViewModel() {
             formGenres = item.genres,
             formCertification = item.certification,
             formVidlyId = item.vidlyId,
+            formDirectVideoUrl = item.directVideoUrl,
+            formDownloadUrl = item.downloadUrl,
+            formEpisodeLinksText = EpisodeDirectLinksCodec.formatMultilineInput(item.episodeLinksJson),
             formSeasons = item.numberOfSeasons.toString(),
             formEpisodes = item.episodesPerSeason.toString(),
             isEditing = true,

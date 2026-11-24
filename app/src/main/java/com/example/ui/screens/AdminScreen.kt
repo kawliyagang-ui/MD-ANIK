@@ -93,6 +93,7 @@ import com.example.R
 import com.example.data.model.AdminAnnouncementEntity
 import com.example.data.model.CloudSyncStatus
 import com.example.data.model.CustomMediaEntity
+import com.example.data.model.EpisodeDirectLinksCodec
 import com.example.data.model.MediaItem
 import com.example.data.model.toMediaItem
 import com.example.ui.components.CatalogCountChip
@@ -308,6 +309,11 @@ fun AdminScreen(
                             mediaType = adminState.formMediaType,
                             certification = adminState.formCertification.trim(),
                             vidlyId = adminState.formVidlyId,
+                            directVideoUrl = adminState.formDirectVideoUrl.trim(),
+                            downloadUrl = adminState.formDownloadUrl.trim(),
+                            episodeLinksJson = if (adminState.formMediaType == "tv") {
+                                EpisodeDirectLinksCodec.parseMultilineInput(adminState.formEpisodeLinksText)
+                            } else "",
                             numberOfSeasons = adminState.formSeasons.toIntOrNull()?.coerceAtLeast(1) ?: 1,
                             episodesPerSeason = adminState.formEpisodes.toIntOrNull()?.coerceAtLeast(1) ?: 10
                         )
@@ -1319,6 +1325,58 @@ private fun AdminAddContentTab(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Direct Video Stream URL (optional; also used for download if downloadUrl is blank)
+        OutlinedTextField(
+            value = state.formDirectVideoUrl,
+            onValueChange = { viewModel.updateDirectVideoUrl(it) },
+            label = { Text("Direct Stream URL (.mp4 / .m3u8)") },
+            placeholder = { Text("https://cdn.example.com/movie.mp4 or .../master.m3u8", color = colors.textMuted) },
+            supportingText = {
+                Text(
+                    text = if (state.formDirectVideoUrl.isNotBlank() && state.formDownloadUrl.isBlank()) {
+                        "Used for both Media3 direct streaming and offline download."
+                    } else {
+                        "Optional: streams natively in Media3 ExoPlayer when set."
+                    },
+                    color = colors.textMuted,
+                    fontSize = 11.sp
+                )
+            },
+            singleLine = true,
+            colors = adminTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_form_direct_video_url")
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Direct Download URL (optional; falls back to directVideoUrl when blank)
+        OutlinedTextField(
+            value = state.formDownloadUrl,
+            onValueChange = { viewModel.updateDownloadUrl(it) },
+            label = { Text("Direct Download URL (Optional)") },
+            placeholder = { Text("https://cdn.example.com/movie-download.mp4", color = colors.textMuted) },
+            supportingText = {
+                Text(
+                    text = if (state.formDownloadUrl.isNotBlank() && state.formDirectVideoUrl.isBlank()) {
+                        "Used for both offline download and Media3 direct streaming."
+                    } else {
+                        "Leave blank to reuse the Direct Stream URL for downloading."
+                    },
+                    color = colors.textMuted,
+                    fontSize = 11.sp
+                )
+            },
+            singleLine = true,
+            colors = adminTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("admin_form_download_url")
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Year & Rating
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
@@ -1440,6 +1498,34 @@ private fun AdminAddContentTab(
                         .testTag("admin_form_episodes")
                 )
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = state.formEpisodeLinksText,
+                onValueChange = { viewModel.updateEpisodeLinksText(it) },
+                label = { Text("Episode Direct / Download Links (Optional)") },
+                placeholder = {
+                    Text(
+                        "S1E1 | https://cdn.example.com/s1e1.mp4\nS1E2 | https://cdn.example.com/s1e2.mp4 | https://cdn.example.com/s1e2_dl.mp4",
+                        color = colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                },
+                supportingText = {
+                    Text(
+                        text = "One per line: S1E1 | streamUrl or S1E1 | streamUrl | downloadUrl. Used for season & episode downloads.",
+                        color = colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                },
+                minLines = 3,
+                maxLines = 6,
+                colors = adminTextFieldColors(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("admin_form_episode_links")
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -1502,7 +1588,10 @@ private fun AdminAddContentTab(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            if (state.formVidlyId.isNotBlank()) {
+            if (state.formVidlyId.isNotBlank() ||
+                state.formDirectVideoUrl.isNotBlank() ||
+                state.formDownloadUrl.isNotBlank()
+            ) {
                 OutlinedButton(
                     onClick = onPreviewStream,
                     modifier = Modifier

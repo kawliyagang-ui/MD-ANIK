@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.util.Log
 import coil.imageLoader
+import com.example.data.download.BatchEpisodeDownloadRequest
 import com.example.data.download.DownloadEngine
 import com.example.data.local.MediaDao
 import com.example.data.model.AdConfigEntity
@@ -1500,13 +1501,10 @@ class MovieRepository(
         episode: Int = 1,
         customHost: String = ""
     ): Result<MovieBoxDownloadBundle> {
-        val subjectResult = MovieBoxApiClient.resolveSubjectForMedia(media, customHost)
-        val subject = subjectResult.getOrElse { return Result.failure(it) }
-        return MovieBoxApiClient.fetchDownloadBundle(
-            subject = subject,
+        return MovieBoxApiClient.resolveMultiLanguageDownloadBundle(
+            media = media,
             season = season,
             episode = episode,
-            isTv = media.mediaType.equals("tv", ignoreCase = true) || subject.subjectType == 2,
             customHost = customHost
         )
     }
@@ -1518,7 +1516,7 @@ class MovieRepository(
         isTv: Boolean = subject.subjectType == 2,
         customHost: String = ""
     ): Result<MovieBoxDownloadBundle> {
-        return MovieBoxApiClient.fetchDownloadBundle(
+        return MovieBoxApiClient.fetchMultiLanguageDownloadBundleForSubject(
             subject = subject,
             season = season,
             episode = episode,
@@ -1534,7 +1532,7 @@ class MovieRepository(
         episodeTitle: String = "",
         option: MovieBoxDownloadOption,
         subtitle: MovieBoxSubtitleOption? = null,
-        providerName: String = "MovieBox API",
+        providerName: String = "Cloud HD",
         wifiOnly: Boolean = false
     ): Result<DownloadEntity> {
         val engine = downloadEngine ?: return Result.failure(
@@ -1550,6 +1548,43 @@ class MovieRepository(
             providerName = providerName,
             wifiOnly = wifiOnly
         )
+    }
+
+    suspend fun startDirectUrlDownload(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        episodeTitle: String = "",
+        directUrl: String,
+        wifiOnly: Boolean = false
+    ): Result<DownloadEntity> {
+        val engine = downloadEngine ?: return Result.failure(
+            IllegalStateException("Download service requires an Android application context.")
+        )
+        return engine.enqueueDirectUrlDownload(
+            media = media,
+            season = season,
+            episode = episode,
+            episodeTitle = episodeTitle,
+            directUrl = directUrl,
+            wifiOnly = wifiOnly
+        )
+    }
+
+    suspend fun enqueueBatchEpisodeDownloads(
+        requests: List<BatchEpisodeDownloadRequest>,
+        wifiOnly: Boolean = false
+    ): Int {
+        val engine = downloadEngine ?: return 0
+        return engine.enqueueBatchDownloads(requests, wifiOnly)
+    }
+
+    suspend fun pauseDownload(downloadId: String) {
+        downloadEngine?.pauseDownload(downloadId)
+    }
+
+    suspend fun resumeDownload(downloadId: String) {
+        downloadEngine?.resumeDownload(downloadId)
     }
 
     suspend fun syncActiveDownloads(): List<DownloadEntity> {
@@ -1573,6 +1608,52 @@ class MovieRepository(
             IllegalStateException("Download service unavailable.")
         )
         return engine.exportToPublicDownloads(download)
+    }
+
+    suspend fun getPlaybackPosition(
+        mediaId: String,
+        mediaType: String,
+        season: Int,
+        episode: Int
+    ): Long = withContext(Dispatchers.IO) {
+        val key = playbackPositionKey(mediaId, mediaType, season, episode)
+        mediaDao.getPlaybackPosition(key)?.positionMs ?: 0L
+    }
+
+    suspend fun savePlaybackPosition(
+        mediaId: String,
+        mediaType: String,
+        season: Int,
+        episode: Int,
+        positionMs: Long,
+        durationMs: Long
+    ) = withContext(Dispatchers.IO) {
+        val key = playbackPositionKey(mediaId, mediaType, season, episode)
+        val safePos = if (durationMs > 0L && positionMs >= durationMs - 3_000L) 0L else positionMs.coerceAtLeast(0L)
+        mediaDao.upsertPlaybackPosition(
+            com.example.data.model.PlaybackPositionEntity(
+                key = key,
+                mediaId = mediaId,
+                season = if (mediaType.equals("tv", ignoreCase = true)) season else 1,
+                episode = if (mediaType.equals("tv", ignoreCase = true)) episode else 1,
+                positionMs = safePos,
+                durationMs = durationMs.coerceAtLeast(0L),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun playbackPositionKey(
+        mediaId: String,
+        mediaType: String,
+        season: Int,
+        episode: Int
+    ): String {
+        return if (mediaType.equals("tv", ignoreCase = true)) {
+            "${mediaId}_s${season}_e${episode}"
+        } else {
+            "${mediaId}_movie"
+        }
     }
 }
 

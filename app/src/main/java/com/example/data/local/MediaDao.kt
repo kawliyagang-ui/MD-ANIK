@@ -201,11 +201,20 @@ interface MediaDao {
     @Query("SELECT * FROM downloads")
     suspend fun getAllDownloadsOnce(): List<com.example.data.model.DownloadEntity>
 
+    @Query("SELECT * FROM downloads WHERE mediaId = :mediaId ORDER BY season ASC, episode ASC")
+    suspend fun getDownloadsByMediaId(mediaId: String): List<com.example.data.model.DownloadEntity>
+
     @Query("SELECT * FROM downloads WHERE id = :id LIMIT 1")
     suspend fun getDownloadById(id: String): com.example.data.model.DownloadEntity?
 
     @Query("SELECT * FROM downloads WHERE systemDownloadId = :systemDownloadId LIMIT 1")
     suspend fun getDownloadBySystemId(systemDownloadId: Long): com.example.data.model.DownloadEntity?
+
+    @Query("SELECT COUNT(*) FROM downloads WHERE status = 'RUNNING' OR status = 'DOWNLOADING'")
+    suspend fun countRunningDownloads(): Int
+
+    @Query("SELECT * FROM downloads WHERE status = 'QUEUED' ORDER BY createdAt ASC")
+    suspend fun getQueuedDownloadsOrdered(): List<com.example.data.model.DownloadEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDownload(download: com.example.data.model.DownloadEntity)
@@ -215,4 +224,14 @@ interface MediaDao {
 
     @Query("DELETE FROM downloads")
     suspend fun clearAllDownloads()
+
+    // Direct Media3 Playback Positions
+    @Query("SELECT * FROM playback_positions WHERE `key` = :key LIMIT 1")
+    suspend fun getPlaybackPosition(key: String): com.example.data.model.PlaybackPositionEntity?
+
+    @Query("SELECT * FROM playback_positions")
+    fun getAllPlaybackPositions(): Flow<List<com.example.data.model.PlaybackPositionEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPlaybackPosition(position: com.example.data.model.PlaybackPositionEntity)
 }

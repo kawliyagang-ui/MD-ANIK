@@ -51,6 +51,21 @@ object WebViewFullscreenHost {
         }
     }
 
+    fun emptyBlockedResponse(): WebResourceResponse {
+        return WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            403,
+            "Blocked",
+            mapOf("Access-Control-Allow-Origin" to "*"),
+            ByteArrayInputStream(ByteArray(0))
+        )
+    }
+
+    fun isDestroyed(webView: WebView?): Boolean {
+        return webView == null || destroyedWebViews.contains(webView)
+    }
+
     private fun installServiceWorkerFilterOnce() {
         if (!swFilterInstalled.compareAndSet(false, true)) return
         runCatching {
@@ -63,7 +78,7 @@ object WebViewFullscreenHost {
                 override fun shouldInterceptRequest(request: WebResourceRequest?): WebResourceResponse? {
                     val targetUrl = request?.url?.toString() ?: return null
                     return if (PlayerControlsPolicy.shouldBlockServiceWorkerRequest(targetUrl)) {
-                        WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                        emptyBlockedResponse()
                     } else {
                         null
                     }
@@ -90,6 +105,7 @@ object WebViewFullscreenHost {
             webView.settings.apply {
                 allowFileAccess = false
                 allowContentAccess = false
+                databaseEnabled = false
                 setGeolocationEnabled(false)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     offscreenPreRaster = false
@@ -115,7 +131,9 @@ object WebViewFullscreenHost {
             webView.removeJavascriptInterface("CinetraWebTorrentBridge")
             webView.webChromeClient = null
             webView.webViewClient = WebViewClient()
+            webView.onPause()
             webView.stopLoading()
+            webView.clearCache(false)
             webView.clearHistory()
             webView.removeAllViews()
             webView.destroy()

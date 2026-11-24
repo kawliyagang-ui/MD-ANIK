@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
@@ -28,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +48,8 @@ import com.example.data.model.MediaItem
 import com.example.ui.theme.CineTheme
 import java.util.Locale
 
+val LocalDownloadedMediaIds = staticCompositionLocalOf<Set<String>> { emptySet() }
+
 @Composable
 fun MovieCard(
     media: MediaItem,
@@ -58,6 +62,7 @@ fun MovieCard(
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
+    val isDownloaded = LocalDownloadedMediaIds.current.contains(media.id)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
@@ -223,6 +228,36 @@ fun MovieCard(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
+                }
+            }
+
+            if (isDownloaded) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(
+                            start = 6.dp,
+                            bottom = if (progressPercent != null || episodeLabel != null) 28.dp else 6.dp
+                        )
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(colors.success.copy(alpha = 0.9f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .testTag("poster_downloaded_badge_${media.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DownloadDone,
+                        contentDescription = "Downloaded",
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "Downloaded",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }

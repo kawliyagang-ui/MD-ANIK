@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
@@ -223,6 +224,31 @@ fun DetailedMovieView(
                             tint = colors.textMuted,
                             modifier = Modifier.size(32.dp)
                         )
+                    }
+                    if (LocalDownloadedMediaIds.current.contains(media.id)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(colors.success.copy(alpha = 0.92f))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                .testTag("details_poster_downloaded_badge")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DownloadDone,
+                                contentDescription = "Downloaded",
+                                tint = Color.White,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Downloaded",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 

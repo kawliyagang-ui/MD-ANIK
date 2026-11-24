@@ -19,7 +19,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import java.io.ByteArrayInputStream
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -74,6 +73,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.R
 import com.example.ui.theme.CineTheme
 
@@ -107,7 +109,9 @@ fun TrailerModal(
         }
     }
 
-    val embedUrl = youtubeKey?.let { "https://www.youtube.com/embed/$it?autoplay=1&playsinline=1&fs=1" }
+    val embedUrl = youtubeKey?.let {
+        "https://www.youtube-nocookie.com/embed/$it?autoplay=1&playsinline=1&fs=1&rel=0&modestbranding=1"
+    }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var webViewSlotKey by remember(youtubeKey) { mutableIntStateOf(0) }
     var rendererCrashed by remember(youtubeKey) { mutableStateOf(false) }
@@ -116,6 +120,23 @@ fun TrailerModal(
     var customFullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenContainer by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, webViewRef, rendererCrashed) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(webViewRef)) {
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> runCatching { webViewRef?.onResume() }
+                    Lifecycle.Event.ON_PAUSE -> runCatching { webViewRef?.onPause() }
+                    else -> Unit
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val detachCustomViewOnly: () -> Unit = {
         val c = fullscreenContainer
@@ -351,6 +372,7 @@ fun TrailerModal(
                         }
                         else -> {
                             val dialogRootView = LocalView.current
+                            if (!rendererCrashed) {
                             key(webViewSlotKey) {
                             AndroidView(
                                 modifier = Modifier.fillMaxSize(),
@@ -397,7 +419,7 @@ fun TrailerModal(
                                             ): WebResourceResponse? {
                                                 val targetUrl = request?.url?.toString() ?: return null
                                                 return if (PlayerControlsPolicy.shouldBlockPlayerSubresource(targetUrl)) {
-                                                    WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                                                    WebViewFullscreenHost.emptyBlockedResponse()
                                                 } else {
                                                     null
                                                 }
@@ -474,6 +496,9 @@ fun TrailerModal(
                                     }
                                 },
                                 update = { webView ->
+                                    if (rendererCrashed || WebViewFullscreenHost.isDestroyed(webView)) {
+                                        return@AndroidView
+                                    }
                                     if (webView.tag != embedUrl) {
                                         webView.tag = embedUrl
                                         isWebLoading = true
@@ -484,12 +509,13 @@ fun TrailerModal(
                                     if (webViewRef === wv) {
                                         webViewRef = null
                                     }
-                                    if (!rendererCrashed) {
+                                    if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(wv)) {
                                         runCatching { wv.loadUrl("about:blank") }
                                     }
                                     WebViewFullscreenHost.safelyDestroyWebView(wv)
                                 }
                             )
+                            }
                             }
 
                             if (rendererCrashed) {

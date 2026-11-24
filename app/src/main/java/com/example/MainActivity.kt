@@ -1,10 +1,5 @@
 package com.example
 
-import android.app.DownloadManager
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -74,6 +69,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -90,7 +86,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -98,14 +93,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.AppDatabase
 import com.example.data.local.UserPreferences
 import com.example.data.model.DownloadStatus
+import com.example.data.model.MediaItem
 import com.example.data.repository.MovieRepository
 import com.example.ui.components.AdGateOverlay
+import com.example.ui.components.LocalDownloadedMediaIds
 import com.example.ui.components.MovieBoxDownloadSheet
 import com.example.ui.components.StreamPlayerView
 import com.example.ui.components.TrailerModal
 import com.example.ui.screens.CategoryListScreen
 import com.example.ui.screens.ContinueWatchingScreen
 import com.example.ui.screens.DetailsScreen
+import com.example.ui.screens.DirectMediaPlayerScreen
 import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.ExploreScreen
 import com.example.ui.screens.HomeScreen
@@ -121,6 +119,7 @@ import com.example.ui.viewmodel.AdGateState
 import com.example.ui.viewmodel.MovieViewModel
 import com.example.ui.viewmodel.MovieViewModelFactory
 import com.example.ui.viewmodel.Screen
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -171,25 +170,6 @@ fun CinetraApp() {
         }
     }
 
-    DisposableEffect(context) {
-        val downloadReceiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context?, intent: Intent?) {
-                if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
-                    movieViewModel.syncDownloadsNow()
-                }
-            }
-        }
-        ContextCompat.registerReceiver(
-            context,
-            downloadReceiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-        onDispose {
-            runCatching { context.unregisterReceiver(downloadReceiver) }
-        }
-    }
-
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -237,17 +217,32 @@ fun CinetraApp() {
         }
 
         val watchlistIds = remember(watchlist) { watchlist.map { it.id }.toSet() }
-        val activeDownloadsCount = remember(downloads) { downloads.count { it.parsedStatus.isActive } }
-        val completedDownloadsCount = remember(downloads) { downloads.count { it.parsedStatus == DownloadStatus.COMPLETED } }
-        val isPlayerScreen = userState.currentScreen is Screen.Player || userState.currentScreen is Screen.OfflinePlayer
+        val runningDownloadsCount = remember(downloads) {
+            downloads.count { it.parsedStatus == DownloadStatus.RUNNING }
+        }
+        val completedDownloadsCount = remember(downloads) {
+            downloads.count { it.parsedStatus == DownloadStatus.COMPLETED }
+        }
+        val downloadedMediaIds = remember(downloads) {
+            downloads.filter {
+                it.parsedStatus == DownloadStatus.COMPLETED &&
+                    it.localFilePath.isNotBlank() &&
+                    File(it.localFilePath).exists()
+            }.map { it.mediaId }.toSet()
+        }
+        val isPlayerScreen = userState.currentScreen is Screen.Player ||
+            userState.currentScreen is Screen.DirectPlayer ||
+            userState.currentScreen is Screen.OfflinePlayer
         val isDedicatedSubPage = userState.currentScreen is Screen.Details ||
             userState.currentScreen is Screen.Search ||
             userState.currentScreen is Screen.CategoryList ||
             userState.currentScreen is Screen.LanguageCatalog ||
             userState.currentScreen is Screen.Player ||
+            userState.currentScreen is Screen.DirectPlayer ||
             userState.currentScreen is Screen.OfflinePlayer ||
-            userState.currentScreen is Screen.Downloads ||
             userState.currentScreen is Screen.ReportProblem
+
+        CompositionLocalProvider(LocalDownloadedMediaIds provides downloadedMediaIds) {
 
         BackHandler(
             enabled = userState.backStack.size > 1 &&
@@ -347,14 +342,11 @@ fun CinetraApp() {
                                 ) {
                                     BadgedBox(
                                         badge = {
-                                            val totalBadge = activeDownloadsCount + completedDownloadsCount
-                                            if (totalBadge > 0) {
-                                                Badge(
-                                                    containerColor = if (activeDownloadsCount > 0) colors.softRose else colors.gold
-                                                ) {
+                                            if (runningDownloadsCount > 0) {
+                                                Badge(containerColor = colors.softRose) {
                                                     Text(
-                                                        text = "$totalBadge",
-                                                        color = if (activeDownloadsCount > 0) Color.White else Color.Black,
+                                                        text = "$runningDownloadsCount",
+                                                        color = Color.White,
                                                         fontSize = 10.sp
                                                     )
                                                 }
@@ -364,7 +356,7 @@ fun CinetraApp() {
                                         Icon(
                                             imageVector = if (userState.currentScreen is Screen.Downloads) Icons.Filled.Download else Icons.Outlined.Download,
                                             contentDescription = "Downloads",
-                                            tint = if (activeDownloadsCount > 0) colors.softRose else if (completedDownloadsCount > 0) colors.gold else colors.textPrimary
+                                            tint = if (runningDownloadsCount > 0) colors.softRose else if (completedDownloadsCount > 0) colors.gold else colors.textPrimary
                                         )
                                     }
                                 }
@@ -447,7 +439,7 @@ fun CinetraApp() {
                                         contentDescription = "Home"
                                     )
                                 },
-                                label = { Text("Home", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                label = { Text("Home", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                                 colors = navItemColors,
                                 modifier = Modifier.testTag("nav_home")
                             )
@@ -461,7 +453,7 @@ fun CinetraApp() {
                                         contentDescription = "Explore"
                                     )
                                 },
-                                label = { Text("Explore", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                label = { Text("Explore", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                                 colors = navItemColors,
                                 modifier = Modifier.testTag("nav_explore")
                             )
@@ -485,9 +477,33 @@ fun CinetraApp() {
                                         )
                                     }
                                 },
-                                label = { Text("Saved", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                label = { Text("Saved", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                                 colors = navItemColors,
                                 modifier = Modifier.testTag("nav_watchlist")
+                            )
+
+                            NavigationBarItem(
+                                selected = userState.currentScreen is Screen.Downloads,
+                                onClick = { movieViewModel.openDownloadsScreen() },
+                                icon = {
+                                    BadgedBox(
+                                        badge = {
+                                            if (runningDownloadsCount > 0) {
+                                                Badge(containerColor = colors.softRose) {
+                                                    Text("$runningDownloadsCount", color = Color.White)
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (userState.currentScreen is Screen.Downloads) Icons.Filled.Download else Icons.Outlined.Download,
+                                            contentDescription = "Downloads"
+                                        )
+                                    }
+                                },
+                                label = { Text("Downloads", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
+                                colors = navItemColors,
+                                modifier = Modifier.testTag("nav_downloads")
                             )
 
                             NavigationBarItem(
@@ -509,7 +525,7 @@ fun CinetraApp() {
                                         )
                                     }
                                 },
-                                label = { Text("History", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                label = { Text("History", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                                 colors = navItemColors,
                                 modifier = Modifier.testTag("nav_history")
                             )
@@ -523,7 +539,7 @@ fun CinetraApp() {
                                         contentDescription = "Settings"
                                     )
                                 },
-                                label = { Text("Settings", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                label = { Text("Settings", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                                 colors = navItemColors,
                                 modifier = Modifier.testTag("nav_settings")
                             )
@@ -622,10 +638,9 @@ fun CinetraApp() {
                             icon = {
                                 BadgedBox(
                                     badge = {
-                                        val count = activeDownloadsCount + completedDownloadsCount
-                                        if (count > 0) {
+                                        if (runningDownloadsCount > 0) {
                                             Badge(containerColor = colors.softRose) {
-                                                Text("$count", color = Color.White)
+                                                Text("$runningDownloadsCount", color = Color.White)
                                             }
                                         }
                                     }
@@ -665,20 +680,21 @@ fun CinetraApp() {
                                 targetState is Screen.CategoryList ||
                                 targetState is Screen.LanguageCatalog ||
                                 targetState is Screen.Player ||
+                                targetState is Screen.DirectPlayer ||
                                 targetState is Screen.OfflinePlayer ||
-                                targetState is Screen.Downloads ||
                                 targetState is Screen.ReportProblem
                             val wasSecondaryOrigin = initialState is Screen.Details ||
                                 initialState is Screen.Search ||
                                 initialState is Screen.CategoryList ||
                                 initialState is Screen.LanguageCatalog ||
                                 initialState is Screen.Player ||
+                                initialState is Screen.DirectPlayer ||
                                 initialState is Screen.OfflinePlayer ||
-                                initialState is Screen.Downloads ||
                                 initialState is Screen.ReportProblem
 
                             when {
                                 targetState is Screen.Player || initialState is Screen.Player ||
+                                    targetState is Screen.DirectPlayer || initialState is Screen.DirectPlayer ||
                                     targetState is Screen.OfflinePlayer || initialState is Screen.OfflinePlayer -> {
                                     // Keep native video/WebView surfaces un-scaled and non-overlapping during transitions
                                     EnterTransition.None togetherWith ExitTransition.None
@@ -728,6 +744,7 @@ fun CinetraApp() {
                                 is Screen.LanguageCatalog -> "language_${screen.languageCode}"
                                 is Screen.Details -> "details_${screen.media.id}"
                                 is Screen.Player -> "player_${screen.media.id}"
+                                is Screen.DirectPlayer -> "direct_player_${screen.media.id}_${screen.season}_${screen.episode}"
                                 is Screen.OfflinePlayer -> "offline_player_${screen.download.id}"
                             }
                         },
@@ -1136,6 +1153,8 @@ fun CinetraApp() {
                                     },
                                     onPlayOffline = { movieViewModel.openOfflinePlayer(it) },
                                     onExportToDevice = { movieViewModel.exportDownloadToPublicFolder(it) },
+                                    onPauseDownload = { movieViewModel.pauseDownload(it) },
+                                    onResumeDownload = { movieViewModel.resumeDownload(it) },
                                     onRetryDownload = { movieViewModel.retryDownload(it) },
                                     onCancelOrDelete = { movieViewModel.cancelOrDeleteDownload(it) },
                                     onRefreshStatus = { movieViewModel.syncDownloadsNow() },
@@ -1185,9 +1204,21 @@ fun CinetraApp() {
                                     similarMedia = userState.similarForSelectedMedia,
                                     onSimilarMediaClick = { movieViewModel.openDetails(it) },
                                     onReportProblemClick = { movieViewModel.openReportProblem(media = activeMedia) },
+                                    downloads = downloads,
                                     onDownloadClick = { s, ep, epTitle ->
-                                        movieViewModel.openMovieBoxDownloadSheet(activeMedia, s, ep, epTitle)
+                                        movieViewModel.startMovieOrEpisodeDownload(activeMedia, s, ep, epTitle)
                                     },
+                                    onDownloadSeason = { s ->
+                                        movieViewModel.enqueueSeasonBatchDownload(activeMedia, s)
+                                    },
+                                    onDownloadSelectedEpisodes = { s, selectedEps ->
+                                        movieViewModel.enqueueSeasonBatchDownload(activeMedia, s, selectedEps)
+                                    },
+                                    onPauseDownload = { movieViewModel.pauseDownload(it) },
+                                    onResumeDownload = { movieViewModel.resumeDownload(it) },
+                                    onCancelDownload = { movieViewModel.cancelOrDeleteDownload(it) },
+                                    onRetryDownload = { movieViewModel.retryDownload(it) },
+                                    onPlayOffline = { movieViewModel.openOfflinePlayer(it) },
                                     onBack = { movieViewModel.navigateBack() }
                                 )
                             }
@@ -1244,9 +1275,54 @@ fun CinetraApp() {
                                     onBack = { movieViewModel.navigateBack() }
                                 )
                             }
+                            is Screen.DirectPlayer -> {
+                                DirectMediaPlayerScreen(
+                                    media = screen.media,
+                                    season = screen.season,
+                                    episode = screen.episode,
+                                    sourceUrl = screen.sourceUrl,
+                                    isLocalFile = screen.isLocalFile,
+                                    downloadEntity = screen.downloadEntity,
+                                    initialPositionMs = screen.initialPositionMs,
+                                    onSavePosition = { pos, dur ->
+                                        movieViewModel.saveDirectPlaybackPosition(
+                                            media = screen.media,
+                                            season = screen.season,
+                                            episode = screen.episode,
+                                            positionMs = pos,
+                                            durationMs = dur
+                                        )
+                                    },
+                                    onFallbackToWebEmbed = if (!screen.isLocalFile) {
+                                        { movieViewModel.openWebEmbedPlayer(screen.media, screen.season, screen.episode) }
+                                    } else {
+                                        null
+                                    },
+                                    onBack = { movieViewModel.navigateBack() }
+                                )
+                            }
                             is Screen.OfflinePlayer -> {
                                 OfflineVideoPlayerScreen(
                                     download = screen.download,
+                                    initialPositionMs = screen.initialPositionMs,
+                                    onSavePosition = { pos, dur ->
+                                        val offlineMedia = MediaItem(
+                                            id = screen.download.mediaId,
+                                            tmdbId = screen.download.tmdbId,
+                                            title = screen.download.title,
+                                            overview = "",
+                                            posterPath = screen.download.posterPath,
+                                            backdropPath = screen.download.backdropPath,
+                                            mediaType = screen.download.mediaType
+                                        )
+                                        movieViewModel.saveDirectPlaybackPosition(
+                                            media = offlineMedia,
+                                            season = screen.download.season,
+                                            episode = screen.download.episode,
+                                            positionMs = pos,
+                                            durationMs = dur
+                                        )
+                                    },
                                     onBack = { movieViewModel.navigateBack() }
                                 )
                             }
@@ -1288,6 +1364,7 @@ fun CinetraApp() {
                     )
                 }
             }
+        }
         }
         }
     }

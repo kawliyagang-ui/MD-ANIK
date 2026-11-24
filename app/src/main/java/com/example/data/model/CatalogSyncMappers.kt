@@ -49,6 +49,9 @@ object CatalogSyncMappers {
             "trailerYoutubeKey" to entity.trailerYoutubeKey,
             "numberOfSeasons" to entity.numberOfSeasons,
             "episodesPerSeason" to entity.episodesPerSeason,
+            "directVideoUrl" to entity.directVideoUrl,
+            "downloadUrl" to entity.downloadUrl,
+            "episodeLinksJson" to entity.episodeLinksJson,
             "createdAt" to entity.createdAt
         )
     }
@@ -76,6 +79,9 @@ object CatalogSyncMappers {
             trailerYoutubeKey = (data["trailerYoutubeKey"] as? String)?.takeIf { it.isNotBlank() },
             numberOfSeasons = ((data["numberOfSeasons"] as? Number)?.toInt() ?: 1).coerceAtLeast(1),
             episodesPerSeason = ((data["episodesPerSeason"] as? Number)?.toInt() ?: 10).coerceAtLeast(1),
+            directVideoUrl = (data["directVideoUrl"] as? String)?.trim().orEmpty(),
+            downloadUrl = (data["downloadUrl"] as? String)?.trim().orEmpty(),
+            episodeLinksJson = (data["episodeLinksJson"] as? String)?.trim().orEmpty(),
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }
@@ -235,7 +241,10 @@ object CatalogOverridePolicy {
                 customOverride.episodesPerSeason
             } else {
                 catalogItem.episodesPerSeason
-            }
+            },
+            directVideoUrl = customOverride.directVideoUrl.ifBlank { catalogItem.directVideoUrl },
+            downloadUrl = customOverride.downloadUrl.ifBlank { catalogItem.downloadUrl },
+            episodeLinksJson = customOverride.episodeLinksJson.ifBlank { catalogItem.episodeLinksJson }
         )
     }
 

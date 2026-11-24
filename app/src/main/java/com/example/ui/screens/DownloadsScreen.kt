@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,13 +29,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderCopy
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -44,6 +48,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,8 +77,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.DownloadEntity
+import com.example.data.model.DownloadSeasonGroup
+import com.example.data.model.DownloadSeriesGroup
 import com.example.data.model.DownloadStatus
 import com.example.data.model.MovieBoxSubject
+import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
 import com.example.ui.components.CineGradientButton
 import com.example.ui.theme.CineTheme
@@ -91,6 +99,8 @@ fun DownloadsScreen(
     onOpenMovieBoxSubject: (MovieBoxSubject, Int, Int) -> Unit,
     onPlayOffline: (DownloadEntity) -> Unit,
     onExportToDevice: (DownloadEntity) -> Unit,
+    onPauseDownload: (String) -> Unit,
+    onResumeDownload: (String) -> Unit,
     onRetryDownload: (DownloadEntity) -> Unit,
     onCancelOrDelete: (String) -> Unit,
     onRefreshStatus: () -> Unit,
@@ -104,6 +114,7 @@ fun DownloadsScreen(
     var selectedFilter by remember { mutableStateOf("All") }
     var searchDraft by remember(movieBoxSearchQuery) { mutableStateOf(movieBoxSearchQuery) }
     var tvEpisodePickerSubject by remember { mutableStateOf<MovieBoxSubject?>(null) }
+    var collapsedSeasons by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val filteredDownloads = remember(downloads, selectedFilter) {
         when (selectedFilter) {
@@ -114,6 +125,10 @@ fun DownloadsScreen(
         }
     }
 
+    val grouping = remember(filteredDownloads) {
+        PlaybackSourcePolicy.groupDownloadsForDisplay(filteredDownloads)
+    }
+
     val totalOfflineBytes = remember(downloads) {
         downloads.filter { it.parsedStatus == DownloadStatus.COMPLETED }
             .sumOf { maxOf(it.bytesDownloaded, it.totalBytes) }
@@ -121,8 +136,11 @@ fun DownloadsScreen(
     val completedCount = remember(downloads) {
         downloads.count { it.parsedStatus == DownloadStatus.COMPLETED }
     }
-    val activeCount = remember(downloads) {
-        downloads.count { it.parsedStatus.isActive }
+    val runningCount = remember(downloads) {
+        downloads.count { it.parsedStatus == DownloadStatus.RUNNING }
+    }
+    val queuedOrPausedCount = remember(downloads) {
+        downloads.count { it.parsedStatus == DownloadStatus.QUEUED || it.parsedStatus == DownloadStatus.PAUSED }
     }
 
     BackHandler { onBack() }
@@ -142,7 +160,9 @@ fun DownloadsScreen(
         ) {
             IconButton(
                 onClick = onBack,
-                modifier = Modifier.testTag("downloads_back_button")
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("downloads_back_button")
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -153,29 +173,34 @@ fun DownloadsScreen(
             Spacer(modifier = Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Downloads & MovieBox",
+                    text = "Downloads",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = colors.textPrimary
                 )
                 val summary = buildString {
-                    append("$completedCount offline")
-                    if (activeCount > 0) append(" • $activeCount active")
+                    append("$completedCount completed")
+                    if (runningCount > 0) append(" • $runningCount downloading")
+                    if (queuedOrPausedCount > 0) append(" • $queuedOrPausedCount queued/paused")
                     if (totalOfflineBytes > 0L) append(" • ${formatDownloadBytes(totalOfflineBytes)}")
                 }
                 Text(
                     text = summary,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = colors.gold,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             IconButton(
                 onClick = onRefreshStatus,
-                modifier = Modifier.testTag("downloads_refresh_button")
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("downloads_refresh_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh download progress",
+                    contentDescription = "Sync download queue",
                     tint = colors.textPrimary
                 )
             }
@@ -198,7 +223,7 @@ fun DownloadsScreen(
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onDismissFeedback, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onDismissFeedback, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Dismiss",
@@ -214,126 +239,6 @@ fun DownloadsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Direct MovieBox API Search Card
-            item(key = "moviebox_search_card") {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = colors.surface),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDownload,
-                                contentDescription = null,
-                                tint = colors.softRose,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "MovieBox API Direct Search",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = colors.textPrimary
-                                )
-                                Text(
-                                    text = "Host: ${movieBoxHostUrl.removePrefix("https://")} • 1080p/720p MP4 + Subtitles",
-                                    fontSize = 11.sp,
-                                    color = colors.textSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = searchDraft,
-                            onValueChange = { searchDraft = it },
-                            singleLine = true,
-                            placeholder = {
-                                Text("Search MovieBox (e.g. Inception, Breaking Bad)...", fontSize = 12.sp, color = colors.textMuted)
-                            },
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = { onSearchMovieBox(searchDraft) },
-                                    modifier = Modifier.testTag("moviebox_hub_search_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = "Search MovieBox API",
-                                        tint = colors.softRose
-                                    )
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = { onSearchMovieBox(searchDraft) }),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = colors.primary,
-                                unfocusedBorderColor = colors.border,
-                                focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("moviebox_hub_search_input")
-                        )
-
-                        if (isSearchingMovieBox) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = colors.softRose,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Querying MovieBox mirrors...",
-                                    fontSize = 12.sp,
-                                    color = colors.textSecondary
-                                )
-                            }
-                        } else if (!movieBoxSearchError.isNullOrBlank()) {
-                            Text(
-                                text = movieBoxSearchError,
-                                fontSize = 12.sp,
-                                color = colors.softRose
-                            )
-                        } else if (movieBoxSearchResults.isNotEmpty()) {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                itemsIndexed(
-                                    items = movieBoxSearchResults,
-                                    key = { index, item -> "mb_${index}_${item.subjectId}" }
-                                ) { _, subject ->
-                                    MovieBoxResultCard(
-                                        subject = subject,
-                                        onDownloadClick = {
-                                            if (subject.subjectType == 2) {
-                                                tvEpisodePickerSubject = subject
-                                            } else {
-                                                onOpenMovieBoxSubject(subject, 1, 1)
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // Filter Chips
             item(key = "downloads_filter_row") {
                 Row(
@@ -342,6 +247,7 @@ fun DownloadsScreen(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val activeTotal = runningCount + queuedOrPausedCount
                     listOf("All", "Active", "Completed", "Failed").forEach { tab ->
                         val selected = selectedFilter == tab
                         FilterChip(
@@ -350,8 +256,8 @@ fun DownloadsScreen(
                             label = {
                                 Text(
                                     text = when (tab) {
-                                        "Active" -> "Active ($activeCount)"
-                                        "Completed" -> "Offline ($completedCount)"
+                                        "Active" -> "Active ($activeTotal)"
+                                        "Completed" -> "Completed ($completedCount)"
                                         else -> tab
                                     },
                                     fontSize = 12.sp,
@@ -398,7 +304,7 @@ fun DownloadsScreen(
                             color = colors.textPrimary
                         )
                         Text(
-                            text = "Tap Download on any movie or TV episode page, or search MovieBox above to save HD videos for offline playback.",
+                            text = "Tap Download on any movie, full TV season, or episode to watch offline inside Cinetra.",
                             fontSize = 12.sp,
                             color = colors.textSecondary,
                             lineHeight = 18.sp
@@ -406,14 +312,161 @@ fun DownloadsScreen(
                     }
                 }
             } else {
-                items(filteredDownloads, key = { it.id }) { download ->
+                // Grouped TV Series -> Seasons
+                items(
+                    items = grouping.seriesGroups,
+                    key = { "series_${it.mediaId}" }
+                ) { seriesGroup ->
+                    SeriesDownloadGroupCard(
+                        seriesGroup = seriesGroup,
+                        collapsedSeasons = collapsedSeasons,
+                        onToggleSeasonCollapse = { key ->
+                            collapsedSeasons = if (key in collapsedSeasons) {
+                                collapsedSeasons - key
+                            } else {
+                                collapsedSeasons + key
+                            }
+                        },
+                        onPlayOffline = onPlayOffline,
+                        onExportToDevice = onExportToDevice,
+                        onPauseDownload = onPauseDownload,
+                        onResumeDownload = onResumeDownload,
+                        onRetryDownload = onRetryDownload,
+                        onCancelOrDelete = onCancelOrDelete
+                    )
+                }
+
+                // Movie Downloads
+                items(grouping.movieDownloads, key = { it.id }) { download ->
                     DownloadItemCard(
                         download = download,
                         onPlayOffline = { onPlayOffline(download) },
                         onExportToDevice = { onExportToDevice(download) },
+                        onPause = { onPauseDownload(download.id) },
+                        onResume = { onResumeDownload(download.id) },
                         onRetry = { onRetryDownload(download) },
                         onCancelOrDelete = { onCancelOrDelete(download.id) }
                     )
+                }
+            }
+
+            // Catalog Download Discovery Card
+            item(key = "catalog_download_search_card") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = colors.softRose,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Catalog Download Search",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = colors.textPrimary
+                                )
+                                Text(
+                                    text = "Search movies & series for offline HD downloads",
+                                    fontSize = 11.sp,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = searchDraft,
+                            onValueChange = { searchDraft = it },
+                            singleLine = true,
+                            placeholder = {
+                                Text("Search title (e.g. Inception, Breaking Bad)...", fontSize = 12.sp, color = colors.textMuted)
+                            },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { onSearchMovieBox(searchDraft) },
+                                    modifier = Modifier.testTag("catalog_download_search_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search catalog downloads",
+                                        tint = colors.softRose
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { onSearchMovieBox(searchDraft) }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.border,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("catalog_download_search_input")
+                        )
+
+                        if (isSearchingMovieBox) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    color = colors.softRose,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Searching available downloads...",
+                                    fontSize = 12.sp,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        } else if (!movieBoxSearchError.isNullOrBlank()) {
+                            Text(
+                                text = movieBoxSearchError,
+                                fontSize = 12.sp,
+                                color = colors.softRose
+                            )
+                        } else if (movieBoxSearchResults.isNotEmpty()) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                itemsIndexed(
+                                    items = movieBoxSearchResults,
+                                    key = { index, item -> "mb_${index}_${item.subjectId}" }
+                                ) { _, subject ->
+                                    MovieBoxResultCard(
+                                        subject = subject,
+                                        onDownloadClick = {
+                                            if (subject.subjectType == 2) {
+                                                tvEpisodePickerSubject = subject
+                                            } else {
+                                                onOpenMovieBoxSubject(subject, 1, 1)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -437,7 +490,7 @@ fun DownloadsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Choose Season & Episode to fetch from MovieBox API:",
+                        text = "Choose Season & Episode to fetch download links:",
                         fontSize = 12.sp,
                         color = colors.textSecondary
                     )
@@ -476,6 +529,297 @@ fun DownloadsScreen(
                     Text("Cancel", color = colors.textSecondary)
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun SeriesDownloadGroupCard(
+    seriesGroup: DownloadSeriesGroup,
+    collapsedSeasons: Set<String>,
+    onToggleSeasonCollapse: (String) -> Unit,
+    onPlayOffline: (DownloadEntity) -> Unit,
+    onExportToDevice: (DownloadEntity) -> Unit,
+    onPauseDownload: (String) -> Unit,
+    onResumeDownload: (String) -> Unit,
+    onRetryDownload: (DownloadEntity) -> Unit,
+    onCancelOrDelete: (String) -> Unit
+) {
+    val colors = CineTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        seriesGroup.seasons.forEach { seasonGroup ->
+            SeasonDownloadGroupCard(
+                seasonGroup = seasonGroup,
+                isExpanded = seasonGroup.seriesKey !in collapsedSeasons,
+                onToggleExpand = { onToggleSeasonCollapse(seasonGroup.seriesKey) },
+                onPlayOffline = onPlayOffline,
+                onExportToDevice = onExportToDevice,
+                onPauseDownload = onPauseDownload,
+                onResumeDownload = onResumeDownload,
+                onRetryDownload = onRetryDownload,
+                onCancelOrDelete = onCancelOrDelete
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeasonDownloadGroupCard(
+    seasonGroup: DownloadSeasonGroup,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onPlayOffline: (DownloadEntity) -> Unit,
+    onExportToDevice: (DownloadEntity) -> Unit,
+    onPauseDownload: (String) -> Unit,
+    onResumeDownload: (String) -> Unit,
+    onRetryDownload: (DownloadEntity) -> Unit,
+    onCancelOrDelete: (String) -> Unit
+) {
+    val colors = CineTheme.colors
+    Card(
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .testTag("download_season_group_${seasonGroup.seriesKey}")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Season Group Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpand)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(52.dp)
+                        .height(72.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(colors.surfaceElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (seasonGroup.posterUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = seasonGroup.posterUrl,
+                            contentDescription = seasonGroup.seriesTitle,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            tint = colors.softRose
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = seasonGroup.seriesTitle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Season ${seasonGroup.seasonNumber} • ${seasonGroup.completedCount}/${seasonGroup.episodes.size} Completed",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.gold
+                    )
+                    LinearProgressIndicator(
+                        progress = { seasonGroup.overallProgressPercent / 100f },
+                        color = if (seasonGroup.completedCount == seasonGroup.episodes.size) colors.success else colors.primary,
+                        trackColor = colors.surfaceElevated,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50))
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (seasonGroup.totalExpectedBytes > 0L) {
+                                "${formatDownloadBytes(seasonGroup.totalDownloadedBytes)} / ${formatDownloadBytes(seasonGroup.totalExpectedBytes)}"
+                            } else {
+                                "${seasonGroup.episodes.size} episode(s)"
+                            },
+                            fontSize = 11.sp,
+                            color = colors.textSecondary
+                        )
+                        Text(
+                            text = "${seasonGroup.overallProgressPercent}%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary
+                        )
+                    }
+                }
+
+                IconButton(onClick = onToggleExpand, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isExpanded) "Collapse season" else "Expand season",
+                        tint = colors.textSecondary
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    HorizontalDivider(color = colors.border)
+                    seasonGroup.episodes.forEachIndexed { idx, epDownload ->
+                        EpisodeDownloadRow(
+                            download = epDownload,
+                            onPlayOffline = { onPlayOffline(epDownload) },
+                            onExportToDevice = { onExportToDevice(epDownload) },
+                            onPause = { onPauseDownload(epDownload.id) },
+                            onResume = { onResumeDownload(epDownload.id) },
+                            onRetry = { onRetryDownload(epDownload) },
+                            onCancelOrDelete = { onCancelOrDelete(epDownload.id) }
+                        )
+                        if (idx < seasonGroup.episodes.lastIndex) {
+                            HorizontalDivider(
+                                color = colors.border.copy(alpha = 0.55f),
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EpisodeDownloadRow(
+    download: DownloadEntity,
+    onPlayOffline: () -> Unit,
+    onExportToDevice: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetry: () -> Unit,
+    onCancelOrDelete: () -> Unit
+) {
+    val colors = CineTheme.colors
+    val status = download.parsedStatus
+    val statusColor = when (status) {
+        DownloadStatus.COMPLETED -> colors.success
+        DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
+        DownloadStatus.PAUSED -> colors.gold
+        DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag("download_card_${download.id}"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "E${download.episode}${download.episodeTitle.takeIf { it.isNotBlank() }?.let { " • $it" } ?: ""}",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val sizeText = when {
+                    download.totalBytes > 0L -> "${formatDownloadBytes(download.bytesDownloaded)} / ${formatDownloadBytes(download.totalBytes)}"
+                    download.bytesDownloaded > 0L -> formatDownloadBytes(download.bytesDownloaded)
+                    else -> download.qualityLabel
+                }
+                Text(
+                    text = "${download.format} • $sizeText",
+                    fontSize = 11.sp,
+                    color = colors.textSecondary
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = status.displayLabel,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = statusColor,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(statusColor.copy(alpha = 0.14f))
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            )
+        }
+
+        if (status.isActive) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (download.progressPercent > 0) {
+                    LinearProgressIndicator(
+                        progress = { download.progressPercent / 100f },
+                        color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
+                        trackColor = colors.surfaceElevated,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(50))
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
+                        trackColor = colors.surfaceElevated,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(50))
+                    )
+                }
+                Text(
+                    text = "${download.progressPercent}%",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+            }
+        } else if (status == DownloadStatus.FAILED && download.errorReason.isNotBlank()) {
+            Text(
+                text = download.errorReason,
+                fontSize = 11.sp,
+                color = colors.softRose,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        DownloadActionButtonsRow(
+            status = status,
+            onPlayOffline = onPlayOffline,
+            onExportToDevice = onExportToDevice,
+            onPause = onPause,
+            onResume = onResume,
+            onRetry = onRetry,
+            onCancelOrDelete = onCancelOrDelete
         )
     }
 }
@@ -536,7 +880,7 @@ private fun MovieBoxResultCard(
             text = listOfNotNull(
                 subject.releaseYear.takeIf { it.isNotBlank() },
                 subject.imdbRating.takeIf { it.isNotBlank() }?.let { "★ $it" }
-            ).joinToString(" • ").ifBlank { "MovieBox Ready" },
+            ).joinToString(" • ").ifBlank { "HD Ready" },
             fontSize = 10.sp,
             color = colors.textSecondary,
             maxLines = 1
@@ -545,9 +889,9 @@ private fun MovieBoxResultCard(
             onClick = onDownloadClick,
             shape = RoundedCornerShape(8.dp),
             fillWidth = true,
-            minHeight = 32.dp,
+            minHeight = 36.dp,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(36.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Download,
@@ -566,6 +910,8 @@ private fun DownloadItemCard(
     download: DownloadEntity,
     onPlayOffline: () -> Unit,
     onExportToDevice: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
     onRetry: () -> Unit,
     onCancelOrDelete: () -> Unit
 ) {
@@ -575,7 +921,7 @@ private fun DownloadItemCard(
         DownloadStatus.COMPLETED -> colors.success
         DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
         DownloadStatus.PAUSED -> colors.gold
-        DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED -> colors.info
+        DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
     }
 
     Card(
@@ -618,6 +964,23 @@ private fun DownloadItemCard(
                             tint = colors.softRose,
                             modifier = Modifier.size(26.dp)
                         )
+                    }
+                    if (status == DownloadStatus.COMPLETED) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(colors.success.copy(alpha = 0.9f))
+                                .padding(vertical = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DownloadDone,
+                                contentDescription = "Downloaded",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
                     }
                 }
 
@@ -670,8 +1033,18 @@ private fun DownloadItemCard(
                             )
                         }
                     }
+                    val cleanProvider = remember(download.providerName) {
+                        val raw = download.providerName.trim()
+                        when {
+                            raw.isBlank() ||
+                                raw.contains("moviebox", ignoreCase = true) ||
+                                raw.contains("aoneroom", ignoreCase = true) ||
+                                raw.contains("inmoviebox", ignoreCase = true) -> "Cloud HD"
+                            else -> raw
+                        }
+                    }
                     Text(
-                        text = download.providerName + if (download.subtitleLabel.isNotBlank()) " • Sub: ${download.subtitleLabel}" else "",
+                        text = cleanProvider + if (download.subtitleLabel.isNotBlank()) " • Sub: ${download.subtitleLabel}" else "",
                         fontSize = 10.sp,
                         color = colors.textMuted,
                         maxLines = 1,
@@ -685,7 +1058,7 @@ private fun DownloadItemCard(
                     if (download.progressPercent > 0) {
                         LinearProgressIndicator(
                             progress = { download.progressPercent / 100f },
-                            color = colors.softRose,
+                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
                             trackColor = colors.surfaceElevated,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -694,7 +1067,7 @@ private fun DownloadItemCard(
                         )
                     } else {
                         LinearProgressIndicator(
-                            color = colors.softRose,
+                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
                             trackColor = colors.surfaceElevated,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -711,14 +1084,16 @@ private fun DownloadItemCard(
                         } else if (download.bytesDownloaded > 0L) {
                             formatDownloadBytes(download.bytesDownloaded)
                         } else {
-                            download.errorReason.ifBlank { "Starting download..." }
+                            download.errorReason.ifBlank {
+                                if (status == DownloadStatus.QUEUED) "Waiting in queue..." else "Downloading..."
+                            }
                         }
                         Text(text = sizeProg, fontSize = 11.sp, color = colors.textSecondary)
                         Text(
                             text = "${download.progressPercent}%",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = colors.softRose
+                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose
                         )
                     }
                 }
@@ -739,99 +1114,187 @@ private fun DownloadItemCard(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                when (status) {
-                    DownloadStatus.COMPLETED -> {
-                        CineGradientButton(
-                            onClick = onPlayOffline,
-                            shape = RoundedCornerShape(8.dp),
-                            minHeight = 40.dp,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Play Offline",
-                                tint = Color.White,
-                                modifier = Modifier.size(17.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Play Offline", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                        OutlinedButton(
-                            onClick = onExportToDevice,
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp),
-                            modifier = Modifier.height(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FolderCopy,
-                                contentDescription = "Save to Downloads folder",
-                                tint = colors.gold,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Export", fontSize = 11.sp, color = colors.textPrimary)
-                        }
-                        IconButton(
-                            onClick = onCancelOrDelete,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete download",
-                                tint = colors.softRose
-                            )
-                        }
-                    }
+            DownloadActionButtonsRow(
+                status = status,
+                onPlayOffline = onPlayOffline,
+                onExportToDevice = onExportToDevice,
+                onPause = onPause,
+                onResume = onResume,
+                onRetry = onRetry,
+                onCancelOrDelete = onCancelOrDelete
+            )
+        }
+    }
+}
 
-                    DownloadStatus.FAILED, DownloadStatus.CANCELLED -> {
-                        OutlinedButton(
-                            onClick = onRetry,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Retry",
-                                tint = colors.gold,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry Download", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        IconButton(
-                            onClick = onCancelOrDelete,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Remove failed download",
-                                tint = colors.softRose
-                            )
-                        }
-                    }
+@Composable
+private fun DownloadActionButtonsRow(
+    status: DownloadStatus,
+    onPlayOffline: () -> Unit,
+    onExportToDevice: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetry: () -> Unit,
+    onCancelOrDelete: () -> Unit
+) {
+    val colors = CineTheme.colors
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        when (status) {
+            DownloadStatus.COMPLETED -> {
+                CineGradientButton(
+                    onClick = onPlayOffline,
+                    shape = RoundedCornerShape(8.dp),
+                    minHeight = 44.dp,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Play", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                OutlinedButton(
+                    onClick = onExportToDevice,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderCopy,
+                        contentDescription = "Save to Downloads folder",
+                        tint = colors.gold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Save to Downloads folder",
+                        fontSize = 11.sp,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(
+                    onClick = onCancelOrDelete,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete download",
+                        tint = colors.softRose
+                    )
+                }
+            }
 
-                    else -> {
-                        OutlinedButton(
-                            onClick = onCancelOrDelete,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Cancel download",
-                                tint = colors.softRose,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cancel Download", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.softRose)
-                        }
-                    }
+            DownloadStatus.RUNNING, DownloadStatus.QUEUED -> {
+                OutlinedButton(
+                    onClick = onPause,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Pause,
+                        contentDescription = "Pause",
+                        tint = colors.gold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Pause", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                }
+                OutlinedButton(
+                    onClick = onCancelOrDelete,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cancel",
+                        tint = colors.softRose,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.softRose)
+                }
+            }
+
+            DownloadStatus.PAUSED -> {
+                CineGradientButton(
+                    onClick = onResume,
+                    shape = RoundedCornerShape(8.dp),
+                    minHeight = 44.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Resume",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Resume", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                OutlinedButton(
+                    onClick = onCancelOrDelete,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cancel",
+                        tint = colors.softRose,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.softRose)
+                }
+            }
+
+            DownloadStatus.FAILED, DownloadStatus.CANCELLED -> {
+                OutlinedButton(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Retry",
+                        tint = colors.gold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                }
+                IconButton(
+                    onClick = onCancelOrDelete,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = colors.softRose
+                    )
                 }
             }
         }

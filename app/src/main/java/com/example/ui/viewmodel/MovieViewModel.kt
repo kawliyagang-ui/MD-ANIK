@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.download.BatchEpisodeDownloadRequest
+import com.example.data.download.DownloadEngine
 import com.example.data.local.DownloadPreferences
 import com.example.data.local.NotificationPreferences
 import com.example.data.local.UserPreferences
@@ -28,6 +30,8 @@ import com.example.data.model.MovieBoxSubject
 import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.NewReleasePolicy
 import com.example.data.model.PagedCatalogBatch
+import com.example.data.model.PlaybackSource
+import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.PlayerServer
 import com.example.data.model.PreferredDownloadQuality
 import com.example.data.model.RecommendationPolicy
@@ -83,7 +87,16 @@ sealed class Screen {
     ) : Screen()
     data class Details(val media: MediaItem) : Screen()
     data class Player(val media: MediaItem, val season: Int = 1, val episode: Int = 1) : Screen()
-    data class OfflinePlayer(val download: DownloadEntity) : Screen()
+    data class DirectPlayer(
+        val media: MediaItem,
+        val season: Int = 1,
+        val episode: Int = 1,
+        val sourceUrl: String,
+        val isLocalFile: Boolean,
+        val downloadEntity: DownloadEntity? = null,
+        val initialPositionMs: Long = 0L
+    ) : Screen()
+    data class OfflinePlayer(val download: DownloadEntity, val initialPositionMs: Long = 0L) : Screen()
 }
 
 data class DownloadSheetUiState(
@@ -1918,6 +1931,104 @@ class MovieViewModel(
             season = season,
             episode = episode
         )
+        val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(safeSeason).orEmpty()
+        val playbackSource = PlaybackSourcePolicy.resolvePlaybackSource(
+            media = resolvedMedia,
+            season = safeSeason,
+            episode = safeEpisode,
+            episodesInSeason = episodesInSeason,
+            downloads = downloads.value
+        )
+
+        when (playbackSource) {
+            is PlaybackSource.LocalFile -> {
+                viewModelScope.launch {
+                    val savedPosMs = repository.getPlaybackPosition(
+                        mediaId = resolvedMedia.id,
+                        mediaType = resolvedMedia.mediaType,
+                        season = safeSeason,
+                        episode = safeEpisode
+                    )
+                    repository.saveContinueWatching(
+                        item = resolvedMedia,
+                        season = safeSeason,
+                        episode = safeEpisode,
+                        watchedSeconds = savedPosMs / 1000L,
+                        durationSeconds = 0L,
+                        progressPercent = 0
+                    )
+                    _uiState.update {
+                        it.copy(
+                            playingMedia = resolvedMedia,
+                            currentSeason = safeSeason,
+                            currentEpisode = safeEpisode
+                        )
+                    }
+                    navigateTo(
+                        Screen.DirectPlayer(
+                            media = resolvedMedia,
+                            season = safeSeason,
+                            episode = safeEpisode,
+                            sourceUrl = playbackSource.filePath,
+                            isLocalFile = true,
+                            downloadEntity = playbackSource.download,
+                            initialPositionMs = savedPosMs
+                        )
+                    )
+                }
+            }
+            is PlaybackSource.DirectStream -> {
+                viewModelScope.launch {
+                    val savedPosMs = repository.getPlaybackPosition(
+                        mediaId = resolvedMedia.id,
+                        mediaType = resolvedMedia.mediaType,
+                        season = safeSeason,
+                        episode = safeEpisode
+                    )
+                    repository.saveContinueWatching(
+                        item = resolvedMedia,
+                        season = safeSeason,
+                        episode = safeEpisode,
+                        watchedSeconds = savedPosMs / 1000L,
+                        durationSeconds = 0L,
+                        progressPercent = 0
+                    )
+                    _uiState.update {
+                        it.copy(
+                            playingMedia = resolvedMedia,
+                            currentSeason = safeSeason,
+                            currentEpisode = safeEpisode
+                        )
+                    }
+                    navigateTo(
+                        Screen.DirectPlayer(
+                            media = resolvedMedia,
+                            season = safeSeason,
+                            episode = safeEpisode,
+                            sourceUrl = playbackSource.url,
+                            isLocalFile = false,
+                            downloadEntity = null,
+                            initialPositionMs = savedPosMs
+                        )
+                    )
+                }
+                if (resolvedMedia.mediaType == "tv") {
+                    ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
+                }
+            }
+            is PlaybackSource.WebEmbed -> {
+                openWebEmbedPlayer(resolvedMedia, safeSeason, safeEpisode)
+            }
+        }
+    }
+
+    fun openWebEmbedPlayer(media: MediaItem, season: Int = 1, episode: Int = 1) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
+            mediaType = resolvedMedia.mediaType,
+            season = season,
+            episode = episode
+        )
         val existing = continueWatching.value.firstOrNull { it.id == resolvedMedia.id }
         val preserve = ContinueWatchingPolicy.shouldPreserveProgress(
             existing = existing,
@@ -1948,6 +2059,34 @@ class MovieViewModel(
         navigateTo(Screen.Player(resolvedMedia, safeSeason, safeEpisode))
         if (resolvedMedia.mediaType == "tv") {
             ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
+        }
+    }
+
+    fun saveDirectPlaybackPosition(
+        media: MediaItem,
+        season: Int,
+        episode: Int,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        viewModelScope.launch {
+            repository.savePlaybackPosition(
+                mediaId = media.id,
+                mediaType = media.mediaType,
+                season = season,
+                episode = episode,
+                positionMs = positionMs,
+                durationMs = durationMs
+            )
+            if (durationMs > 0L) {
+                repository.saveContinueWatching(
+                    item = media,
+                    season = season,
+                    episode = episode,
+                    watchedSeconds = positionMs / 1000L,
+                    durationSeconds = durationMs / 1000L
+                )
+            }
         }
     }
 
@@ -2239,14 +2378,15 @@ class MovieViewModel(
 
     private fun observeDownloadsProgress() {
         viewModelScope.launch {
+            repository.syncActiveDownloads()
             downloads.collect { list ->
-                val hasActive = list.any { it.parsedStatus.isActive }
-                if (hasActive && downloadSyncJob?.isActive != true) {
+                val hasRunningOrQueued = list.any { it.parsedStatus.isRunningOrQueued }
+                if (hasRunningOrQueued && downloadSyncJob?.isActive != true) {
                     downloadSyncJob = viewModelScope.launch {
                         while (true) {
+                            delay(4000L)
                             val synced = repository.syncActiveDownloads()
-                            if (synced.none { it.parsedStatus.isActive }) break
-                            delay(1000L)
+                            if (synced.none { it.parsedStatus.isRunningOrQueued }) break
                         }
                     }
                 }
@@ -2266,7 +2406,153 @@ class MovieViewModel(
     }
 
     fun openOfflinePlayer(download: DownloadEntity) {
-        navigateTo(Screen.OfflinePlayer(download))
+        viewModelScope.launch {
+            val savedPosMs = repository.getPlaybackPosition(
+                mediaId = download.mediaId,
+                mediaType = download.mediaType,
+                season = download.season,
+                episode = download.episode
+            )
+            navigateTo(Screen.OfflinePlayer(download, savedPosMs))
+        }
+    }
+
+    fun pauseDownload(downloadId: String) {
+        viewModelScope.launch {
+            repository.pauseDownload(downloadId)
+        }
+    }
+
+    fun resumeDownload(downloadId: String) {
+        viewModelScope.launch {
+            repository.resumeDownload(downloadId)
+        }
+    }
+
+    fun startMovieOrEpisodeDownload(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        episodeTitle: String = ""
+    ) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(season).orEmpty()
+        val link = resolvedMedia.resolveDirectLinkForEpisode(
+            season = season,
+            episode = episode,
+            episodesInSeason = episodesInSeason
+        )
+        val directDownloadUrl = link.effectiveDownloadUrl()
+        if (directDownloadUrl.startsWith("http://", ignoreCase = true) ||
+            directDownloadUrl.startsWith("https://", ignoreCase = true)
+        ) {
+            val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
+            viewModelScope.launch {
+                repository.startDirectUrlDownload(
+                    media = resolvedMedia,
+                    season = season,
+                    episode = episode,
+                    episodeTitle = episodeTitle,
+                    directUrl = directDownloadUrl,
+                    wifiOnly = wifiOnly
+                ).fold(
+                    onSuccess = { entry ->
+                        val label = if (resolvedMedia.mediaType.equals("tv", true)) {
+                            "Queued ${entry.title} S${entry.season}E${entry.episode}"
+                        } else {
+                            "Queued ${entry.title}"
+                        }
+                        _uiState.update { it.copy(downloadFeedbackMessage = label) }
+                    },
+                    onFailure = { err ->
+                        _uiState.update {
+                            it.copy(downloadFeedbackMessage = err.localizedMessage ?: "Download failed.")
+                        }
+                    }
+                )
+            }
+        } else {
+            openMovieBoxDownloadSheet(
+                media = resolvedMedia,
+                season = season,
+                episode = episode,
+                episodeTitle = episodeTitle
+            )
+        }
+    }
+
+    fun enqueueSeasonBatchDownload(
+        media: MediaItem,
+        seasonNumber: Int,
+        selectedEpisodesOnly: Set<Int>? = null
+    ) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(seasonNumber).orEmpty()
+        val episodeCount = resolvedMedia.episodesForSeason(seasonNumber)
+        val allEpisodeNums = if (episodesInSeason.isNotEmpty()) {
+            episodesInSeason.map { it.episodeNumber }
+        } else {
+            (1..episodeCount).toList()
+        }
+
+        val eligibility = PlaybackSourcePolicy.computeSeasonEligibility(
+            media = resolvedMedia,
+            seasonNumber = seasonNumber,
+            episodeNumbers = allEpisodeNums,
+            episodesInSeason = episodesInSeason,
+            downloads = downloads.value
+        )
+
+        val targetEpisodes = if (selectedEpisodesOnly != null) {
+            eligibility.eligibleEpisodes.filter { it in selectedEpisodesOnly }
+        } else {
+            eligibility.eligibleEpisodes
+        }
+
+        if (targetEpisodes.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    downloadFeedbackMessage = if (eligibility.downloadedEpisodes.isNotEmpty() && eligibility.noLinkEpisodes.isEmpty()) {
+                        "All episodes in Season $seasonNumber are already downloaded or queued."
+                    } else {
+                        "No episodes with direct download links available in Season $seasonNumber."
+                    }
+                )
+            }
+            return
+        }
+
+        val requests = targetEpisodes.mapNotNull { epNum ->
+            val epInfo = episodesInSeason.firstOrNull { it.episodeNumber == epNum }
+            val link = resolvedMedia.resolveDirectLinkForEpisode(
+                season = seasonNumber,
+                episode = epNum,
+                episodesInSeason = episodesInSeason
+            )
+            val dlUrl = link.effectiveDownloadUrl()
+            if (!dlUrl.startsWith("http", ignoreCase = true)) null
+            else BatchEpisodeDownloadRequest(
+                media = resolvedMedia,
+                season = seasonNumber,
+                episode = epNum,
+                episodeTitle = epInfo?.name.orEmpty(),
+                sourceUrl = dlUrl
+            )
+        }
+
+        val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
+        viewModelScope.launch {
+            val count = repository.enqueueBatchEpisodeDownloads(requests, wifiOnly)
+            _uiState.update {
+                it.copy(
+                    downloadFeedbackMessage = if (count > 0) {
+                        "Queued $count episode(s) from Season $seasonNumber (max 2 running at once)."
+                    } else {
+                        "Episodes already downloaded or queued."
+                    }
+                )
+            }
+        }
     }
 
     fun openMovieBoxDownloadSheet(
@@ -2301,17 +2587,12 @@ class MovieViewModel(
 
         val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
         downloadFetchJob = viewModelScope.launch {
-            // Also populate alternate MovieBox search candidates in parallel
-            val candidatesDeferred = async {
-                repository.searchMovieBoxSubjects(media.title, "all", customHost).getOrDefault(emptyList())
-            }
             val bundleResult = repository.resolveMovieBoxDownloadBundle(
                 media = media,
                 season = safeSeason,
                 episode = safeEpisode,
                 customHost = customHost
             )
-            val candidates = candidatesDeferred.await()
 
             bundleResult.fold(
                 onSuccess = { bundle ->
@@ -2321,7 +2602,7 @@ class MovieViewModel(
                                 isLoading = false,
                                 errorMessage = null,
                                 bundle = bundle,
-                                searchCandidates = candidates
+                                searchCandidates = emptyList()
                             )
                         )
                     }
@@ -2332,9 +2613,9 @@ class MovieViewModel(
                             downloadSheet = current.downloadSheet.copy(
                                 isLoading = false,
                                 errorMessage = err.localizedMessage
-                                    ?: "Could not fetch MovieBox download links for \"${media.title}\".",
+                                    ?: "Could not fetch download links for \"${media.title}\".",
                                 bundle = null,
-                                searchCandidates = candidates
+                                searchCandidates = emptyList()
                             )
                         )
                     }
@@ -2370,7 +2651,7 @@ class MovieViewModel(
                             downloadSheet = current.downloadSheet.copy(
                                 isSearchingCandidates = false,
                                 searchCandidates = items,
-                                errorMessage = if (items.isEmpty()) "No MovieBox titles matched \"$clean\"." else null
+                                errorMessage = if (items.isEmpty()) "No titles matched \"$clean\"." else null
                             )
                         )
                     }
@@ -2380,7 +2661,7 @@ class MovieViewModel(
                         current.copy(
                             downloadSheet = current.downloadSheet.copy(
                                 isSearchingCandidates = false,
-                                errorMessage = err.localizedMessage ?: "MovieBox search failed."
+                                errorMessage = err.localizedMessage ?: "Search failed."
                             )
                         )
                     }
@@ -2444,11 +2725,6 @@ class MovieViewModel(
         val sheet = _uiState.value.downloadSheet
         val media = sheet.targetMedia ?: return
         val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
-        val hostLabel = sheet.bundle?.sourceHost
-            ?.removePrefix("https://")
-            ?.removePrefix("http://")
-            ?.ifBlank { "MovieBox API" }
-            ?: "MovieBox API"
 
         viewModelScope.launch {
             val res = repository.startMovieBoxDownload(
@@ -2458,7 +2734,7 @@ class MovieViewModel(
                 episodeTitle = sheet.episodeTitle,
                 option = option,
                 subtitle = subtitle,
-                providerName = "MovieBox ($hostLabel)",
+                providerName = DownloadEngine.DEFAULT_CLOUD_PROVIDER,
                 wifiOnly = wifiOnly
             )
             res.fold(
@@ -2466,7 +2742,7 @@ class MovieViewModel(
                     _uiState.update {
                         it.copy(
                             downloadSheet = DownloadSheetUiState(),
-                            downloadFeedbackMessage = "Downloading ${entry.title} (${entry.qualityLabel}) via MovieBox API"
+                            downloadFeedbackMessage = "Downloading ${entry.title} (${entry.qualityLabel})"
                         )
                     }
                     syncDownloadsNow()
@@ -2507,7 +2783,7 @@ class MovieViewModel(
                         it.copy(
                             movieBoxSearchResults = items,
                             isSearchingMovieBox = false,
-                            movieBoxSearchError = if (items.isEmpty()) "No MovieBox titles found for \"$clean\"." else null
+                            movieBoxSearchError = if (items.isEmpty()) "No titles found for \"$clean\"." else null
                         )
                     }
                 },
@@ -2515,7 +2791,7 @@ class MovieViewModel(
                     _uiState.update {
                         it.copy(
                             isSearchingMovieBox = false,
-                            movieBoxSearchError = err.localizedMessage ?: "MovieBox API request failed."
+                            movieBoxSearchError = err.localizedMessage ?: "Download catalog search failed."
                         )
                     }
                 }
@@ -2575,7 +2851,7 @@ class MovieViewModel(
                         current.copy(
                             downloadSheet = current.downloadSheet.copy(
                                 isLoading = false,
-                                errorMessage = err.localizedMessage ?: "No MovieBox downloads available."
+                                errorMessage = err.localizedMessage ?: "No downloads available for this title."
                             )
                         )
                     }
@@ -2640,7 +2916,7 @@ class MovieViewModel(
         _uiState.update {
             it.copy(
                 downloadPrefs = updated,
-                settingsFeedbackMessage = "MovieBox & Download settings saved (${updated.preferredQuality.displayName})."
+                settingsFeedbackMessage = "Download settings saved (${updated.preferredQuality.displayName})."
             )
         }
         viewModelScope.launch {
@@ -2652,12 +2928,12 @@ class MovieViewModel(
         viewModelScope.launch {
             MovieBoxApiClient.testHostConnection(hostUrl).fold(
                 onSuccess = { msg ->
-                    _uiState.update { it.copy(settingsFeedbackMessage = "MovieBox API: $msg") }
+                    _uiState.update { it.copy(settingsFeedbackMessage = msg) }
                 },
                 onFailure = { err ->
                     _uiState.update {
                         it.copy(
-                            settingsFeedbackMessage = "MovieBox connection failed: ${err.localizedMessage ?: "Network error"}"
+                            settingsFeedbackMessage = "Connection failed: ${err.localizedMessage ?: "Network error"}"
                         )
                     }
                 }

@@ -2,6 +2,7 @@ package com.example
 
 import com.example.data.model.*
 import com.example.data.model.PlayerServer
+import com.example.data.remote.MovieBoxApiClient
 import com.example.data.repository.applyToMediaItem
 import com.example.data.repository.toEpisodeInfoList
 import com.example.ui.theme.DarkThemePalette
@@ -1710,6 +1711,8 @@ class ExampleUnitTest {
         assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://stats.bingr.one/script.js"))
         assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://cdn.example.com/disable-devtool.min.js"))
         assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://vidly.pro/sw.js?v=1"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://ads.pubmatic.com/AdServer/js/prebid.js"))
+        assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockPlayerSubresource("https://js-agent.newrelic.com/nr-spa-1216.min.js"))
         assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://vidsrc.to/service-worker.js"))
         assertTrue(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://stats.bingr.one/script.js"))
         assertFalse(com.example.ui.components.PlayerControlsPolicy.shouldBlockServiceWorkerRequest("https://vidly.pro/movie/693134"))
@@ -1749,4 +1752,363 @@ class ExampleUnitTest {
             com.example.data.download.DownloadEngine.mapHttpStatusToReadableError(429).contains("429")
         )
     }
+
+    @Test
+    fun testUnifiedLinksAndEpisodeDirectLinksCodec() {
+        val streamOnly = MediaItem(
+            id = "m1",
+            title = "Stream Only",
+            overview = "",
+            posterPath = "",
+            mediaType = "movie",
+            directVideoUrl = "https://cdn.example.com/movie.m3u8"
+        )
+        assertEquals("https://cdn.example.com/movie.m3u8", streamOnly.effectiveStreamUrl())
+        assertEquals("https://cdn.example.com/movie.m3u8", streamOnly.effectiveDownloadUrl())
+
+        val downloadOnly = MediaItem(
+            id = "m2",
+            title = "Download Only",
+            overview = "",
+            posterPath = "",
+            mediaType = "movie",
+            downloadUrl = "https://cdn.example.com/movie.mp4"
+        )
+        assertEquals("https://cdn.example.com/movie.mp4", downloadOnly.effectiveStreamUrl())
+        assertEquals("https://cdn.example.com/movie.mp4", downloadOnly.effectiveDownloadUrl())
+
+        val multiline = """
+            S1E1 | https://cdn.example.com/s1e1.mp4
+            S01E02 | https://cdn.example.com/s1e2.m3u8 | https://cdn.example.com/s1e2.mp4
+            2x3 | https://cdn.example.com/s2e3.mp4
+        """.trimIndent()
+        val json = com.example.data.model.EpisodeDirectLinksCodec.parseMultilineInput(multiline)
+        val parsed = com.example.data.model.EpisodeDirectLinksCodec.decodeJson(json)
+        assertEquals(3, parsed.size)
+        assertEquals("https://cdn.example.com/s1e1.mp4", parsed["s1e1"]?.effectiveDownloadUrl())
+        assertEquals("https://cdn.example.com/s1e2.m3u8", parsed["s1e2"]?.effectiveStreamUrl())
+        assertEquals("https://cdn.example.com/s1e2.mp4", parsed["s1e2"]?.effectiveDownloadUrl())
+        assertEquals("https://cdn.example.com/s2e3.mp4", parsed["s2e3"]?.effectiveStreamUrl())
+
+        val roundTripText = com.example.data.model.EpisodeDirectLinksCodec.formatMultilineInput(json)
+        assertTrue(roundTripText.contains("S1E1 | https://cdn.example.com/s1e1.mp4"))
+        assertTrue(roundTripText.contains("S1E2 | https://cdn.example.com/s1e2.m3u8 | https://cdn.example.com/s1e2.mp4"))
+    }
+
+    @Test
+    fun testPlaybackSourcePriorityLocalOverDirectOverWebEmbed() {
+        val tempFile = java.io.File.createTempFile("cinetra_local_test", ".mp4")
+        try {
+            tempFile.writeText("fake video payload")
+            val media = MediaItem(
+                id = "m_prio",
+                tmdbId = 27205L,
+                title = "Inception",
+                overview = "",
+                posterPath = "",
+                mediaType = "movie",
+                vidlyId = "27205",
+                directVideoUrl = "https://cdn.example.com/inception.m3u8"
+            )
+            val completedDownload = DownloadEntity(
+                id = "m_prio_movie_direct",
+                mediaId = "m_prio",
+                tmdbId = 27205L,
+                title = "Inception",
+                posterPath = "",
+                backdropPath = "",
+                mediaType = "movie",
+                sourceUrl = "https://cdn.example.com/inception.m3u8",
+                localFilePath = tempFile.absolutePath,
+                status = DownloadStatus.COMPLETED.storageValue
+            )
+
+            val localResolved = com.example.data.model.PlaybackSourcePolicy.resolvePlaybackSource(
+                media = media,
+                downloads = listOf(completedDownload)
+            )
+            assertTrue(localResolved is com.example.data.model.PlaybackSource.LocalFile)
+            assertEquals(tempFile.absolutePath, (localResolved as com.example.data.model.PlaybackSource.LocalFile).filePath)
+
+            val streamResolved = com.example.data.model.PlaybackSourcePolicy.resolvePlaybackSource(
+                media = media,
+                downloads = emptyList()
+            )
+            assertTrue(streamResolved is com.example.data.model.PlaybackSource.DirectStream)
+            val streamUrl = (streamResolved as com.example.data.model.PlaybackSource.DirectStream).url
+            assertEquals("https://cdn.example.com/inception.m3u8", streamUrl)
+            assertTrue(com.example.data.model.PlaybackSourcePolicy.isHlsStreamUrl(streamUrl))
+
+            val webMedia = media.copy(directVideoUrl = "", downloadUrl = "")
+            val webResolved = com.example.data.model.PlaybackSourcePolicy.resolvePlaybackSource(
+                media = webMedia,
+                downloads = emptyList()
+            )
+            assertTrue(webResolved is com.example.data.model.PlaybackSource.WebEmbed)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testSeasonEligibilityAndDownloadGroupingAndQueueSlots() {
+        val tempFile = java.io.File.createTempFile("cinetra_ep1", ".mp4")
+        try {
+            tempFile.writeText("ep1")
+            val epLinksJson = com.example.data.model.EpisodeDirectLinksCodec.parseMultilineInput(
+                """
+                S1E1 | https://cdn.example.com/s1e1.mp4
+                S1E2 | https://cdn.example.com/s1e2.mp4
+                S1E3 | https://cdn.example.com/s1e3.mp4
+                """.trimIndent()
+            )
+            val series = MediaItem(
+                id = "tv_100",
+                tmdbId = 100L,
+                title = "Arcane",
+                overview = "",
+                posterPath = "",
+                mediaType = "tv",
+                episodeLinksJson = epLinksJson
+            )
+            val episodes = listOf(
+                EpisodeInfo(seasonNumber = 1, episodeNumber = 1, name = "Ep 1"),
+                EpisodeInfo(seasonNumber = 1, episodeNumber = 2, name = "Ep 2"),
+                EpisodeInfo(seasonNumber = 1, episodeNumber = 3, name = "Ep 3"),
+                EpisodeInfo(seasonNumber = 1, episodeNumber = 4, name = "Ep 4 (no link)")
+            )
+            val completedEp1 = DownloadEntity(
+                id = "tv_100_s1e1_direct",
+                mediaId = "tv_100",
+                tmdbId = 100L,
+                title = "Arcane",
+                posterPath = "",
+                backdropPath = "",
+                mediaType = "tv",
+                season = 1,
+                episode = 1,
+                episodeTitle = "Ep 1",
+                sourceUrl = "https://cdn.example.com/s1e1.mp4",
+                localFilePath = tempFile.absolutePath,
+                bytesDownloaded = 500L,
+                totalBytes = 500L,
+                status = DownloadStatus.COMPLETED.storageValue
+            )
+            val ep2Running = DownloadEntity(
+                id = "tv_100_s1e2_direct",
+                mediaId = "tv_100",
+                tmdbId = 100L,
+                title = "Arcane",
+                posterPath = "",
+                backdropPath = "",
+                mediaType = "tv",
+                season = 1,
+                episode = 2,
+                episodeTitle = "Ep 2",
+                sourceUrl = "https://cdn.example.com/s1e2.mp4",
+                bytesDownloaded = 250L,
+                totalBytes = 500L,
+                status = DownloadStatus.RUNNING.storageValue
+            )
+            val ep3Queued = DownloadEntity(
+                id = "tv_100_s1e3_direct",
+                mediaId = "tv_100",
+                tmdbId = 100L,
+                title = "Arcane",
+                posterPath = "",
+                backdropPath = "",
+                mediaType = "tv",
+                season = 1,
+                episode = 3,
+                episodeTitle = "Ep 3",
+                sourceUrl = "https://cdn.example.com/s1e3.mp4",
+                bytesDownloaded = 0L,
+                totalBytes = 500L,
+                status = DownloadStatus.QUEUED.storageValue
+            )
+
+            val eligibility = com.example.data.model.PlaybackSourcePolicy.computeSeasonEligibility(
+                media = series,
+                seasonNumber = 1,
+                episodeNumbers = episodes.map { it.episodeNumber },
+                episodesInSeason = episodes,
+                downloads = listOf(completedEp1, ep2Running)
+            )
+            assertEquals(listOf(1), eligibility.downloadedEpisodes)
+            assertEquals(listOf(4), eligibility.noLinkEpisodes)
+            assertEquals(listOf(3), eligibility.eligibleEpisodes)
+
+            val grouping = com.example.data.model.PlaybackSourcePolicy.groupDownloadsForDisplay(
+                listOf(completedEp1, ep2Running, ep3Queued)
+            )
+            assertEquals(0, grouping.movieDownloads.size)
+            assertEquals(1, grouping.seriesGroups.size)
+            val arcaneGroup = grouping.seriesGroups[0]
+            assertEquals("Arcane", arcaneGroup.seriesTitle)
+            assertEquals(1, arcaneGroup.seasons.size)
+            val s1Group = arcaneGroup.seasons[0]
+            assertEquals(1, s1Group.completedCount)
+            assertEquals(3, s1Group.episodes.size)
+            assertEquals(50, s1Group.overallProgressPercent)
+
+            // Queue promotion: 1 running, 2 queued, max 2 -> promote 1 slot
+            val toPromoteCount = com.example.data.download.DownloadEngine.computeSlotsToPromote(
+                runningCount = 1,
+                queuedCount = 2,
+                maxConcurrent = 2
+            )
+            assertEquals(1, toPromoteCount)
+            assertEquals(DownloadStatus.RUNNING, DownloadStatus.fromStorage("DOWNLOADING"))
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testCatalogSyncMappersPreserveDirectLinksAndEpisodeLinks() {
+        val entity = CustomMediaEntity(
+            id = "custom_series_1",
+            title = "Custom Series",
+            overview = "Desc",
+            posterPath = "https://img/p.jpg",
+            backdropPath = "https://img/b.jpg",
+            mediaType = "tv",
+            releaseDate = "2025",
+            voteAverage = 8.5,
+            genres = "Sci-Fi",
+            certification = "TV-14",
+            vidlyId = "12345",
+            directVideoUrl = "https://cdn/master.m3u8",
+            downloadUrl = "https://cdn/movie.mp4",
+            episodeLinksJson = """[{"season":1,"episode":1,"directVideoUrl":"https://cdn/e1.mp4"}]""",
+            tmdbId = 12345L,
+            numberOfSeasons = 2,
+            episodesPerSeason = 8
+        )
+        val map = CatalogSyncMappers.customMediaToMap(entity)
+        val restored = CatalogSyncMappers.customMediaFromMap("custom_series_1", map)
+        assertTrue(restored != null)
+        assertEquals("https://cdn/master.m3u8", restored!!.directVideoUrl)
+        assertEquals("https://cdn/movie.mp4", restored.downloadUrl)
+        assertEquals(entity.episodeLinksJson, restored.episodeLinksJson)
+
+        val tmdbBase = MediaItem(
+            id = "12345",
+            tmdbId = 12345L,
+            title = "Base Series",
+            overview = "",
+            posterPath = "",
+            mediaType = "tv"
+        )
+        val merged = tmdbBase.mergeWithCatalog(restored.toMediaItem())
+        assertEquals("https://cdn/master.m3u8", merged.directVideoUrl)
+        assertEquals("https://cdn/movie.mp4", merged.downloadUrl)
+        assertEquals(entity.episodeLinksJson, merged.episodeLinksJson)
+    }
+
+    @Test
+    fun testMultiLanguageDownloadParsingAndGroupingRules() {
+        // Language extraction and title normalization
+        assertEquals("Hindi", MovieBoxApiClient.extractLanguageFromTitle("Inception [Hindi]"))
+        assertEquals("Bengali", MovieBoxApiClient.extractLanguageFromTitle("Jawan (Bangla Dub)"))
+        assertEquals("Inception", MovieBoxApiClient.stripTitleLanguageAndSeason("Inception [Hindi Dubbed] S1"))
+        assertEquals("English", MovieBoxApiClient.normalizeLanguageLabel("eng"))
+        assertEquals("Hindi", MovieBoxApiClient.normalizeLanguageLabel("Hindi Dubbed"))
+
+        val baseSubject = MovieBoxSubject(
+            subjectId = "sub_en",
+            subjectType = 1,
+            title = "Inception",
+            detailPath = "inception-2010",
+            language = "English"
+        )
+
+        // Parse dubs from detail JSON
+        val dubsJson = """
+            {
+              "code": 0,
+              "data": {
+                "subject": {
+                  "detailPath": "inception-2010",
+                  "dubs": [
+                    { "subjectId": "sub_hi", "lanName": "Hindi", "detailPath": "inception-hindi" },
+                    { "subjectId": "sub_bn", "lanCode": "bn", "detailPath": "inception-bengali" }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+        val (resolvedPath, dubSubjects) = MovieBoxApiClient.parseSubjectDetailDubsJson(dubsJson, baseSubject)
+        assertEquals("inception-2010", resolvedPath)
+        assertEquals(2, dubSubjects.size)
+        assertEquals("Hindi", dubSubjects[0].language)
+        assertEquals("Bengali", dubSubjects[1].language)
+
+        // Same-resolution options in different languages must NOT be collapsed by finalizeOptions
+        val multiLangDownloadsJson = """
+            {
+              "code": 0,
+              "data": {
+                "downloads": [
+                  { "id": "en_1080", "resolution": 1080, "size": 2100000000, "url": "https://cdn.example.com/en_1080.mp4", "lanName": "English" },
+                  { "id": "hi_1080", "resolution": 1080, "size": 1950000000, "url": "https://cdn.example.com/hi_1080.mp4", "lanName": "Hindi" },
+                  { "id": "hi_720", "resolution": 720, "size": 1050000000, "url": "https://cdn.example.com/hi_720.mp4", "lanName": "Hindi" }
+                ]
+              }
+            }
+        """.trimIndent()
+        val multiBundle = MovieBoxApiClient.parseDownloadResponseJson(multiLangDownloadsJson, baseSubject)
+        assertEquals(3, multiBundle.options.size)
+        assertEquals(2, multiBundle.languageGroups.size)
+        assertEquals(listOf("English", "Hindi"), multiBundle.languageGroups.map { it.language })
+
+        // Single-language bundle must keep languageGroups empty so UI shows just the single available list
+        val singleLangDownloadsJson = """
+            {
+              "code": 0,
+              "data": {
+                "downloads": [
+                  { "id": "en_1080", "resolution": 1080, "size": 2100000000, "url": "https://cdn.example.com/en_1080.mp4", "lanName": "English" },
+                  { "id": "en_720", "resolution": 720, "size": 1050000000, "url": "https://cdn.example.com/en_720.mp4", "lanName": "English" }
+                ]
+              }
+            }
+        """.trimIndent()
+        val singleBundle = MovieBoxApiClient.parseDownloadResponseJson(singleLangDownloadsJson, baseSubject)
+        assertEquals(2, singleBundle.options.size)
+        assertTrue(singleBundle.languageGroups.isEmpty())
+
+        // Same-title search candidate variant discovery + bundle merging
+        val hindiSubject = baseSubject.copy(subjectId = "sub_hi", title = "Inception [Hindi]", language = "Hindi")
+        val media = MediaItem(id = "27205", tmdbId = 27205L, title = "Inception", overview = "", posterPath = "", mediaType = "movie")
+        val matchingVariants = MovieBoxApiClient.collectSameTitleLanguageVariants(
+            media = media,
+            primarySubject = baseSubject,
+            candidates = listOf(
+                baseSubject,
+                hindiSubject,
+                MovieBoxSubject(subjectId = "other", subjectType = 1, title = "Inception: Making Of [Hindi]", language = "Hindi")
+            )
+        )
+        assertEquals(listOf("sub_hi"), matchingVariants.map { it.subjectId })
+
+        val mergedMulti = MovieBoxApiClient.mergeLanguageBundles(
+            primarySubject = baseSubject,
+            bundlesWithSubjects = listOf(
+                baseSubject to singleBundle,
+                hindiSubject to MovieBoxApiClient.parseDownloadResponseJson(
+                    """{"data":{"downloads":[{"id":"hi_1080","resolution":1080,"size":1900000000,"url":"https://cdn.example.com/hi.mp4"}]}}""",
+                    hindiSubject
+                )
+            )
+        )
+        assertEquals(3, mergedMulti.options.size)
+        assertEquals(2, mergedMulti.languageGroups.size)
+
+        // Managed provider compatibility for legacy MovieBox rows and new Cloud HD rows
+        assertTrue(com.example.data.download.DownloadEngine.isManagedApiProvider("Cloud HD"))
+        assertTrue(com.example.data.download.DownloadEngine.isManagedApiProvider("MovieBox API"))
+        assertFalse(com.example.data.download.DownloadEngine.isManagedApiProvider("Direct Stream"))
+    }
 }
+

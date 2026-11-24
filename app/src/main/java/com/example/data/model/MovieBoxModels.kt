@@ -12,7 +12,8 @@ data class MovieBoxSubject(
     val detailPath: String = "",
     val coverUrl: String = "",
     val hasResource: Boolean = true,
-    val sourceHost: String = ""
+    val sourceHost: String = "",
+    val language: String = ""
 ) {
     val mediaTypeLabel: String
         get() = if (subjectType == 2) "TV Series" else "Movie"
@@ -30,7 +31,8 @@ data class MovieBoxDownloadOption(
     val format: String = "MP4",
     val refererHeader: String = DEFAULT_REFERER,
     val userAgentHeader: String = DEFAULT_USER_AGENT,
-    val cookieHeader: String = ""
+    val cookieHeader: String = "",
+    val language: String = ""
 ) {
     val formattedSize: String
         get() = formatDownloadBytes(sizeBytes)
@@ -53,29 +55,42 @@ data class MovieBoxSubtitleOption(
         get() = formatDownloadBytes(sizeBytes)
 }
 
+data class MovieBoxLanguageGroup(
+    val language: String,
+    val subject: MovieBoxSubject,
+    val options: List<MovieBoxDownloadOption>,
+    val subtitles: List<MovieBoxSubtitleOption> = emptyList()
+)
+
 data class MovieBoxDownloadBundle(
     val subject: MovieBoxSubject,
     val options: List<MovieBoxDownloadOption>,
     val subtitles: List<MovieBoxSubtitleOption> = emptyList(),
     val sourceHost: String = "",
     val season: Int = 1,
-    val episode: Int = 1
+    val episode: Int = 1,
+    val languageGroups: List<MovieBoxLanguageGroup> = emptyList()
 )
 
 enum class DownloadStatus(val storageValue: String, val displayLabel: String) {
     QUEUED("QUEUED", "Queued"),
-    DOWNLOADING("DOWNLOADING", "Downloading"),
+    RUNNING("RUNNING", "Downloading"),
     PAUSED("PAUSED", "Paused"),
-    COMPLETED("COMPLETED", "Downloaded"),
+    COMPLETED("COMPLETED", "Completed"),
     FAILED("FAILED", "Failed"),
     CANCELLED("CANCELLED", "Cancelled");
 
     val isActive: Boolean
-        get() = this == QUEUED || this == DOWNLOADING || this == PAUSED
+        get() = this == QUEUED || this == RUNNING || this == PAUSED
+
+    val isRunningOrQueued: Boolean
+        get() = this == QUEUED || this == RUNNING
 
     companion object {
         fun fromStorage(raw: String?): DownloadStatus {
-            return entries.firstOrNull { it.storageValue.equals(raw, ignoreCase = true) } ?: QUEUED
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.equals("DOWNLOADING", ignoreCase = true)) return RUNNING
+            return entries.firstOrNull { it.storageValue.equals(trimmed, ignoreCase = true) } ?: QUEUED
         }
     }
 }

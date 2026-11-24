@@ -61,6 +61,9 @@ data class CustomMediaEntity(
     val trailerYoutubeKey: String? = null,
     val numberOfSeasons: Int = 1,
     val episodesPerSeason: Int = 10,
+    val directVideoUrl: String = "",
+    val downloadUrl: String = "",
+    val episodeLinksJson: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -145,7 +148,7 @@ data class DownloadEntity(
     val episodeTitle: String = "",
     val qualityLabel: String = "720p HD",
     val format: String = "MP4",
-    val providerName: String = "MovieBox API",
+    val providerName: String = "Cloud HD",
     val sourceUrl: String,
     val localFilePath: String = "",
     val localUri: String = "",
@@ -156,8 +159,13 @@ data class DownloadEntity(
     val totalBytes: Long = 0L,
     val progressPercent: Int = 0,
     val errorReason: String = "",
+    val refererHeader: String = "",
+    val userAgentHeader: String = "",
+    val cookieHeader: String = "",
+    val wifiOnly: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val completedAt: Long = 0L
 ) {
     val parsedStatus: DownloadStatus
         get() = DownloadStatus.fromStorage(status)
@@ -177,3 +185,14 @@ data class DownloadEntity(
             "Movie • $qualityLabel"
         }
 }
+
+@Entity(tableName = "playback_positions")
+data class PlaybackPositionEntity(
+    @PrimaryKey val key: String, // e.g. "${mediaId}_movie" or "${mediaId}_s${season}_e${episode}"
+    val mediaId: String,
+    val season: Int = 1,
+    val episode: Int = 1,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val updatedAt: Long = System.currentTimeMillis()
+)

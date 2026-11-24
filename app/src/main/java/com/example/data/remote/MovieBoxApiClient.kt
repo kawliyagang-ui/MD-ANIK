@@ -3,6 +3,7 @@ package com.example.data.remote
 import com.example.data.model.MediaItem
 import com.example.data.model.MovieBoxDownloadBundle
 import com.example.data.model.MovieBoxDownloadOption
+import com.example.data.model.MovieBoxLanguageGroup
 import com.example.data.model.MovieBoxSubject
 import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.PreferredDownloadQuality
@@ -10,6 +11,9 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -285,7 +289,7 @@ object MovieBoxApiClient {
         val cleanQuery = query.trim()
         if (cleanQuery.isBlank()) {
             return@withContext Result.failure(
-                IllegalArgumentException("Enter a movie or series title to search MovieBox.")
+                IllegalArgumentException("Enter a movie or series title to search.")
             )
         }
         val subjectType = when {
@@ -372,7 +376,7 @@ object MovieBoxApiClient {
 
         Result.failure(
             lastError ?: IllegalStateException(
-                "MovieBox backend unreachable. Check your network or update the MovieBox API Host in Settings."
+                "Download server unreachable. Check your network and try again."
             )
         )
     }
@@ -405,7 +409,7 @@ object MovieBoxApiClient {
             }
             return broadResult.fold(
                 onSuccess = {
-                    Result.failure(NoSuchElementException("No MovieBox entry found for \"${media.title}\"."))
+                    Result.failure(NoSuchElementException("No downloadable source found for \"${media.title}\"."))
                 },
                 onFailure = { Result.failure(it) }
             )
@@ -413,9 +417,153 @@ object MovieBoxApiClient {
 
         return searchResult.fold(
             onSuccess = {
-                Result.failure(NoSuchElementException("No MovieBox entry found for \"${media.title}\"."))
+                Result.failure(NoSuchElementException("No downloadable source found for \"${media.title}\"."))
             },
             onFailure = { Result.failure(it) }
+        )
+    }
+
+    suspend fun resolveMultiLanguageDownloadBundle(
+        media: MediaItem,
+        season: Int = 1,
+        episode: Int = 1,
+        customHost: String = ""
+    ): Result<MovieBoxDownloadBundle> = withContext(Dispatchers.IO) {
+        val primarySearch = searchSubjects(
+            query = media.title,
+            mediaType = media.mediaType,
+            customHost = customHost
+        )
+        var candidates = primarySearch.getOrNull().orEmpty()
+        if (candidates.isEmpty() && !media.mediaType.equals("all", ignoreCase = true)) {
+            candidates = searchSubjects(
+                query = media.title,
+                mediaType = "all",
+                customHost = customHost
+            ).getOrNull().orEmpty()
+        }
+
+        if (candidates.isEmpty()) {
+            val err = primarySearch.exceptionOrNull()
+                ?: NoSuchElementException("No downloadable source found for \"${media.title}\".")
+            return@withContext Result.failure(err)
+        }
+
+        val bestSubject = pickBestSubjectCandidate(media, candidates)
+            ?: return@withContext Result.failure(
+                NoSuchElementException("No downloadable source found for \"${media.title}\".")
+            )
+
+        val isTv = media.mediaType.equals("tv", ignoreCase = true) || bestSubject.subjectType == 2
+        val matchingVariants = collectSameTitleLanguageVariants(media, bestSubject, candidates)
+        val detailDubs = fetchSubjectDetailDubs(bestSubject, customHost)
+
+        val combinedSubjects = buildList {
+            add(bestSubject)
+            addAll(detailDubs)
+            addAll(matchingVariants)
+        }.distinctBy { it.subjectId }.take(6)
+
+        if (combinedSubjects.size <= 1) {
+            return@withContext fetchDownloadBundle(
+                subject = bestSubject,
+                season = season,
+                episode = episode,
+                isTv = isTv,
+                customHost = customHost
+            )
+        }
+
+        val results = coroutineScope {
+            combinedSubjects.map { subj ->
+                async {
+                    subj to fetchDownloadBundle(
+                        subject = subj,
+                        season = season,
+                        episode = episode,
+                        isTv = isTv,
+                        customHost = customHost
+                    ).getOrNull()
+                }
+            }.awaitAll()
+        }
+
+        val successfulBundles = results.mapNotNull { (subj, bundle) ->
+            bundle?.takeIf { it.options.isNotEmpty() }?.let { subj to it }
+        }
+        if (successfulBundles.isEmpty()) {
+            return@withContext fetchDownloadBundle(
+                subject = bestSubject,
+                season = season,
+                episode = episode,
+                isTv = isTv,
+                customHost = customHost
+            )
+        }
+
+        return@withContext Result.success(
+            mergeLanguageBundles(
+                primarySubject = bestSubject,
+                bundlesWithSubjects = successfulBundles,
+                season = if (isTv) season.coerceAtLeast(1) else 1,
+                episode = if (isTv) episode.coerceAtLeast(1) else 1
+            )
+        )
+    }
+
+    suspend fun fetchMultiLanguageDownloadBundleForSubject(
+        subject: MovieBoxSubject,
+        season: Int = 1,
+        episode: Int = 1,
+        isTv: Boolean = subject.subjectType == 2,
+        customHost: String = ""
+    ): Result<MovieBoxDownloadBundle> = withContext(Dispatchers.IO) {
+        val detailDubs = fetchSubjectDetailDubs(subject, customHost)
+        val subjects = (listOf(subject) + detailDubs).distinctBy { it.subjectId }.take(6)
+        if (subjects.size <= 1) {
+            return@withContext fetchDownloadBundle(
+                subject = subject,
+                season = season,
+                episode = episode,
+                isTv = isTv,
+                customHost = customHost
+            )
+        }
+
+        val results = coroutineScope {
+            subjects.map { subj ->
+                async {
+                    subj to fetchDownloadBundle(
+                        subject = subj,
+                        season = season,
+                        episode = episode,
+                        isTv = isTv,
+                        customHost = customHost
+                    ).getOrNull()
+                }
+            }.awaitAll()
+        }
+
+        val successful = results.mapNotNull { (subj, b) ->
+            b?.takeIf { it.options.isNotEmpty() }?.let { subj to it }
+        }
+        if (successful.isEmpty()) {
+            return@withContext fetchDownloadBundle(
+                subject = subject,
+                season = season,
+                episode = episode,
+                isTv = isTv,
+                customHost = customHost
+            )
+        }
+
+        Result.success(
+            mergeLanguageBundles(
+                primarySubject = subject,
+                bundlesWithSubjects = successful,
+                season = if (isTv) season.coerceAtLeast(1) else 1,
+                episode = if (isTv) episode.coerceAtLeast(1) else 1
+            )
         )
     }
 
@@ -620,21 +768,28 @@ object MovieBoxApiClient {
         val cleanOptions = finalizeOptions(mergedOptions)
         if (cleanOptions.isNotEmpty()) {
             val cleanSubtitles = finalizeSubtitles(mergedSubtitles)
+            val updatedSubject = subject.copy(detailPath = resolvedDetailPath)
+            val groups = buildLanguageGroupsFromOptions(
+                primarySubject = updatedSubject,
+                options = cleanOptions,
+                subtitles = cleanSubtitles
+            )
             return@withContext Result.success(
                 MovieBoxDownloadBundle(
-                    subject = subject.copy(detailPath = resolvedDetailPath),
+                    subject = updatedSubject,
                     options = cleanOptions,
                     subtitles = cleanSubtitles,
                     sourceHost = winningSourceHost.ifBlank { DEFAULT_HOST },
                     season = if (isTv) safeSeason else 1,
-                    episode = if (isTv) safeEpisode else 1
+                    episode = if (isTv) safeEpisode else 1,
+                    languageGroups = groups
                 )
             )
         }
 
         Result.failure(
             lastError ?: IllegalStateException(
-                "No downloadable video files returned by MovieBox for \"${subject.title}\"."
+                "No downloadable video files available for \"${subject.title}\"."
             )
         )
     }
@@ -671,7 +826,7 @@ object MovieBoxApiClient {
                     if (dlCount > 0) {
                         "Connected to $normalized (${items.size} results, $dlCount stream/download links + $subCount subtitles verified)"
                     } else if (token.isNotBlank()) {
-                        "Connected to $normalized (${items.size} MovieBox results, signed session active)"
+                        "Connected to $normalized (${items.size} results, signed session active)"
                     } else {
                         "Reachable ($normalized • HTTP $code)"
                     }
@@ -718,7 +873,7 @@ object MovieBoxApiClient {
                     if (dlCheck > 0) {
                         "Connected to $normalized (${items.size} results, $dlCheck download links verified)"
                     } else if (token.isNotBlank()) {
-                        "Connected to $normalized (${items.size} MovieBox results)"
+                        "Connected to $normalized (${items.size} results)"
                     } else {
                         "Reachable ($normalized • HTTP $code)"
                     }
@@ -1020,10 +1175,8 @@ object MovieBoxApiClient {
             val found = runCatching {
                 val (code, body) = executeMobileSigned(host = host, url = url)
                 if (code !in 200..299) return@runCatching null
-                val root = mapAdapter.fromJson(body) ?: return@runCatching null
-                val data = root["data"].asMapOrNull() ?: root
-                val subj = data["subject"].asMapOrNull() ?: data
-                subj["detailPath"].asCleanString().ifBlank { null }
+                val (detailPath, _) = parseSubjectDetailDubsJson(body, subject, host)
+                detailPath.ifBlank { null }
             }.getOrNull()
             if (!found.isNullOrBlank()) return found
         }
@@ -1040,10 +1193,8 @@ object MovieBoxApiClient {
             val found = runCatching {
                 val (code, body) = executeH5WithSession(host = host, url = url, referer = "$host/")
                 if (code !in 200..299) return@runCatching null
-                val root = mapAdapter.fromJson(body) ?: return@runCatching null
-                val data = root["data"].asMapOrNull() ?: root
-                val subj = data["subject"].asMapOrNull() ?: data
-                subj["detailPath"].asCleanString().ifBlank { null }
+                val (detailPath, _) = parseSubjectDetailDubsJson(body, subject, host)
+                detailPath.ifBlank { null }
             }.getOrNull()
             if (!found.isNullOrBlank()) return found
         }
@@ -1065,6 +1216,91 @@ object MovieBoxApiClient {
             }.getOrNull()
         }
         return null
+    }
+
+    private fun fetchSubjectDetailDubs(
+        subject: MovieBoxSubject,
+        customHost: String = ""
+    ): List<MovieBoxSubject> {
+        val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
+        val hosts = buildList {
+            if (subject.sourceHost.isNotBlank()) add(normalizeHostUrl(subject.sourceHost))
+            addAll(candidateHosts(customHost))
+        }.distinct()
+
+        for (host in hosts.take(4)) {
+            if (isMobileBackendHost(host)) {
+                val endpoints = listOf(
+                    "$host/wefeed-mobile-bff/subject-api/get?subjectId=$encodedId",
+                    "$host/wefeed-mobile-bff/subject-api/detail?subjectId=$encodedId"
+                )
+                for (url in endpoints) {
+                    val dubs = runCatching {
+                        val (code, body) = executeMobileSigned(host = host, url = url)
+                        if (code !in 200..299) return@runCatching emptyList()
+                        parseSubjectDetailDubsJson(body, subject, host).second
+                    }.getOrDefault(emptyList())
+                    if (dubs.isNotEmpty()) return dubs
+                }
+            } else {
+                val endpoints = listOf(
+                    "$host/wefeed-h5api-bff/subject/detail?subjectId=$encodedId",
+                    "$host/wefeed-h5-api/subject/detail?subjectId=$encodedId"
+                )
+                for (url in endpoints) {
+                    val dubs = runCatching {
+                        val (code, body) = executeH5WithSession(host = host, url = url, referer = "$host/")
+                        if (code !in 200..299) return@runCatching emptyList()
+                        parseSubjectDetailDubsJson(body, subject, host).second
+                    }.getOrDefault(emptyList())
+                    if (dubs.isNotEmpty()) return dubs
+                }
+            }
+        }
+        return emptyList()
+    }
+
+    fun parseSubjectDetailDubsJson(
+        json: String,
+        baseSubject: MovieBoxSubject,
+        sourceHost: String = DEFAULT_HOST
+    ): Pair<String, List<MovieBoxSubject>> {
+        val trimmed = json.trim()
+        if (trimmed.isBlank()) return "" to emptyList()
+        val root = runCatching { mapAdapter.fromJson(trimmed) }.getOrNull() ?: return "" to emptyList()
+        val data = root["data"].asMapOrNull() ?: root
+        val subj = data["subject"].asMapOrNull() ?: data
+        val detailPath = subj["detailPath"].asCleanString()
+            .ifBlank { data["detailPath"].asCleanString() }
+            .ifBlank { baseSubject.detailPath }
+
+        val rawDubs = buildList {
+            addAll(subj["dubs"].asMapListOrEmpty())
+            addAll(data["dubs"].asMapListOrEmpty())
+            addAll(data["subjectDubs"].asMapListOrEmpty())
+            addAll(root["dubs"].asMapListOrEmpty())
+        }
+        val dubSubjects = rawDubs.mapNotNull { dub ->
+            val dubId = dub["subjectId"].asCleanString()
+                .ifBlank { dub["id"].asCleanString() }
+            if (dubId.isBlank()) return@mapNotNull null
+            val rawLang = dub["lanName"].asCleanString()
+                .ifBlank { dub["language"].asCleanString() }
+                .ifBlank { dub["langName"].asCleanString() }
+                .ifBlank { dub["name"].asCleanString() }
+                .ifBlank { dub["lan"].asCleanString() }
+                .ifBlank { dub["lanCode"].asCleanString() }
+            val normalizedLang = normalizeLanguageLabel(rawLang)
+            val dubPath = dub["detailPath"].asCleanString().ifBlank { detailPath }
+            baseSubject.copy(
+                subjectId = dubId,
+                detailPath = dubPath,
+                sourceHost = sourceHost,
+                language = normalizedLang
+            )
+        }.distinctBy { it.subjectId }
+
+        return detailPath to dubSubjects
     }
 
     private fun buildH5BaseRequest(
@@ -1162,6 +1398,14 @@ object MovieBoxApiClient {
             val rawSubjectType = item["subjectType"].asIntOrNull()
                 ?: if (item["mediaType"].asCleanString().equals("tv", ignoreCase = true)) 2 else 1
 
+            val rawLang = item["lanName"].asCleanString()
+                .ifBlank { item["language"].asCleanString() }
+                .ifBlank { item["langName"].asCleanString() }
+                .ifBlank { item["audioLanguage"].asCleanString() }
+                .ifBlank { item["dubLanguage"].asCleanString() }
+                .ifBlank { item["lan"].asCleanString() }
+                .ifBlank { extractLanguageFromTitle(title) }
+
             MovieBoxSubject(
                 subjectId = id,
                 subjectType = rawSubjectType,
@@ -1173,7 +1417,8 @@ object MovieBoxApiClient {
                 detailPath = item["detailPath"].asCleanString(),
                 coverUrl = coverUrl,
                 hasResource = item["hasResource"] as? Boolean ?: true,
-                sourceHost = sourceHost
+                sourceHost = sourceHost,
+                language = normalizeLanguageLabel(rawLang)
             )
         }
     }
@@ -1213,6 +1458,9 @@ object MovieBoxApiClient {
         val effectiveReferer = refererOverride
             ?: "${originForHost(normalizeHostUrl(sourceHost))}/"
         val effectiveUserAgent = userAgentOverride ?: H5_DESKTOP_USER_AGENT
+        val fallbackSubjectLang = normalizeLanguageLabel(
+            subject.language.ifBlank { extractLanguageFromTitle(subject.title) }
+        )
 
         val embeddedCaptions = mutableListOf<Map<String, Any?>>()
         val parsedOptions = rawDownloads.mapIndexedNotNull { idx, entry ->
@@ -1245,6 +1493,18 @@ object MovieBoxApiClient {
                 .uppercase(Locale.US)
             val signCookie = entry["signCookie"].asCleanString()
                 .ifBlank { entry["cookie"].asCleanString() }
+            val rawEntryLang = entry["lanName"].asCleanString()
+                .ifBlank { entry["language"].asCleanString() }
+                .ifBlank { entry["audioLanguage"].asCleanString() }
+                .ifBlank { entry["audioLang"].asCleanString() }
+                .ifBlank { entry["audio"].asCleanString() }
+                .ifBlank { entry["dubName"].asCleanString() }
+                .ifBlank { entry["lan"].asCleanString() }
+                .ifBlank { entry["lang"].asCleanString() }
+                .ifBlank { extractLanguageFromTitle(entry["name"].asCleanString()) }
+                .ifBlank { extractLanguageFromTitle(entry["title"].asCleanString()) }
+                .ifBlank { fallbackSubjectLang }
+            val resolvedLang = normalizeLanguageLabel(rawEntryLang)
 
             MovieBoxDownloadOption(
                 id = entry["id"].asCleanString()
@@ -1257,7 +1517,8 @@ object MovieBoxApiClient {
                 format = format,
                 refererHeader = effectiveReferer,
                 userAgentHeader = effectiveUserAgent,
-                cookieHeader = signCookie
+                cookieHeader = signCookie,
+                language = resolvedLang
             )
         }.ifEmpty {
             if (singleUrlFallback.isNotBlank() && !isBaitOrBlockedUrl(singleUrlFallback)) {
@@ -1270,7 +1531,8 @@ object MovieBoxApiClient {
                         downloadUrl = singleUrlFallback,
                         format = inferFormatFromUrl(singleUrlFallback),
                         refererHeader = effectiveReferer,
-                        userAgentHeader = effectiveUserAgent
+                        userAgentHeader = effectiveUserAgent,
+                        language = fallbackSubjectLang
                     )
                 )
             } else {
@@ -1319,13 +1581,21 @@ object MovieBoxApiClient {
             )
         }
 
+        val finalSubtitles = finalizeSubtitles(parsedSubtitles)
+        val languageGroups = buildLanguageGroupsFromOptions(
+            primarySubject = subject,
+            options = finalOptions,
+            subtitles = finalSubtitles
+        )
+
         return MovieBoxDownloadBundle(
             subject = subject,
             options = finalOptions,
-            subtitles = finalizeSubtitles(parsedSubtitles),
+            subtitles = finalSubtitles,
             sourceHost = sourceHost,
             season = season,
-            episode = episode
+            episode = episode,
+            languageGroups = languageGroups
         )
     }
 
@@ -1339,7 +1609,10 @@ object MovieBoxApiClient {
                     .thenByDescending { it.sizeBytes }
             )
             .distinctBy { it.downloadUrl }
-            .distinctBy { if (it.resolution > 0) "res_${it.resolution}_${it.format}" else it.downloadUrl }
+            .distinctBy {
+                val langKey = it.language.trim().lowercase(Locale.US)
+                if (it.resolution > 0) "res_${it.resolution}_${it.format}_$langKey" else it.downloadUrl
+            }
     }
 
     private fun finalizeSubtitles(subtitles: List<MovieBoxSubtitleOption>): List<MovieBoxSubtitleOption> {
@@ -1350,6 +1623,120 @@ object MovieBoxApiClient {
                 compareBy<MovieBoxSubtitleOption> { !it.languageCode.equals("en", ignoreCase = true) }
                     .thenBy { it.languageName }
             )
+    }
+
+    fun collectSameTitleLanguageVariants(
+        media: MediaItem,
+        primarySubject: MovieBoxSubject,
+        candidates: List<MovieBoxSubject>
+    ): List<MovieBoxSubject> {
+        val baseMediaTitle = normalizeTitle(stripTitleLanguageAndSeason(media.title))
+        val basePrimaryTitle = normalizeTitle(stripTitleLanguageAndSeason(primarySubject.title))
+        val expectedType = primarySubject.subjectType
+        return candidates.filter { cand ->
+            if (cand.subjectId == primarySubject.subjectId) return@filter false
+            if (cand.subjectType != expectedType) return@filter false
+            val candBase = normalizeTitle(stripTitleLanguageAndSeason(cand.title))
+            val titleMatches = candBase.isNotBlank() &&
+                (candBase == basePrimaryTitle || candBase == baseMediaTitle)
+            if (!titleMatches) return@filter false
+            cand.language.isNotBlank() || extractLanguageFromTitle(cand.title).isNotBlank()
+        }
+    }
+
+    fun mergeLanguageBundles(
+        primarySubject: MovieBoxSubject,
+        bundlesWithSubjects: List<Pair<MovieBoxSubject, MovieBoxDownloadBundle>>,
+        season: Int = 1,
+        episode: Int = 1
+    ): MovieBoxDownloadBundle {
+        val allOptions = mutableListOf<MovieBoxDownloadOption>()
+        val allSubtitles = mutableListOf<MovieBoxSubtitleOption>()
+        val groupedByLang = linkedMapOf<String, MutableList<MovieBoxDownloadOption>>()
+        val subjectByLang = linkedMapOf<String, MovieBoxSubject>()
+        val subtitlesByLang = linkedMapOf<String, MutableList<MovieBoxSubtitleOption>>()
+        var winningHost = ""
+
+        val hasAnyExplicitLang = bundlesWithSubjects.any { (subj, bundle) ->
+            subj.language.isNotBlank() || bundle.options.any { it.language.isNotBlank() }
+        }
+
+        for ((subj, bundle) in bundlesWithSubjects) {
+            if (winningHost.isBlank() && bundle.sourceHost.isNotBlank()) {
+                winningHost = bundle.sourceHost
+            }
+            allSubtitles.addAll(bundle.subtitles)
+            val subjLang = normalizeLanguageLabel(
+                subj.language.ifBlank { extractLanguageFromTitle(subj.title) }
+            )
+            for (opt in bundle.options) {
+                val optLang = opt.language.ifBlank { subjLang }.let { raw ->
+                    if (raw.isBlank() && hasAnyExplicitLang && bundlesWithSubjects.size > 1) "Original" else raw
+                }
+                val taggedOption = if (optLang.isNotBlank() && opt.language != optLang) {
+                    opt.copy(language = optLang)
+                } else {
+                    opt
+                }
+                allOptions.add(taggedOption)
+                val groupKey = optLang.ifBlank { "Default" }
+                groupedByLang.getOrPut(groupKey) { mutableListOf() }.add(taggedOption)
+                subjectByLang.putIfAbsent(groupKey, subj.copy(language = optLang))
+                subtitlesByLang.getOrPut(groupKey) { mutableListOf() }.addAll(bundle.subtitles)
+            }
+        }
+
+        val groups = if (groupedByLang.size > 1) {
+            groupedByLang.entries.map { (langLabel, opts) ->
+                MovieBoxLanguageGroup(
+                    language = langLabel,
+                    subject = subjectByLang[langLabel] ?: primarySubject,
+                    options = finalizeOptions(opts),
+                    subtitles = finalizeSubtitles(subtitlesByLang[langLabel].orEmpty())
+                )
+            }.filter { it.options.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+
+        val finalMergedOptions = finalizeOptions(allOptions)
+        val finalMergedSubtitles = finalizeSubtitles(allSubtitles)
+
+        return MovieBoxDownloadBundle(
+            subject = primarySubject,
+            options = finalMergedOptions,
+            subtitles = finalMergedSubtitles,
+            sourceHost = winningHost.ifBlank { DEFAULT_HOST },
+            season = season,
+            episode = episode,
+            languageGroups = groups
+        )
+    }
+
+    private fun buildLanguageGroupsFromOptions(
+        primarySubject: MovieBoxSubject,
+        options: List<MovieBoxDownloadOption>,
+        subtitles: List<MovieBoxSubtitleOption>
+    ): List<MovieBoxLanguageGroup> {
+        val distinctLangs = options.map { it.language.trim() }.filter { it.isNotBlank() }.distinct()
+        if (distinctLangs.size <= 1) return emptyList()
+        val hasBlank = options.any { it.language.isBlank() }
+        val grouped = linkedMapOf<String, MutableList<MovieBoxDownloadOption>>()
+        for (opt in options) {
+            val label = opt.language.ifBlank { if (hasBlank) "Original" else "Default" }
+            grouped.getOrPut(label) { mutableListOf() }.add(
+                if (opt.language.isBlank()) opt.copy(language = label) else opt
+            )
+        }
+        if (grouped.size <= 1) return emptyList()
+        return grouped.entries.map { (lang, opts) ->
+            MovieBoxLanguageGroup(
+                language = lang,
+                subject = primarySubject.copy(language = lang),
+                options = finalizeOptions(opts),
+                subtitles = subtitles
+            )
+        }
     }
 
     fun pickBestSubjectCandidate(
@@ -1363,11 +1750,10 @@ object MovieBoxApiClient {
         var score = 0
         val normMediaTitle = normalizeTitle(media.title)
         val normCandTitle = normalizeTitle(candidate.title)
-        val normCandStripped = normalizeTitle(
-            candidate.title.replace(Regex("\\bS\\d+(?:-S\\d+)?\\b", RegexOption.IGNORE_CASE), "")
-        )
+        val normCandStripped = normalizeTitle(stripTitleLanguageAndSeason(candidate.title))
         when {
-            normMediaTitle == normCandTitle || normMediaTitle == normCandStripped -> score += 100
+            normMediaTitle == normCandTitle -> score += 105
+            normMediaTitle == normCandStripped -> score += 95
             normCandTitle.startsWith(normMediaTitle) || normMediaTitle.startsWith(normCandTitle) -> score += 65
             normCandTitle.contains(normMediaTitle) || normMediaTitle.contains(normCandTitle) -> score += 40
         }
@@ -1433,6 +1819,115 @@ object MovieBoxApiClient {
         return raw.lowercase(Locale.US)
             .replace(Regex("[^a-z0-9]"), "")
     }
+
+    fun extractLanguageFromTitle(title: String): String {
+        val bracketMatches = Regex("[\\[(]([^\\])]+)[\\])]").findAll(title)
+        for (match in bracketMatches) {
+            val inner = match.groupValues[1].trim()
+            val detected = matchKnownLanguageKeyword(inner)
+            if (detected.isNotBlank()) return detected
+        }
+        val dashSuffix = title.substringAfterLast(" - ", "").trim()
+        if (dashSuffix.isNotBlank() && dashSuffix != title) {
+            val detected = matchKnownLanguageKeyword(dashSuffix)
+            if (detected.isNotBlank()) return detected
+        }
+        return ""
+    }
+
+    fun stripTitleLanguageAndSeason(title: String): String {
+        var cleaned = title
+            .replace(Regex("\\bS\\d+(?:-S\\d+)?\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\bSeason\\s*\\d+\\b", RegexOption.IGNORE_CASE), "")
+        cleaned = Regex("[\\[(]([^\\])]+)[\\])]").replace(cleaned) { match ->
+            val inner = match.groupValues[1].trim()
+            if (matchKnownLanguageKeyword(inner).isNotBlank() ||
+                inner.contains("dub", ignoreCase = true) ||
+                inner.contains("audio", ignoreCase = true)
+            ) {
+                ""
+            } else {
+                match.value
+            }
+        }
+        return cleaned.replace(Regex("\\s+"), " ").trim()
+    }
+
+    fun normalizeLanguageLabel(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        val cleaned = trimmed
+            .replace(Regex("\\b(dubbed|dub|audio|version|sub)\\b", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (cleaned.isBlank()) return trimmed
+        return LANGUAGE_CODE_MAP[cleaned.lowercase(Locale.ROOT)]
+            ?: cleaned.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+    }
+
+    private fun matchKnownLanguageKeyword(raw: String): String {
+        val cleaned = raw
+            .replace(Regex("\\b(dubbed|dub|audio|version)\\b", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (cleaned.isBlank()) return ""
+        val lower = cleaned.lowercase(Locale.ROOT)
+        LANGUAGE_CODE_MAP[lower]?.let { return it }
+        KNOWN_LANGUAGE_NAMES.firstOrNull { it.equals(lower, ignoreCase = true) }?.let { known ->
+            return known.replaceFirstChar { it.titlecase(Locale.US) }
+        }
+        if (raw.contains("dual audio", ignoreCase = true)) return "Dual Audio"
+        return ""
+    }
+
+    private val LANGUAGE_CODE_MAP = mapOf(
+        "en" to "English",
+        "eng" to "English",
+        "hi" to "Hindi",
+        "hin" to "Hindi",
+        "bn" to "Bengali",
+        "ben" to "Bengali",
+        "bangla" to "Bengali",
+        "ta" to "Tamil",
+        "tam" to "Tamil",
+        "te" to "Telugu",
+        "tel" to "Telugu",
+        "ml" to "Malayalam",
+        "kn" to "Kannada",
+        "mr" to "Marathi",
+        "pa" to "Punjabi",
+        "ur" to "Urdu",
+        "es" to "Spanish",
+        "spa" to "Spanish",
+        "fr" to "French",
+        "fre" to "French",
+        "ar" to "Arabic",
+        "ara" to "Arabic",
+        "id" to "Indonesian",
+        "ind" to "Indonesian",
+        "ja" to "Japanese",
+        "jp" to "Japanese",
+        "jpn" to "Japanese",
+        "ko" to "Korean",
+        "kor" to "Korean",
+        "zh" to "Chinese",
+        "cn" to "Chinese",
+        "th" to "Thai",
+        "vi" to "Vietnamese",
+        "tr" to "Turkish",
+        "ru" to "Russian",
+        "pt" to "Portuguese",
+        "de" to "German",
+        "it" to "Italian",
+        "tl" to "Tagalog",
+        "fil" to "Filipino"
+    )
+
+    private val KNOWN_LANGUAGE_NAMES = setOf(
+        "english", "hindi", "bengali", "bangla", "tamil", "telugu", "malayalam",
+        "kannada", "marathi", "punjabi", "urdu", "spanish", "french", "arabic",
+        "indonesian", "japanese", "korean", "chinese", "mandarin", "cantonese",
+        "thai", "vietnamese", "turkish", "russian", "portuguese", "german",
+        "italian", "tagalog", "filipino", "persian", "farsi", "swahili", "hausa"
+    )
 
     private fun Any?.asMapOrNull(): Map<String, Any?>? {
         @Suppress("UNCHECKED_CAST")
