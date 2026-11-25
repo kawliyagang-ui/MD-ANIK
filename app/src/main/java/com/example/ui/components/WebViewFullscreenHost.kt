@@ -98,7 +98,8 @@ object WebViewFullscreenHost {
         webView.setLayerType(View.LAYER_TYPE_NONE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             runCatching {
-                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+                // Keep renderer IMPORTANT while active in foreground even if Compose overlays temporarily sit above it.
+                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
             }
         }
         runCatching {
@@ -122,19 +123,33 @@ object WebViewFullscreenHost {
         }
     }
 
-    fun safelyDestroyWebView(webView: WebView?) {
+    fun updateRendererPriority(webView: WebView?, isForeground: Boolean) {
+        if (webView == null || isDestroyed(webView)) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching {
+                if (isForeground) {
+                    webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+                } else {
+                    webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
+                }
+            }
+        }
+    }
+
+    fun safelyDestroyWebView(webView: WebView?, rendererAlreadyGone: Boolean = false) {
         if (webView == null) return
         if (!destroyedWebViews.add(webView)) return
         runCatching {
             (webView.parent as? ViewGroup)?.removeView(webView)
-            webView.removeJavascriptInterface("CinetraPlayerBridge")
-            webView.removeJavascriptInterface("CinetraWebTorrentBridge")
             webView.webChromeClient = null
             webView.webViewClient = WebViewClient()
-            webView.onPause()
-            webView.stopLoading()
-            webView.clearCache(false)
-            webView.clearHistory()
+            if (!rendererAlreadyGone) {
+                webView.removeJavascriptInterface("CinetraPlayerBridge")
+                webView.removeJavascriptInterface("CinetraWebTorrentBridge")
+                webView.stopLoading()
+                webView.onPause()
+                webView.clearHistory()
+            }
             webView.removeAllViews()
             webView.destroy()
         }

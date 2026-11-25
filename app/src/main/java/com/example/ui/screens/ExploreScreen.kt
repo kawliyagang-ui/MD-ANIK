@@ -1,7 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +62,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
@@ -65,10 +72,12 @@ import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.components.SearchResultsSkeletonGrid
+import com.example.ui.components.cinePressScale
 import com.example.ui.theme.CineTheme
 
 @Composable
@@ -227,14 +236,20 @@ fun ExploreScreen(
                     testTag = "explore_catalog_total_chip"
                 )
             }
+            val searchBarInteraction = remember { MutableInteractionSource() }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
+                    .cinePressScale(searchBarInteraction)
                     .clip(RoundedCornerShape(14.dp))
                     .background(colors.surfaceElevated)
                     .border(1.dp, colors.border, RoundedCornerShape(14.dp))
-                    .clickable(onClick = onOpenSearch)
+                    .clickable(
+                        interactionSource = searchBarInteraction,
+                        indication = ripple(bounded = true),
+                        onClick = onOpenSearch
+                    )
                     .padding(horizontal = 14.dp)
                     .testTag("search_input_field"),
                 verticalAlignment = Alignment.CenterVertically
@@ -305,7 +320,11 @@ fun ExploreScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(searchHistory, key = { it.query }) { item ->
+                    items(
+                        items = searchHistory,
+                        key = { it.query },
+                        contentType = { "recent_search_chip" }
+                    ) { item ->
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
@@ -555,9 +574,29 @@ fun ExploreScreen(
         }
 
         // Grid of results / Skeleton / Error / Empty state
-        if (showSkeletonGrid) {
+        val exploreMode = when {
+            showSkeletonGrid -> "skeleton"
+            searchErrorMessage != null && filteredList.isEmpty() && !isSearching -> "error"
+            filteredList.isEmpty() && !isSearching && !isLoadingDiscover -> "empty"
+            else -> "grid"
+        }
+
+        AnimatedContent(
+            targetState = exploreMode,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(220, easing = CineEase)) togetherWith
+                    fadeOut(animationSpec = tween(160, easing = CineEase))
+            },
+            label = "explore_content_transition",
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) { mode ->
+        when (mode) {
+            "skeleton" -> {
             SearchResultsSkeletonGrid()
-        } else if (searchErrorMessage != null && filteredList.isEmpty() && !isSearching) {
+            }
+            "error" -> {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -580,7 +619,7 @@ fun ExploreScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = searchErrorMessage,
+                        text = searchErrorMessage.orEmpty(),
                         fontSize = 12.sp,
                         color = colors.textSecondary,
                         textAlign = TextAlign.Center
@@ -598,7 +637,8 @@ fun ExploreScreen(
                     }
                 }
             }
-        } else if (filteredList.isEmpty() && !isSearching && !isLoadingDiscover) {
+            }
+            "empty" -> {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -652,7 +692,8 @@ fun ExploreScreen(
                     }
                 }
             }
-        } else {
+            }
+            else -> {
             val gridState = rememberLazyGridState()
             val shouldAutoLoadMore by remember(effectiveHasMore, effectiveIsLoadingMore, filteredList.size) {
                 derivedStateOf {
@@ -675,7 +716,11 @@ fun ExploreScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(filteredList, key = { it.id }) { item ->
+                items(
+                    items = filteredList,
+                    key = { it.id },
+                    contentType = { "movie_card" }
+                ) { item ->
                     MovieCard(
                         media = item,
                         onClick = { onMediaClick(item) },
@@ -685,7 +730,11 @@ fun ExploreScreen(
                     )
                 }
 
-                item(span = { GridItemSpan(maxLineSpan) }, key = "explore_load_more_footer") {
+                item(
+                    span = { GridItemSpan(maxLineSpan) },
+                    key = "explore_load_more_footer",
+                    contentType = "load_more_footer"
+                ) {
                     LoadMoreBatchFooter(
                         shownCount = filteredList.size,
                         totalAvailable = displayTotal,
@@ -697,6 +746,8 @@ fun ExploreScreen(
                     )
                 }
             }
+            }
+        }
         }
     }
 

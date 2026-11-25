@@ -59,6 +59,7 @@ import com.example.data.model.CatalogBatchPolicy
 import com.example.data.model.MediaItem
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineEase
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.theme.CineTheme
@@ -262,7 +263,8 @@ fun CategoryListScreen(
         AnimatedContent(
             targetState = displayedItems.isEmpty(),
             transitionSpec = {
-                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                fadeIn(animationSpec = tween(220, easing = CineEase)) togetherWith
+                    fadeOut(animationSpec = tween(160, easing = CineEase))
             },
             label = "category_list_content_transition",
             modifier = Modifier.fillMaxSize()
@@ -322,7 +324,11 @@ fun CategoryListScreen(
                         .fillMaxSize()
                         .testTag("category_list_grid")
                 ) {
-                    items(displayedItems, key = { it.id }) { item ->
+                    items(
+                        items = displayedItems,
+                        key = { it.id },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -332,7 +338,11 @@ fun CategoryListScreen(
                         )
                     }
 
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "category_load_more_footer") {
+                    item(
+                        span = { GridItemSpan(maxLineSpan) },
+                        key = "category_load_more_footer",
+                        contentType = "load_more_footer"
+                    ) {
                         LoadMoreBatchFooter(
                             shownCount = displayedItems.size,
                             totalAvailable = maxOf(totalAvailableCount, displayedItems.size),

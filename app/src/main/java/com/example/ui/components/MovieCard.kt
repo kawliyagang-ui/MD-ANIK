@@ -1,13 +1,9 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,16 +22,14 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +43,10 @@ import com.example.ui.theme.CineTheme
 import java.util.Locale
 
 val LocalDownloadedMediaIds = staticCompositionLocalOf<Set<String>> { emptySet() }
+
+private val CardShape = RoundedCornerShape(12.dp)
+private val BadgeShape = RoundedCornerShape(4.dp)
+private val CertShape = RoundedCornerShape(3.dp)
 
 @Composable
 fun MovieCard(
@@ -64,27 +62,50 @@ fun MovieCard(
     val gradients = CineTheme.gradients
     val isDownloaded = LocalDownloadedMediaIds.current.contains(media.id)
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "movie_card_press_scale"
+    val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
+    val overlayBrush = rememberVerticalGradientBrush(
+        Color.Transparent,
+        Color.Transparent,
+        Color.Black.copy(alpha = 0.85f)
     )
+    val progressBackdropBrush = rememberVerticalGradientBrush(
+        Color.Transparent,
+        Color.Black.copy(alpha = 0.72f)
+    )
+
+    val typeBadgeText = remember(media.mediaType, media.seasons.size, media.numberOfSeasons) {
+        if (media.mediaType == "tv") {
+            if (media.seasons.isNotEmpty() || media.numberOfSeasons > 1) {
+                "TV • ${media.numberOfSeasons}S"
+            } else {
+                "TV"
+            }
+        } else {
+            "MOVIE"
+        }
+    }
+    val ratingText = remember(media.voteAverage) {
+        if (media.voteAverage > 0.0) String.format(Locale.US, "%.1f", media.voteAverage) else ""
+    }
+    val metaLineText = remember(media.releaseDate, media.genres) {
+        val year = media.releaseDate.take(4)
+        val genre = media.genres.firstOrNull().orEmpty()
+        when {
+            year.isNotBlank() && genre.isNotBlank() -> "$year • $genre"
+            year.isNotBlank() -> year
+            genre.isNotBlank() -> genre
+            else -> ""
+        }
+    }
 
     Column(
         modifier = modifier
             .width(cardWidth)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(RoundedCornerShape(12.dp))
+            .cinePressScale(interactionSource = interactionSource)
+            .clip(CardShape)
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(),
+                indication = ripple(),
                 onClick = onClick
             )
             .testTag("movie_card_${media.id}")
@@ -93,14 +114,21 @@ fun MovieCard(
             modifier = Modifier
                 .width(cardWidth)
                 .height(cardHeight)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(CardShape)
                 .background(colors.surfaceElevated)
-                .border(1.dp, colors.border.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                .border(1.dp, colors.border.copy(alpha = 0.7f), CardShape)
         ) {
             if (media.fullPosterUrl.isNotBlank()) {
+                val imageRequest = rememberCineImageRequest(
+                    url = media.fullPosterUrl,
+                    widthDp = cardWidth,
+                    heightDp = cardHeight
+                )
                 AsyncImage(
-                    model = media.fullPosterUrl,
+                    model = imageRequest,
                     contentDescription = media.title,
+                    placeholder = darkPlaceholder,
+                    error = darkPlaceholder,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -122,15 +150,7 @@ fun MovieCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.85f)
-                            )
-                        )
-                    )
+                    .background(overlayBrush)
             )
 
             // Top Badges
@@ -140,10 +160,9 @@ fun MovieCard(
                     .padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Type badge
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(BadgeShape)
                         .then(
                             if (media.mediaType == "tv") {
                                 Modifier.background(gradients.softBadge)
@@ -154,15 +173,7 @@ fun MovieCard(
                         .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = if (media.mediaType == "tv") {
-                            if (media.seasons.isNotEmpty() || media.numberOfSeasons > 1) {
-                                "TV • ${media.numberOfSeasons}S"
-                            } else {
-                                "TV"
-                            }
-                        } else {
-                            "MOVIE"
-                        },
+                        text = typeBadgeText,
                         color = Color.White,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
@@ -171,11 +182,10 @@ fun MovieCard(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Rating badge
-                if (media.voteAverage > 0) {
+                if (ratingText.isNotEmpty()) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(BadgeShape)
                             .background(Color.Black.copy(alpha = 0.75f))
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                     ) {
@@ -188,7 +198,7 @@ fun MovieCard(
                             )
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = String.format(Locale.US, "%.1f", media.voteAverage),
+                                text = ratingText,
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -204,11 +214,7 @@ fun MovieCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-                            )
-                        )
+                        .background(progressBackdropBrush)
                 ) {
                     if (episodeLabel != null) {
                         Text(
@@ -240,7 +246,7 @@ fun MovieCard(
                             start = 6.dp,
                             bottom = if (progressPercent != null || episodeLabel != null) 28.dp else 6.dp
                         )
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(BadgeShape)
                         .background(colors.success.copy(alpha = 0.9f))
                         .padding(horizontal = 5.dp, vertical = 2.dp)
                         .testTag("poster_downloaded_badge_${media.id}")
@@ -279,8 +285,8 @@ fun MovieCard(
             if (media.certification.isNotBlank()) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .border(0.75.dp, colors.gold.copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                        .clip(CertShape)
+                        .border(0.75.dp, colors.gold.copy(alpha = 0.7f), CertShape)
                         .padding(horizontal = 4.dp, vertical = 1.dp)
                 ) {
                     Text(
@@ -292,17 +298,9 @@ fun MovieCard(
                 }
                 Spacer(modifier = Modifier.width(5.dp))
             }
-            val year = media.releaseDate.take(4)
-            if (year.isNotBlank()) {
+            if (metaLineText.isNotEmpty()) {
                 Text(
-                    text = year,
-                    color = colors.textSecondary,
-                    fontSize = 11.sp
-                )
-            }
-            if (media.genres.isNotEmpty()) {
-                Text(
-                    text = (if (year.isNotBlank()) " • " else "") + media.genres.first(),
+                    text = metaLineText,
                     color = colors.textSecondary,
                     fontSize = 11.sp,
                     maxLines = 1,

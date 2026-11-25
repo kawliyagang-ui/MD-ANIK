@@ -61,6 +61,7 @@ import com.example.data.model.MediaItem
 import com.example.data.model.TmdbFilterCatalog
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
@@ -286,7 +287,8 @@ fun LanguageCatalogScreen(
         AnimatedContent(
             targetState = contentState,
             transitionSpec = {
-                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                fadeIn(animationSpec = tween(220, easing = CineEase)) togetherWith
+                    fadeOut(animationSpec = tween(160, easing = CineEase))
             },
             label = "language_catalog_content_transition",
             modifier = Modifier.fillMaxSize()
@@ -401,7 +403,11 @@ fun LanguageCatalogScreen(
                             .fillMaxSize()
                             .testTag("language_catalog_grid")
                     ) {
-                        items(mediaItems, key = { it.id }) { item ->
+                        items(
+                            items = mediaItems,
+                            key = { it.id },
+                            contentType = { "movie_card" }
+                        ) { item ->
                             MovieCard(
                                 media = item,
                                 onClick = { onMediaClick(item) },
@@ -411,7 +417,11 @@ fun LanguageCatalogScreen(
                             )
                         }
 
-                        item(span = { GridItemSpan(maxLineSpan) }, key = "language_load_more_footer") {
+                        item(
+                            span = { GridItemSpan(maxLineSpan) },
+                            key = "language_load_more_footer",
+                            contentType = "load_more_footer"
+                        ) {
                             LoadMoreBatchFooter(
                                 shownCount = mediaItems.size,
                                 totalAvailable = effectiveTotal,

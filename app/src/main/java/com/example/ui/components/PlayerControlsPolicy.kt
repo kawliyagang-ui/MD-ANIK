@@ -300,7 +300,19 @@ object PlayerControlsPolicy {
             "highperformanceformat",
             "topcreativeformat",
             "profitabledisplaynetwork",
-            "pushwhy"
+            "pushwhy",
+            "anti-debugger",
+            "fuckadblock",
+            "blockadblock",
+            "popunder",
+            "moatads",
+            "doubleverify",
+            "chartbeat",
+            "crazyegg",
+            "onclkds",
+            "onclickperformance",
+            "pushame",
+            "cdn-cgi/bm/cv"
         )
         return adKeywords.any { lower.contains(it) }
     }

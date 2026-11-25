@@ -1,12 +1,23 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +70,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,7 +80,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -83,8 +97,14 @@ import com.example.data.model.DownloadStatus
 import com.example.data.model.MovieBoxSubject
 import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
+import com.example.ui.components.CineDialogEntryBox
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
+import com.example.ui.components.cinePressScale
+import com.example.ui.components.rememberCineImageRequest
+import com.example.ui.components.rememberDarkImagePainter
 import com.example.ui.theme.CineTheme
+import kotlinx.coroutines.delay
 
 @Composable
 fun DownloadsScreen(
@@ -115,6 +135,11 @@ fun DownloadsScreen(
     var searchDraft by remember(movieBoxSearchQuery) { mutableStateOf(movieBoxSearchQuery) }
     var tvEpisodePickerSubject by remember { mutableStateOf<MovieBoxSubject?>(null) }
     var collapsedSeasons by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var hasFinishedInitialStagger by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(260L)
+        hasFinishedInitialStagger = true
+    }
 
     val filteredDownloads = remember(downloads, selectedFilter) {
         when (selectedFilter) {
@@ -177,11 +202,13 @@ fun DownloadsScreen(
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = colors.textPrimary
                 )
-                val summary = buildString {
-                    append("$completedCount completed")
-                    if (runningCount > 0) append(" • $runningCount downloading")
-                    if (queuedOrPausedCount > 0) append(" • $queuedOrPausedCount queued/paused")
-                    if (totalOfflineBytes > 0L) append(" • ${formatDownloadBytes(totalOfflineBytes)}")
+                val summary = remember(completedCount, runningCount, queuedOrPausedCount, totalOfflineBytes) {
+                    buildString {
+                        append("$completedCount completed")
+                        if (runningCount > 0) append(" • $runningCount downloading")
+                        if (queuedOrPausedCount > 0) append(" • $queuedOrPausedCount queued/paused")
+                        if (totalOfflineBytes > 0L) append(" • ${formatDownloadBytes(totalOfflineBytes)}")
+                    }
                 }
                 Text(
                     text = summary,
@@ -206,7 +233,11 @@ fun DownloadsScreen(
             }
         }
 
-        AnimatedVisibility(visible = feedbackMessage != null) {
+        AnimatedVisibility(
+            visible = feedbackMessage != null,
+            enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(200, easing = CineEase)),
+            exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(180, easing = CineEase))
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -240,7 +271,7 @@ fun DownloadsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Filter Chips
-            item(key = "downloads_filter_row") {
+            item(key = "downloads_filter_row", contentType = "filter_row") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -277,7 +308,7 @@ fun DownloadsScreen(
             }
 
             if (filteredDownloads.isEmpty()) {
-                item(key = "downloads_empty_state") {
+                item(key = "downloads_empty_state", contentType = "empty_state") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -313,45 +344,61 @@ fun DownloadsScreen(
                 }
             } else {
                 // Grouped TV Series -> Seasons
-                items(
+                itemsIndexed(
                     items = grouping.seriesGroups,
-                    key = { "series_${it.mediaId}" }
-                ) { seriesGroup ->
-                    SeriesDownloadGroupCard(
-                        seriesGroup = seriesGroup,
-                        collapsedSeasons = collapsedSeasons,
-                        onToggleSeasonCollapse = { key ->
-                            collapsedSeasons = if (key in collapsedSeasons) {
-                                collapsedSeasons - key
-                            } else {
-                                collapsedSeasons + key
-                            }
-                        },
-                        onPlayOffline = onPlayOffline,
-                        onExportToDevice = onExportToDevice,
-                        onPauseDownload = onPauseDownload,
-                        onResumeDownload = onResumeDownload,
-                        onRetryDownload = onRetryDownload,
-                        onCancelOrDelete = onCancelOrDelete
-                    )
+                    key = { _, g -> "series_${g.mediaId}" },
+                    contentType = { _, _ -> "series_group" }
+                ) { idx, seriesGroup ->
+                    StaggeredInitialItem(
+                        index = idx,
+                        skipStagger = hasFinishedInitialStagger
+                    ) {
+                        SeriesDownloadGroupCard(
+                            seriesGroup = seriesGroup,
+                            collapsedSeasons = collapsedSeasons,
+                            onToggleSeasonCollapse = { key ->
+                                collapsedSeasons = if (key in collapsedSeasons) {
+                                    collapsedSeasons - key
+                                } else {
+                                    collapsedSeasons + key
+                                }
+                            },
+                            onPlayOffline = onPlayOffline,
+                            onExportToDevice = onExportToDevice,
+                            onPauseDownload = onPauseDownload,
+                            onResumeDownload = onResumeDownload,
+                            onRetryDownload = onRetryDownload,
+                            onCancelOrDelete = onCancelOrDelete
+                        )
+                    }
                 }
 
                 // Movie Downloads
-                items(grouping.movieDownloads, key = { it.id }) { download ->
-                    DownloadItemCard(
-                        download = download,
-                        onPlayOffline = { onPlayOffline(download) },
-                        onExportToDevice = { onExportToDevice(download) },
-                        onPause = { onPauseDownload(download.id) },
-                        onResume = { onResumeDownload(download.id) },
-                        onRetry = { onRetryDownload(download) },
-                        onCancelOrDelete = { onCancelOrDelete(download.id) }
-                    )
+                val seriesOffset = grouping.seriesGroups.size
+                itemsIndexed(
+                    items = grouping.movieDownloads,
+                    key = { _, d -> d.id },
+                    contentType = { _, _ -> "movie_download" }
+                ) { idx, download ->
+                    StaggeredInitialItem(
+                        index = seriesOffset + idx,
+                        skipStagger = hasFinishedInitialStagger
+                    ) {
+                        DownloadItemCard(
+                            download = download,
+                            onPlayOffline = { onPlayOffline(download) },
+                            onExportToDevice = { onExportToDevice(download) },
+                            onPause = { onPauseDownload(download.id) },
+                            onResume = { onResumeDownload(download.id) },
+                            onRetry = { onRetryDownload(download) },
+                            onCancelOrDelete = { onCancelOrDelete(download.id) }
+                        )
+                    }
                 }
             }
 
             // Catalog Download Discovery Card
-            item(key = "catalog_download_search_card") {
+            item(key = "catalog_download_search_card", contentType = "catalog_search") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = colors.surface),
                     shape = RoundedCornerShape(16.dp),
@@ -451,7 +498,8 @@ fun DownloadsScreen(
                             ) {
                                 itemsIndexed(
                                     items = movieBoxSearchResults,
-                                    key = { index, item -> "mb_${index}_${item.subjectId}" }
+                                    key = { index, item -> "mb_${index}_${item.subjectId}" },
+                                    contentType = { _, _ -> "mb_subject" }
                                 ) { _, subject ->
                                     MovieBoxResultCard(
                                         subject = subject,
@@ -470,7 +518,9 @@ fun DownloadsScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item(key = "downloads_bottom_spacer", contentType = "spacer") {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 
@@ -488,27 +538,29 @@ fun DownloadsScreen(
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "Choose Season & Episode to fetch download links:",
-                        fontSize = 12.sp,
-                        color = colors.textSecondary
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(
-                            value = seasonInput.toString(),
-                            onValueChange = { seasonInput = it.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 1 },
-                            label = { Text("Season") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                CineDialogEntryBox {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "Choose Season & Episode to fetch download links:",
+                            fontSize = 12.sp,
+                            color = colors.textSecondary
                         )
-                        OutlinedTextField(
-                            value = episodeInput.toString(),
-                            onValueChange = { episodeInput = it.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 1 },
-                            label = { Text("Episode") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = seasonInput.toString(),
+                                onValueChange = { seasonInput = it.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 1 },
+                                label = { Text("Season") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = episodeInput.toString(),
+                                onValueChange = { episodeInput = it.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(1) ?: 1 },
+                                label = { Text("Episode") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             },
@@ -602,9 +654,17 @@ private fun SeasonDownloadGroupCard(
                     contentAlignment = Alignment.Center
                 ) {
                     if (seasonGroup.posterUrl.isNotBlank()) {
+                        val seasonPosterRequest = rememberCineImageRequest(
+                            url = seasonGroup.posterUrl,
+                            widthDp = 52.dp,
+                            heightDp = 72.dp
+                        )
+                        val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
                         AsyncImage(
-                            model = seasonGroup.posterUrl,
+                            model = seasonPosterRequest,
                             contentDescription = seasonGroup.seriesTitle,
+                            placeholder = darkPlaceholder,
+                            error = darkPlaceholder,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -618,6 +678,17 @@ private fun SeasonDownloadGroupCard(
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
+
+                val animatedSeasonProgress by animateFloatAsState(
+                    targetValue = (seasonGroup.overallProgressPercent / 100f).coerceIn(0f, 1f),
+                    animationSpec = tween(durationMillis = 220, easing = CineEase),
+                    label = "seasonGroupProgress"
+                )
+                val animatedSeasonPercent by animateIntAsState(
+                    targetValue = seasonGroup.overallProgressPercent.coerceIn(0, 100),
+                    animationSpec = tween(durationMillis = 200, easing = CineEase),
+                    label = "seasonGroupPercent"
+                )
 
                 Column(
                     modifier = Modifier.weight(1f),
@@ -638,7 +709,7 @@ private fun SeasonDownloadGroupCard(
                         color = colors.gold
                     )
                     LinearProgressIndicator(
-                        progress = { seasonGroup.overallProgressPercent / 100f },
+                        progress = { animatedSeasonProgress },
                         color = if (seasonGroup.completedCount == seasonGroup.episodes.size) colors.success else colors.primary,
                         trackColor = colors.surfaceElevated,
                         modifier = Modifier
@@ -660,7 +731,7 @@ private fun SeasonDownloadGroupCard(
                             color = colors.textSecondary
                         )
                         Text(
-                            text = "${seasonGroup.overallProgressPercent}%",
+                            text = "$animatedSeasonPercent%",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = colors.textPrimary
@@ -677,7 +748,11 @@ private fun SeasonDownloadGroupCard(
                 }
             }
 
-            AnimatedVisibility(visible = isExpanded) {
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(220, easing = CineEase)),
+                exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(180, easing = CineEase))
+            ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     HorizontalDivider(color = colors.border)
                     seasonGroup.episodes.forEachIndexed { idx, epDownload ->
@@ -757,19 +832,44 @@ private fun EpisodeDownloadRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Text(
-                text = status.displayLabel,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = statusColor,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(statusColor.copy(alpha = 0.14f))
-                    .padding(horizontal = 6.dp, vertical = 3.dp)
-            )
+            AnimatedContent(
+                targetState = status,
+                transitionSpec = {
+                    fadeIn(tween(180, easing = CineEase)) togetherWith
+                        fadeOut(tween(140, easing = CineEase))
+                },
+                label = "epDownloadStatusBadge"
+            ) { animatedStatus ->
+                val pillColor = when (animatedStatus) {
+                    DownloadStatus.COMPLETED -> colors.success
+                    DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
+                    DownloadStatus.PAUSED -> colors.gold
+                    DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
+                }
+                Text(
+                    text = animatedStatus.displayLabel,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = pillColor,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(pillColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+            }
         }
 
         if (status.isActive) {
+            val animatedProgress by animateFloatAsState(
+                targetValue = (download.progressPercent / 100f).coerceIn(0f, 1f),
+                animationSpec = tween(durationMillis = 220, easing = CineEase),
+                label = "epDownloadProgress"
+            )
+            val animatedPercent by animateIntAsState(
+                targetValue = download.progressPercent.coerceIn(0, 100),
+                animationSpec = tween(durationMillis = 200, easing = CineEase),
+                label = "epDownloadPercent"
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -777,7 +877,7 @@ private fun EpisodeDownloadRow(
             ) {
                 if (download.progressPercent > 0) {
                     LinearProgressIndicator(
-                        progress = { download.progressPercent / 100f },
+                        progress = { animatedProgress },
                         color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
                         trackColor = colors.surfaceElevated,
                         modifier = Modifier
@@ -796,7 +896,7 @@ private fun EpisodeDownloadRow(
                     )
                 }
                 Text(
-                    text = "${download.progressPercent}%",
+                    text = "$animatedPercent%",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = colors.textPrimary
@@ -830,13 +930,20 @@ private fun MovieBoxResultCard(
     onDownloadClick: () -> Unit
 ) {
     val colors = CineTheme.colors
+    val interactionSource = remember { MutableInteractionSource() }
+    val darkPlaceholder = rememberDarkImagePainter(colors.background)
     Column(
         modifier = Modifier
             .width(136.dp)
+            .cinePressScale(interactionSource = interactionSource)
             .clip(RoundedCornerShape(12.dp))
             .background(colors.surfaceElevated)
             .border(1.dp, colors.border, RoundedCornerShape(12.dp))
-            .clickable(onClick = onDownloadClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onDownloadClick
+            )
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -848,9 +955,16 @@ private fun MovieBoxResultCard(
                 .background(colors.background)
         ) {
             if (subject.coverUrl.isNotBlank()) {
+                val coverRequest = rememberCineImageRequest(
+                    url = subject.coverUrl,
+                    widthDp = 120.dp,
+                    heightDp = 148.dp
+                )
                 AsyncImage(
-                    model = subject.coverUrl,
+                    model = coverRequest,
                     contentDescription = subject.title,
+                    placeholder = darkPlaceholder,
+                    error = darkPlaceholder,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -951,9 +1065,17 @@ private fun DownloadItemCard(
                     contentAlignment = Alignment.Center
                 ) {
                     if (download.fullPosterUrl.isNotBlank()) {
+                        val posterReq = rememberCineImageRequest(
+                            url = download.fullPosterUrl,
+                            widthDp = 64.dp,
+                            heightDp = 90.dp
+                        )
+                        val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
                         AsyncImage(
-                            model = download.fullPosterUrl,
+                            model = posterReq,
                             contentDescription = download.title,
+                            placeholder = darkPlaceholder,
+                            error = darkPlaceholder,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -1009,16 +1131,31 @@ private fun DownloadItemCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = status.displayLabel,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = statusColor,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(statusColor.copy(alpha = 0.14f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        AnimatedContent(
+                            targetState = status,
+                            transitionSpec = {
+                                fadeIn(tween(180, easing = CineEase)) togetherWith
+                                    fadeOut(tween(140, easing = CineEase))
+                            },
+                            label = "movieDownloadStatusBadge"
+                        ) { animatedStatus ->
+                            val pillColor = when (animatedStatus) {
+                                DownloadStatus.COMPLETED -> colors.success
+                                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
+                                DownloadStatus.PAUSED -> colors.gold
+                                DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
+                            }
+                            Text(
+                                text = animatedStatus.displayLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = pillColor,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(pillColor.copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                         Text(
                             text = download.qualityLabel,
                             fontSize = 10.sp,
@@ -1026,8 +1163,11 @@ private fun DownloadItemCard(
                             color = colors.gold
                         )
                         if (download.totalBytes > 0L) {
+                            val totalBytesLabel = remember(download.totalBytes) {
+                                formatDownloadBytes(download.totalBytes)
+                            }
                             Text(
-                                text = "• ${formatDownloadBytes(download.totalBytes)}",
+                                text = "• $totalBytesLabel",
                                 fontSize = 10.sp,
                                 color = colors.textMuted
                             )
@@ -1054,10 +1194,20 @@ private fun DownloadItemCard(
             }
 
             if (status.isActive) {
+                val animatedProgress by animateFloatAsState(
+                    targetValue = (download.progressPercent / 100f).coerceIn(0f, 1f),
+                    animationSpec = tween(durationMillis = 220, easing = CineEase),
+                    label = "movieDownloadProgress"
+                )
+                val animatedPercent by animateIntAsState(
+                    targetValue = download.progressPercent.coerceIn(0, 100),
+                    animationSpec = tween(durationMillis = 200, easing = CineEase),
+                    label = "movieDownloadPercent"
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (download.progressPercent > 0) {
                         LinearProgressIndicator(
-                            progress = { download.progressPercent / 100f },
+                            progress = { animatedProgress },
                             color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
                             trackColor = colors.surfaceElevated,
                             modifier = Modifier
@@ -1090,7 +1240,7 @@ private fun DownloadItemCard(
                         }
                         Text(text = sizeProg, fontSize = 11.sp, color = colors.textSecondary)
                         Text(
-                            text = "${download.progressPercent}%",
+                            text = "$animatedPercent%",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose
@@ -1128,6 +1278,36 @@ private fun DownloadItemCard(
 }
 
 @Composable
+private fun StaggeredInitialItem(
+    index: Int,
+    skipStagger: Boolean,
+    content: @Composable () -> Unit
+) {
+    if (skipStagger || index >= 8) {
+        content()
+        return
+    }
+    val progress = remember { Animatable(0f) }
+    val offsetPx = with(LocalDensity.current) { 10.dp.toPx() }
+    LaunchedEffect(Unit) {
+        delay(index * 25L)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 200, easing = CineEase)
+        )
+    }
+    Box(
+        modifier = Modifier.graphicsLayer {
+            val p = progress.value
+            alpha = p
+            translationY = (1f - p) * offsetPx
+        }
+    ) {
+        content()
+    }
+}
+
+@Composable
 private fun DownloadActionButtonsRow(
     status: DownloadStatus,
     onPlayOffline: () -> Unit,
@@ -1138,12 +1318,20 @@ private fun DownloadActionButtonsRow(
     onCancelOrDelete: () -> Unit
 ) {
     val colors = CineTheme.colors
+    AnimatedContent(
+        targetState = status,
+        transitionSpec = {
+            fadeIn(tween(180, easing = CineEase)) togetherWith
+                fadeOut(tween(140, easing = CineEase))
+        },
+        label = "downloadActionRowTransition"
+    ) { animatedStatus ->
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        when (status) {
+        when (animatedStatus) {
             DownloadStatus.COMPLETED -> {
                 CineGradientButton(
                     onClick = onPlayOffline,
@@ -1298,5 +1486,6 @@ private fun DownloadActionButtonsRow(
                 }
             }
         }
+    }
     }
 }

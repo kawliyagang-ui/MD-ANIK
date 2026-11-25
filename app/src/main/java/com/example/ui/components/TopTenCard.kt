@@ -1,13 +1,9 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,16 +21,14 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -47,6 +41,9 @@ import com.example.data.model.MediaItem
 import com.example.ui.theme.CineTheme
 import java.util.Locale
 
+private val TopTenPosterShape = RoundedCornerShape(14.dp)
+private val TopTenBadgeShape = RoundedCornerShape(4.dp)
+
 @Composable
 fun TopTenCard(
     rank: Int,
@@ -57,27 +54,28 @@ fun TopTenCard(
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "top_ten_card_scale"
+    val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
+    val posterFadeBrush = rememberVerticalGradientBrush(
+        Color.Transparent,
+        Color.Transparent,
+        Color.Black.copy(alpha = 0.85f)
     )
+    val numeralBrush = rememberVerticalGradientBrush(
+        colors.textPrimary,
+        colors.softRose
+    )
+    val ratingText = remember(media.voteAverage) {
+        if (media.voteAverage > 0.0) String.format(Locale.US, "%.1f", media.voteAverage) else ""
+    }
 
     Column(
         modifier = modifier
             .width(166.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(RoundedCornerShape(14.dp))
+            .cinePressScale(interactionSource = interactionSource)
+            .clip(TopTenPosterShape)
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(),
+                indication = ripple(),
                 onClick = onClick
             )
             .testTag("top_ten_card_${rank}_${media.id}")
@@ -93,14 +91,21 @@ fun TopTenCard(
                     .align(Alignment.CenterEnd)
                     .width(130.dp)
                     .height(192.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(TopTenPosterShape)
                     .background(colors.surfaceElevated)
-                    .border(1.dp, colors.border.copy(alpha = 0.8f), RoundedCornerShape(14.dp))
+                    .border(1.dp, colors.border.copy(alpha = 0.8f), TopTenPosterShape)
             ) {
                 if (media.fullPosterUrl.isNotBlank()) {
+                    val imageRequest = rememberCineImageRequest(
+                        url = media.fullPosterUrl,
+                        widthDp = 130.dp,
+                        heightDp = 192.dp
+                    )
                     AsyncImage(
-                        model = media.fullPosterUrl,
+                        model = imageRequest,
                         contentDescription = "#$rank ${media.title}",
+                        placeholder = darkPlaceholder,
+                        error = darkPlaceholder,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -121,15 +126,7 @@ fun TopTenCard(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.85f)
-                                )
-                            )
-                        )
+                        .background(posterFadeBrush)
                 )
 
                 // Top badges on poster
@@ -141,7 +138,7 @@ fun TopTenCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(TopTenBadgeShape)
                             .background(gradients.softBadge)
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
@@ -153,10 +150,10 @@ fun TopTenCard(
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    if (media.voteAverage > 0.0) {
+                    if (ratingText.isNotEmpty()) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(TopTenBadgeShape)
                                 .background(Color.Black.copy(alpha = 0.72f))
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
@@ -169,7 +166,7 @@ fun TopTenCard(
                                 )
                                 Spacer(modifier = Modifier.width(2.dp))
                                 Text(
-                                    text = String.format(Locale.US, "%.1f", media.voteAverage),
+                                    text = ratingText,
                                     color = Color.White,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -180,7 +177,7 @@ fun TopTenCard(
                 }
             }
 
-            // Large overlapping Netflix-style Rank Numeral (outline + solid fill)
+            // Large overlapping rank numeral
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -202,12 +199,7 @@ fun TopTenCard(
                         fontSize = if (rank >= 10) 64.sp else 74.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = (-4).sp,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                colors.textPrimary,
-                                colors.softRose
-                            )
-                        )
+                        brush = numeralBrush
                     )
                 )
             }

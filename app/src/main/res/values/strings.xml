@@ -77,4 +77,6 @@
     <string name="report_problem_title">Report a Problem</string>
     <string name="report_problem_submit">Submit Report</string>
     <string name="report_problem_success">Report submitted! Our studio team will review it shortly.</string>
+    <string name="direct_player_notification_channel">Direct Media Playback</string>
+    <string name="direct_player_notification_close">Close</string>
 </resources>

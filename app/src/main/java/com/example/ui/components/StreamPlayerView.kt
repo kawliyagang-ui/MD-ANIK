@@ -179,12 +179,9 @@ fun StreamPlayerView(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var webViewSlotKey by remember { mutableIntStateOf(0) }
-    var rendererCrashCount by remember(media.id, selectedServer, currentSeason, currentEpisode) {
-        mutableIntStateOf(0)
+    var rendererCrashed by remember(media.id, selectedServer, currentSeason, currentEpisode) {
+        mutableStateOf(false)
     }
-    var rendererCrashed by remember { mutableStateOf(false) }
-    var pendingRendererRecovery by remember { mutableStateOf(false) }
-    var pendingForegroundAutoRecover by remember { mutableStateOf(false) }
     var customFullscreenView by remember { mutableStateOf<View?>(null) }
     var fullscreenHostContainer by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -212,10 +209,10 @@ fun StreamPlayerView(
         mutableStateOf<List<TorrentFileEntry>>(emptyList())
     }
     val latestOnProgressUpdate by rememberUpdatedState(onProgressUpdate)
-    val latestStreamUrl by rememberUpdatedState(
+    val currentStreamUrl = remember(media, selectedServer, currentSeason, currentEpisode) {
         media.getStreamUrl(selectedServer, currentSeason, currentEpisode)
-    )
-    val currentStreamUrl = latestStreamUrl
+    }
+    val latestStreamUrl by rememberUpdatedState(currentStreamUrl)
     val effectiveStreamUrl = remember(manualTorrentUri, currentStreamUrl, media.title) {
         if (manualTorrentUri.isNotBlank()) {
             WebTorrentPolicy.normalizeTorrentId(manualTorrentUri, media.title)
@@ -273,44 +270,28 @@ fun StreamPlayerView(
         }
     }
 
-    // Sync WebView lifecycle on background/foreground transitions & handle postponed renderer recovery
+    // Sync WebView lifecycle and renderer priority on background/foreground transitions
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, webViewInstance, rendererCrashed, pendingRendererRecovery) {
+    DisposableEffect(lifecycleOwner, webViewInstance, rendererCrashed) {
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> {
-                    if (pendingRendererRecovery && !rendererCrashed) {
-                        pendingRendererRecovery = false
-                        isLoadingPage = true
-                        webViewSlotKey += 1
-                    } else if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(webViewInstance)) {
-                        runCatching { webViewInstance?.onResume() }
+            val activeWebView = webViewInstance
+            if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> {
+                        WebViewFullscreenHost.updateRendererPriority(activeWebView, isForeground = true)
+                        runCatching { activeWebView?.onResume() }
                     }
-                }
-                Lifecycle.Event.ON_PAUSE -> {
-                    if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(webViewInstance)) {
-                        runCatching { webViewInstance?.onPause() }
+                    Lifecycle.Event.ON_PAUSE -> {
+                        WebViewFullscreenHost.updateRendererPriority(activeWebView, isForeground = false)
+                        runCatching { activeWebView?.onPause() }
                     }
+                    else -> Unit
                 }
-                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    LaunchedEffect(pendingForegroundAutoRecover) {
-        if (pendingForegroundAutoRecover) {
-            delay(450L)
-            pendingForegroundAutoRecover = false
-            if (!rendererCrashed && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                isLoadingPage = true
-                webViewSlotKey += 1
-            } else if (!rendererCrashed) {
-                pendingRendererRecovery = true
-            }
         }
     }
 
@@ -354,14 +335,15 @@ fun StreamPlayerView(
     }
 
     // Track real active watch seconds & probe player duration/position every 5s
-    LaunchedEffect(media.id, currentSeason, currentEpisode, isPlaying, isLoadingPage, rendererCrashed, pendingRendererRecovery) {
-        if (!isLoadingPage && isPlaying && !rendererCrashed && !pendingRendererRecovery && !pendingForegroundAutoRecover) {
+    LaunchedEffect(media.id, currentSeason, currentEpisode, isPlaying, isLoadingPage, rendererCrashed) {
+        if (!isLoadingPage && isPlaying && !rendererCrashed) {
             while (true) {
                 delay(1000L)
                 trackedWatchedSeconds += 1L
-                if (trackedWatchedSeconds % 5L == 0L && !rendererCrashed && !WebViewFullscreenHost.isDestroyed(webViewInstance)) {
+                val activeWebView = webViewInstance
+                if (trackedWatchedSeconds % 5L == 0L && !rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
                     runCatching {
-                        webViewInstance?.evaluateJavascript(
+                        activeWebView?.evaluateJavascript(
                             PlayerControlsPolicy.buildProgressProbeScript(),
                             null
                         )
@@ -373,7 +355,12 @@ fun StreamPlayerView(
     }
 
     val performSeek: (Int) -> Unit = { deltaSeconds ->
-        webViewInstance?.evaluateJavascript(PlayerControlsPolicy.buildSeekScript(deltaSeconds), null)
+        val activeWebView = webViewInstance
+        if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
+            runCatching {
+                activeWebView?.evaluateJavascript(PlayerControlsPolicy.buildSeekScript(deltaSeconds), null)
+            }
+        }
         val prefix = if (deltaSeconds < 0) "↺ " else "↻ "
         seekFeedbackText = "$prefix${PlayerControlsPolicy.seekDeltaLabel(deltaSeconds)}"
         seekFeedbackTick += 1
@@ -383,7 +370,12 @@ fun StreamPlayerView(
     val togglePlayPause: () -> Unit = {
         val nextPlaying = !isPlaying
         isPlaying = nextPlaying
-        webViewInstance?.evaluateJavascript(PlayerControlsPolicy.buildPlayPauseScript(nextPlaying), null)
+        val activeWebView = webViewInstance
+        if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
+            runCatching {
+                activeWebView?.evaluateJavascript(PlayerControlsPolicy.buildPlayPauseScript(nextPlaying), null)
+            }
+        }
         hudInteractionTick += 1
     }
 
@@ -399,10 +391,15 @@ fun StreamPlayerView(
             val streamIndex = PlayerControlsPolicy.volumeFractionToStreamIndex(clamped, maxStreamVolume)
             runCatching { mgr.setStreamVolume(AudioManager.STREAM_MUSIC, streamIndex, 0) }
         }
-        webViewInstance?.evaluateJavascript(
-            PlayerControlsPolicy.buildVolumeScript(clamped, mutedNow),
-            null
-        )
+        val activeWebView = webViewInstance
+        if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
+            runCatching {
+                activeWebView?.evaluateJavascript(
+                    PlayerControlsPolicy.buildVolumeScript(clamped, mutedNow),
+                    null
+                )
+            }
+        }
         hudInteractionTick += 1
     }
 
@@ -416,10 +413,15 @@ fun StreamPlayerView(
             audioManager?.let { mgr ->
                 runCatching { mgr.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0) }
             }
-            webViewInstance?.evaluateJavascript(
-                PlayerControlsPolicy.buildVolumeScript(0f, true),
-                null
-            )
+            val activeWebView = webViewInstance
+            if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
+                runCatching {
+                    activeWebView?.evaluateJavascript(
+                        PlayerControlsPolicy.buildVolumeScript(0f, true),
+                        null
+                    )
+                }
+            }
             hudInteractionTick += 1
         }
     }
@@ -556,14 +558,11 @@ fun StreamPlayerView(
 
                     IconButton(
                         onClick = {
-                            if (rendererCrashed || pendingRendererRecovery || pendingForegroundAutoRecover) {
+                            if (rendererCrashed) {
                                 rendererCrashed = false
-                                pendingRendererRecovery = false
-                                pendingForegroundAutoRecover = false
-                                rendererCrashCount = 0
                                 isLoadingPage = true
                                 webViewSlotKey += 1
-                            } else {
+                            } else if (!WebViewFullscreenHost.isDestroyed(webViewInstance)) {
                                 webViewInstance?.reload()
                             }
                         },
@@ -609,7 +608,7 @@ fun StreamPlayerView(
                     .background(Color.Black)
             }
         ) {
-            if (!rendererCrashed && !pendingRendererRecovery && !pendingForegroundAutoRecover) {
+            if (!rendererCrashed) {
             key(webViewSlotKey) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -636,13 +635,14 @@ fun StreamPlayerView(
                         }
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                if (rendererCrashed || WebViewFullscreenHost.isDestroyed(view)) return
                                 isLoadingPage = true
-                                rendererCrashed = false
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
+                                if (rendererCrashed || WebViewFullscreenHost.isDestroyed(view)) return
                                 isLoadingPage = false
-                                if (!WebViewFullscreenHost.isDestroyed(view)) {
+                                if (url != "about:blank") {
                                     view?.evaluateJavascript(
                                         PlayerControlsPolicy.buildProgressMessageBridgeScript(),
                                         null
@@ -685,8 +685,6 @@ fun StreamPlayerView(
                                 view: WebView?,
                                 detail: RenderProcessGoneDetail?
                             ): Boolean {
-                                val crashedBySite = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                    detail?.didCrash() == true
                                 if (webViewInstance === view) {
                                     webViewInstance = null
                                 }
@@ -696,23 +694,15 @@ fun StreamPlayerView(
                                 runCatching { cb?.onCustomViewHidden() }
                                 isFullScreen = false
                                 isLoadingPage = false
+                                rendererCrashed = true
                                 WebViewFullscreenHost.trimHostMemoryForWebView(view?.context ?: context)
-                                WebViewFullscreenHost.safelyDestroyWebView(view)
-                                if (!crashedBySite && rendererCrashCount < 1) {
-                                    rendererCrashCount += 1
-                                    if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                                        pendingForegroundAutoRecover = true
-                                    } else {
-                                        pendingRendererRecovery = true
-                                    }
-                                } else {
-                                    rendererCrashed = true
-                                }
+                                WebViewFullscreenHost.safelyDestroyWebView(view, rendererAlreadyGone = true)
                                 return true
                             }
                         }
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                if (rendererCrashed || WebViewFullscreenHost.isDestroyed(view)) return
                                 if (newProgress >= 85) {
                                     isLoadingPage = false
                                 }
@@ -894,10 +884,9 @@ fun StreamPlayerView(
                     if (webViewInstance === wv) {
                         webViewInstance = null
                     }
-                    if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(wv)) {
+                    if (isWebTorrentMode && !rendererCrashed && !WebViewFullscreenHost.isDestroyed(wv)) {
                         runCatching {
                             wv.evaluateJavascript("window.__wtDestroy && window.__wtDestroy()", null)
-                            wv.loadUrl("about:blank")
                         }
                     }
                     WebViewFullscreenHost.safelyDestroyWebView(wv)
@@ -926,9 +915,6 @@ fun StreamPlayerView(
                             Button(
                                 onClick = {
                                     rendererCrashed = false
-                                    pendingRendererRecovery = false
-                                    pendingForegroundAutoRecover = false
-                                    rendererCrashCount = 0
                                     isLoadingPage = true
                                     webViewSlotKey += 1
                                 },
@@ -942,9 +928,6 @@ fun StreamPlayerView(
                                     val idx = servers.indexOf(selectedServer)
                                     val nextServer = servers[(idx + 1) % servers.size]
                                     rendererCrashed = false
-                                    pendingRendererRecovery = false
-                                    pendingForegroundAutoRecover = false
-                                    rendererCrashCount = 0
                                     isLoadingPage = true
                                     onServerSelect(nextServer)
                                 }
@@ -1089,9 +1072,6 @@ fun StreamPlayerView(
                             selected = isSelected,
                             onClick = {
                                 rendererCrashed = false
-                                pendingRendererRecovery = false
-                                pendingForegroundAutoRecover = false
-                                rendererCrashCount = 0
                                 isLoadingPage = true
                                 onServerSelect(server)
                             },
@@ -1244,7 +1224,11 @@ fun StreamPlayerView(
                             .testTag("player_episodes_lazy_row"),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(episodeNumbers, key = { it }) { ep ->
+                        items(
+                            items = episodeNumbers,
+                            key = { it },
+                            contentType = { "player_episode_pill" }
+                        ) { ep ->
                             val isEpSelected = ep == currentEpisode
                             if (isEpSelected) {
                                 CineGradientButton(

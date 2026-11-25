@@ -97,8 +97,11 @@ import com.example.data.model.EpisodeDirectLinksCodec
 import com.example.data.model.MediaItem
 import com.example.data.model.toMediaItem
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineDialogEntryBox
 import com.example.ui.components.DetailedMovieView
 import com.example.ui.components.TmdbSearchRowSkeleton
+import com.example.ui.components.rememberCineImageRequest
+import com.example.ui.components.rememberDarkImagePainter
 import com.example.ui.theme.CineTheme
 import com.example.ui.viewmodel.AdminTab
 import com.example.ui.viewmodel.AdminUiState
@@ -855,15 +858,16 @@ private fun AdminAddContentTab(
             onDismissRequest = { viewModel.selectTmdbPreview(null) },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.background),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                    .testTag("tmdb_selected_detail_dialog")
-            ) {
+            CineDialogEntryBox {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.background),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                        .testTag("tmdb_selected_detail_dialog")
+                ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -927,6 +931,7 @@ private fun AdminAddContentTab(
                         }
                     )
                 }
+            }
             }
         }
     }
@@ -1065,7 +1070,11 @@ private fun AdminAddContentTab(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(searchHistory, key = { it.query }) { item ->
+                        items(
+                            items = searchHistory,
+                            key = { it.query },
+                            contentType = { "tmdb_history_chip" }
+                        ) { item ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(16.dp))
@@ -1156,7 +1165,12 @@ private fun AdminAddContentTab(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(state.tmdbSearchResults, key = { it.id }) { item ->
+                        items(
+                            items = state.tmdbSearchResults,
+                            key = { it.id },
+                            contentType = { "tmdb_result_card" }
+                        ) { item ->
+                            val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                                 shape = RoundedCornerShape(8.dp),
@@ -1175,8 +1189,15 @@ private fun AdminAddContentTab(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (item.fullPosterUrl.isNotBlank()) {
+                                            val thumbRequest = rememberCineImageRequest(
+                                                url = item.fullPosterUrl,
+                                                widthDp = 128.dp,
+                                                heightDp = 90.dp
+                                            )
                                             AsyncImage(
-                                                model = item.fullPosterUrl,
+                                                model = thumbRequest,
+                                                placeholder = darkPlaceholder,
+                                                error = darkPlaceholder,
                                                 contentDescription = item.title,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier.fillMaxSize()
@@ -1441,7 +1462,11 @@ private fun AdminAddContentTab(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(certPresets) { preset ->
+            items(
+                items = certPresets,
+                key = { it },
+                contentType = { "cert_preset_chip" }
+            ) { preset ->
                 val isSelected = state.formCertification.equals(preset, ignoreCase = true)
                 FilterChip(
                     selected = isSelected,
@@ -1726,8 +1751,13 @@ private fun AdminManageContentTab(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(filtered, key = { it.id }) { item ->
-                    val posterUrl = item.toMediaItem().fullPosterUrl
+                items(
+                    items = filtered,
+                    key = { it.id },
+                    contentType = { "manage_media_item" }
+                ) { item ->
+                    val posterUrl = remember(item.posterPath) { item.toMediaItem().fullPosterUrl }
+                    val posterPlaceholder = rememberDarkImagePainter(colors.surface)
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
                         shape = RoundedCornerShape(10.dp),
@@ -1750,8 +1780,15 @@ private fun AdminManageContentTab(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (posterUrl.isNotBlank()) {
+                                    val posterRequest = rememberCineImageRequest(
+                                        url = posterUrl,
+                                        widthDp = 50.dp,
+                                        heightDp = 75.dp
+                                    )
                                     AsyncImage(
-                                        model = posterUrl,
+                                        model = posterRequest,
+                                        placeholder = posterPlaceholder,
+                                        error = posterPlaceholder,
                                         contentDescription = item.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()

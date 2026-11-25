@@ -1,9 +1,15 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -144,8 +150,24 @@ fun MovieBoxDownloadSheet(
 
             HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
 
-            when {
-                sheetState.isLoading -> {
+            val bodyStage = when {
+                sheetState.isLoading -> 0
+                sheetState.errorMessage != null && sheetState.bundle == null -> 1
+                sheetState.bundle != null -> 2
+                else -> 3
+            }
+
+            AnimatedContent(
+                targetState = bodyStage,
+                transitionSpec = {
+                    fadeIn(tween(durationMillis = 200, easing = CineEase)) togetherWith
+                        fadeOut(tween(durationMillis = 150, easing = CineEase))
+                },
+                label = "downloadSheetBodyTransition"
+            ) { stage ->
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    when (stage) {
+                        0 -> {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -160,9 +182,8 @@ fun MovieBoxDownloadSheet(
                             color = colors.textSecondary
                         )
                     }
-                }
-
-                sheetState.errorMessage != null && sheetState.bundle == null -> {
+                        }
+                        1 -> {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -188,7 +209,7 @@ fun MovieBoxDownloadSheet(
                             )
                         }
                         Text(
-                            text = sheetState.errorMessage,
+                            text = sheetState.errorMessage.orEmpty(),
                             fontSize = 12.sp,
                             color = colors.textSecondary,
                             lineHeight = 18.sp
@@ -203,10 +224,10 @@ fun MovieBoxDownloadSheet(
                             Text("Retry", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                }
+                        }
 
-                sheetState.bundle != null -> {
-                    val bundle = sheetState.bundle
+                        2 -> {
+                    val bundle = sheetState.bundle ?: return@Column
                     val languageGroups = bundle.languageGroups
                     val hasMultipleLanguages = languageGroups.size > 1
 
@@ -385,6 +406,8 @@ fun MovieBoxDownloadSheet(
                         fontSize = 11.sp,
                         color = colors.textMuted
                     )
+                        }
+                    }
                 }
             }
         }
@@ -400,10 +423,12 @@ private fun DownloadQualityOptionRow(
     onClick: () -> Unit
 ) {
     val colors = CineTheme.colors
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
+            .cinePressScale(interactionSource = interactionSource)
             .clip(RoundedCornerShape(12.dp))
             .background(colors.surfaceElevated)
             .border(
@@ -411,7 +436,11 @@ private fun DownloadQualityOptionRow(
                 color = if (isRecommended) colors.primary else colors.border,
                 shape = RoundedCornerShape(12.dp)
             )
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically,

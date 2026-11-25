@@ -1,0 +1,37 @@
+# Cinetra Baseline Profile for AOT startup and smooth 60fps scrolling
+# Covers app UI, ViewModels, Compose hot paths, Coil image pipeline, and Media3 ExoPlayer
+
+HSPLcom/example/MainActivity;->**(**)**
+HSPLcom/example/CinetraApplication;->**(**)**
+HSPLcom/example/ui/screens/HomeScreenKt;->**(**)**
+HSPLcom/example/ui/screens/DetailsScreenKt;->**(**)**
+HSPLcom/example/ui/screens/DownloadsScreenKt;->**(**)**
+HSPLcom/example/ui/screens/ExploreScreenKt;->**(**)**
+HSPLcom/example/ui/screens/SearchScreenKt;->**(**)**
+HSPLcom/example/ui/screens/DirectMediaPlayerScreenKt;->**(**)**
+HSPLcom/example/ui/components/HeroBannerKt;->**(**)**
+HSPLcom/example/ui/components/MovieCardKt;->**(**)**
+HSPLcom/example/ui/components/TopTenCardKt;->**(**)**
+HSPLcom/example/ui/components/DetailedMovieViewKt;->**(**)**
+HSPLcom/example/ui/components/MotionPrimitivesKt;->**(**)**
+HSPLcom/example/ui/components/SkeletonLoadersKt;->**(**)**
+HSPLcom/example/ui/viewmodel/**;->**(**)**
+HSPLcom/example/data/model/**;->**(**)**
+
+# Compose Foundation Lazy Lists, Pager & Drawing
+HSPLandroidx/compose/foundation/lazy/LazyListKt;->**(**)**
+HSPLandroidx/compose/foundation/lazy/grid/LazyGridKt;->**(**)**
+HSPLandroidx/compose/foundation/pager/PagerKt;->**(**)**
+HSPLandroidx/compose/animation/AnimatedContentKt;->**(**)**
+HSPLandroidx/compose/animation/AnimatedVisibilityKt;->**(**)**
+HSPLandroidx/compose/runtime/ComposerImpl;->**(**)**
+HSPLandroidx/compose/ui/node/LayoutNode;->**(**)**
+HSPLandroidx/compose/ui/graphics/GraphicsLayerModifierKt;->**(**)**
+
+# Coil Image Loading & Decoding
+HSPLcoil/compose/AsyncImageKt;->**(**)**
+HSPLcoil/RealImageLoader;->**(**)**
+
+# Media3 ExoPlayer
+HSPLandroidx/media3/exoplayer/ExoPlayerImpl;->**(**)**
+HSPLandroidx/media3/ui/PlayerView;->**(**)**

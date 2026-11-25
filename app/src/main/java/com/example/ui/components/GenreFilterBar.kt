@@ -1,11 +1,11 @@
 package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -35,12 +35,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -95,6 +96,8 @@ object HomeGenreCatalog {
     }
 }
 
+private val PillShape = RoundedCornerShape(50)
+
 @Composable
 fun GenreFilterBar(
     genres: List<String>,
@@ -110,7 +113,11 @@ fun GenreFilterBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        items(genres, key = { it }) { genre ->
+        items(
+            items = genres,
+            key = { it },
+            contentType = { "genre_pill" }
+        ) { genre ->
             val isSelected = selectedGenre.equals(genre, ignoreCase = true)
             GenreFilterPill(
                 genre = genre,
@@ -135,40 +142,41 @@ private fun GenreFilterPill(
 ) {
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
-    val backgroundColor by animateColorAsState(
-        targetValue = colors.surfaceElevated,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "genre_pill_bg"
-    )
+    val interactionSource = remember { MutableInteractionSource() }
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) colors.softRose.copy(alpha = 0.65f) else colors.border,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 180, easing = CineEase),
         label = "genre_pill_border"
     )
     val contentColor by animateColorAsState(
         targetValue = if (isSelected) Color.White else colors.textPrimary,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 180, easing = CineEase),
         label = "genre_pill_content"
     )
 
-    val pillShape = RoundedCornerShape(50)
-    val tagSuffix = genre.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    val tagSuffix = remember(genre) {
+        genre.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    }
 
     Box(
         modifier = Modifier
             .minimumInteractiveComponentSize()
-            .clip(pillShape)
-            .background(
-                brush = if (isSelected) {
-                    gradients.primaryCta
+            .cinePressScale(interactionSource = interactionSource)
+            .clip(PillShape)
+            .then(
+                if (isSelected) {
+                    Modifier.background(gradients.primaryCta)
                 } else {
-                    Brush.horizontalGradient(
-                        colors = listOf(backgroundColor, backgroundColor)
-                    )
+                    Modifier.background(colors.surfaceElevated)
                 }
             )
-            .border(width = 1.dp, color = borderColor, shape = pillShape)
-            .clickable(role = Role.Tab, onClick = onClick)
+            .border(width = 1.dp, color = borderColor, shape = PillShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(),
+                role = Role.Tab,
+                onClick = onClick
+            )
             .semantics {
                 selected = isSelected
                 contentDescription = if (isSelected) {

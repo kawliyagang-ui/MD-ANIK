@@ -1,7 +1,10 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,9 +42,11 @@ fun CineGradientButton(
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
     content: @Composable RowScope.() -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
         enabled = enabled,
+        interactionSource = interactionSource,
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
             contentColor = Color.White,
@@ -53,7 +60,10 @@ fun CineGradientButton(
         ),
         contentPadding = PaddingValues(0.dp),
         shape = shape,
-        modifier = modifier
+        modifier = modifier.cinePressScale(
+            interactionSource = interactionSource,
+            enabled = enabled
+        )
     ) {
         Box(
             modifier = Modifier
@@ -83,17 +93,21 @@ fun CineGradientProgressBar(
     trackColor: Color = Color.White.copy(alpha = 0.16f),
     cornerRadius: Dp = 2.dp
 ) {
-    val clamped = progress.coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 220, easing = CineEase),
+        label = "cineGradientProgress"
+    )
     Box(
         modifier = modifier
             .height(height)
             .clip(RoundedCornerShape(cornerRadius))
             .background(trackColor)
     ) {
-        if (clamped > 0f) {
+        if (animatedProgress > 0f) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(clamped)
+                    .fillMaxWidth(animatedProgress)
                     .height(height)
                     .clip(RoundedCornerShape(cornerRadius))
                     .background(brush)

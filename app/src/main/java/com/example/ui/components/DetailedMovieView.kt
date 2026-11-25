@@ -1,9 +1,12 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -31,12 +34,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -77,6 +81,24 @@ fun DetailedMovieView(
 
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
+    val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
+    val backdropFadeBrush = rememberVerticalGradientBrush(
+        Color.Black.copy(alpha = 0.55f),
+        Color.Transparent,
+        colors.background.copy(alpha = 0.90f),
+        colors.background
+    )
+
+    // Soft backdrop/poster entrance: fade + tiny 0.98f -> 1f scale
+    val heroReveal = remember(media.id) { Animatable(0f) }
+    LaunchedEffect(media.id) {
+        heroReveal.snapTo(0f)
+        heroReveal.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 260, easing = CineEase)
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -84,7 +106,7 @@ fun DetailedMovieView(
             .testTag("detailed_movie_view")
     ) {
         // Backdrop Image Header
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
@@ -95,37 +117,53 @@ fun DetailedMovieView(
                     }
                 )
         ) {
-            if (media.fullBackdropUrl.isNotBlank()) {
-                AsyncImage(
-                    model = media.fullBackdropUrl,
-                    contentDescription = "${media.title} backdrop",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("detailed_movie_backdrop")
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(gradients.appBackdrop)
-                        .testTag("detailed_movie_backdrop")
-                )
-            }
+            val targetBackdropWidth = maxWidth
+            val targetBackdropHeight = backdropHeight ?: (targetBackdropWidth * 9f / 16f)
 
-            // Gradient Fade Overlay
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.55f),
-                            0.45f to Color.Transparent,
-                            0.82f to colors.background.copy(alpha = 0.90f),
-                            1.0f to colors.background
-                        )
+                    .graphicsLayer {
+                        val p = heroReveal.value
+                        alpha = p
+                        val s = 0.98f + (0.02f * p)
+                        scaleX = s
+                        scaleY = s
+                    }
+            ) {
+                if (media.fullBackdropUrl.isNotBlank()) {
+                    val backdropReq = rememberCineImageRequest(
+                        url = media.fullBackdropUrl,
+                        widthDp = targetBackdropWidth,
+                        heightDp = targetBackdropHeight,
+                        crossfadeMs = 240
                     )
-            )
+                    AsyncImage(
+                        model = backdropReq,
+                        contentDescription = "${media.title} backdrop",
+                        placeholder = darkPlaceholder,
+                        error = darkPlaceholder,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("detailed_movie_backdrop")
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(gradients.appBackdrop)
+                            .testTag("detailed_movie_backdrop")
+                    )
+                }
+
+                // Gradient Fade Overlay
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(backdropFadeBrush)
+                )
+            }
 
             // Navigation / Dismiss button
             if (showBackButton && onDismissOrBack != null) {
@@ -205,15 +243,29 @@ fun DetailedMovieView(
                     modifier = Modifier
                         .width(100.dp)
                         .height(150.dp)
+                        .graphicsLayer {
+                            val p = heroReveal.value
+                            alpha = p
+                            val s = 0.98f + (0.02f * p)
+                            scaleX = s
+                            scaleY = s
+                        }
                         .clip(RoundedCornerShape(10.dp))
                         .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                         .background(colors.surfaceElevated),
                     contentAlignment = Alignment.Center
                 ) {
                     if (media.fullPosterUrl.isNotBlank()) {
+                        val posterReq = rememberCineImageRequest(
+                            url = media.fullPosterUrl,
+                            widthDp = 100.dp,
+                            heightDp = 150.dp
+                        )
                         AsyncImage(
-                            model = media.fullPosterUrl,
+                            model = posterReq,
                             contentDescription = "${media.title} poster",
+                            placeholder = darkPlaceholder,
+                            error = darkPlaceholder,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -268,8 +320,9 @@ fun DetailedMovieView(
 
                     if (media.genres.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
+                        val genresString = remember(media.genres) { media.genres.joinToString(" • ") }
                         Text(
-                            text = media.genres.joinToString(" • "),
+                            text = genresString,
                             color = colors.gold,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
@@ -293,7 +346,6 @@ fun DetailedMovieView(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Rating Card
                 Surface(
                     color = colors.surfaceElevated,
                     shape = RoundedCornerShape(10.dp),
@@ -329,7 +381,6 @@ fun DetailedMovieView(
                     }
                 }
 
-                // Release Date Card
                 Surface(
                     color = colors.surfaceElevated,
                     shape = RoundedCornerShape(10.dp),

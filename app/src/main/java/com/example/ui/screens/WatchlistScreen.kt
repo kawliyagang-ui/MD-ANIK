@@ -226,7 +226,11 @@ fun WatchlistScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(displayedItems, key = { it.id }) { item ->
+                items(
+                    items = displayedItems,
+                    key = { it.id },
+                    contentType = { "watchlist_card" }
+                ) { item ->
                     val media = item.toMediaItem()
                     Column {
                         MovieCard(

@@ -9,12 +9,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -74,11 +73,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -96,6 +97,7 @@ import com.example.data.model.DownloadStatus
 import com.example.data.model.MediaItem
 import com.example.data.repository.MovieRepository
 import com.example.ui.components.AdGateOverlay
+import com.example.ui.components.CineEase
 import com.example.ui.components.LocalDownloadedMediaIds
 import com.example.ui.components.MovieBoxDownloadSheet
 import com.example.ui.components.StreamPlayerView
@@ -223,6 +225,22 @@ fun CinetraApp() {
         val completedDownloadsCount = remember(downloads) {
             downloads.count { it.parsedStatus == DownloadStatus.COMPLETED }
         }
+        val downloadBadgeScale = remember { Animatable(1f) }
+        val previousCompletedDownloadsCount = remember { mutableIntStateOf(-1) }
+        LaunchedEffect(completedDownloadsCount) {
+            val prev = previousCompletedDownloadsCount.intValue
+            previousCompletedDownloadsCount.intValue = completedDownloadsCount
+            if (prev in 0 until completedDownloadsCount) {
+                downloadBadgeScale.animateTo(
+                    targetValue = 1.18f,
+                    animationSpec = tween(durationMillis = 140, easing = CineEase)
+                )
+                downloadBadgeScale.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 180, easing = CineEase)
+                )
+            }
+        }
         val downloadedMediaIds = remember(downloads) {
             downloads.filter {
                 it.parsedStatus == DownloadStatus.COMPLETED &&
@@ -341,6 +359,11 @@ fun CinetraApp() {
                                     modifier = Modifier.testTag("topbar_downloads_button")
                                 ) {
                                     BadgedBox(
+                                        modifier = Modifier.graphicsLayer {
+                                            val s = downloadBadgeScale.value
+                                            scaleX = s
+                                            scaleY = s
+                                        },
                                         badge = {
                                             if (runningDownloadsCount > 0) {
                                                 Badge(containerColor = colors.softRose) {
@@ -487,6 +510,11 @@ fun CinetraApp() {
                                 onClick = { movieViewModel.openDownloadsScreen() },
                                 icon = {
                                     BadgedBox(
+                                        modifier = Modifier.graphicsLayer {
+                                            val s = downloadBadgeScale.value
+                                            scaleX = s
+                                            scaleY = s
+                                        },
                                         badge = {
                                             if (runningDownloadsCount > 0) {
                                                 Badge(containerColor = colors.softRose) {
@@ -637,6 +665,11 @@ fun CinetraApp() {
                             onClick = { movieViewModel.openDownloadsScreen() },
                             icon = {
                                 BadgedBox(
+                                    modifier = Modifier.graphicsLayer {
+                                        val s = downloadBadgeScale.value
+                                        scaleX = s
+                                        scaleY = s
+                                    },
                                     badge = {
                                         if (runningDownloadsCount > 0) {
                                             Badge(containerColor = colors.softRose) {
@@ -701,32 +734,27 @@ fun CinetraApp() {
                                 }
                                 userState.isNavigatingBack -> {
                                     (slideInHorizontally(
-                                        animationSpec = tween(260, easing = FastOutSlowInEasing),
-                                        initialOffsetX = { -it / 5 }
-                                    ) + fadeIn(tween(240))) togetherWith
+                                        animationSpec = tween(260, easing = CineEase),
+                                        initialOffsetX = { -it / 6 }
+                                    ) + fadeIn(tween(250, easing = CineEase))) togetherWith
                                         (slideOutHorizontally(
-                                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                            targetOffsetX = { it / 3 }
-                                        ) + fadeOut(tween(200)))
+                                            animationSpec = tween(240, easing = CineEase),
+                                            targetOffsetX = { it / 5 }
+                                        ) + fadeOut(tween(190, easing = CineEase)))
                                 }
                                 isSecondaryDestination || wasSecondaryOrigin -> {
                                     (slideInHorizontally(
-                                        animationSpec = tween(280, easing = FastOutSlowInEasing),
-                                        initialOffsetX = { it / 4 }
-                                    ) + fadeIn(tween(250)) + scaleIn(
-                                        initialScale = 0.97f,
-                                        animationSpec = tween(260)
-                                    )) togetherWith
+                                        animationSpec = tween(270, easing = CineEase),
+                                        initialOffsetX = { it / 6 }
+                                    ) + fadeIn(tween(250, easing = CineEase))) togetherWith
                                         (slideOutHorizontally(
-                                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                            targetOffsetX = { -it / 6 }
-                                        ) + fadeOut(tween(200)))
+                                            animationSpec = tween(240, easing = CineEase),
+                                            targetOffsetX = { -it / 7 }
+                                        ) + fadeOut(tween(190, easing = CineEase)))
                                 }
                                 else -> {
-                                    (fadeIn(tween(220)) + scaleIn(
-                                        initialScale = 0.985f,
-                                        animationSpec = tween(220)
-                                    )) togetherWith fadeOut(tween(160))
+                                    fadeIn(tween(220, easing = CineEase)) togetherWith
+                                        fadeOut(tween(160, easing = CineEase))
                                 }
                             }
                         },
@@ -1276,6 +1304,9 @@ fun CinetraApp() {
                                 )
                             }
                             is Screen.DirectPlayer -> {
+                                val loadedSeasonEpisodes = userState.episodesByMediaAndSeason[screen.media.id]
+                                    ?.get(screen.season)
+                                    .orEmpty()
                                 DirectMediaPlayerScreen(
                                     media = screen.media,
                                     season = screen.season,
@@ -1284,6 +1315,18 @@ fun CinetraApp() {
                                     isLocalFile = screen.isLocalFile,
                                     downloadEntity = screen.downloadEntity,
                                     initialPositionMs = screen.initialPositionMs,
+                                    loadedEpisodes = loadedSeasonEpisodes,
+                                    onSwitchEpisode = if (screen.media.mediaType.equals("tv", ignoreCase = true)) {
+                                        { targetEp ->
+                                            movieViewModel.switchDirectEpisode(
+                                                media = screen.media,
+                                                season = screen.season,
+                                                episode = targetEp.episodeNumber
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
                                     onSavePosition = { pos, dur ->
                                         movieViewModel.saveDirectPlaybackPosition(
                                             media = screen.media,

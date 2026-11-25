@@ -12,6 +12,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +64,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -100,10 +102,14 @@ import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.components.SearchResultsSkeletonGrid
+import com.example.ui.components.cinePressScale
+import com.example.ui.components.rememberCineImageRequest
+import com.example.ui.components.rememberDarkImagePainter
 import com.example.ui.theme.CineTheme
 import java.util.Locale
 
@@ -266,8 +272,8 @@ fun SearchScreen(
                 // Type Filter + Advanced Filters Pills when querying or results exist
                 AnimatedVisibility(
                     visible = searchQuery.isNotBlank(),
-                    enter = fadeIn(tween(180)) + expandVertically(),
-                    exit = fadeOut(tween(140)) + shrinkVertically()
+                    enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(200, easing = CineEase)),
+                    exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(160, easing = CineEase))
                 ) {
                     Row(
                         modifier = Modifier
@@ -336,8 +342,8 @@ fun SearchScreen(
                 // Recent Searches Row
                 AnimatedVisibility(
                     visible = searchHistory.isNotEmpty() && searchQuery.isBlank(),
-                    enter = fadeIn(tween(180)) + expandVertically(),
-                    exit = fadeOut(tween(140)) + shrinkVertically()
+                    enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(200, easing = CineEase)),
+                    exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(160, easing = CineEase))
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Spacer(modifier = Modifier.height(10.dp))
@@ -380,7 +386,11 @@ fun SearchScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(searchHistory, key = { it.query }) { item ->
+                            items(
+                                items = searchHistory,
+                                key = { it.query },
+                                contentType = { "search_history_chip" }
+                            ) { item ->
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(16.dp))
@@ -428,8 +438,8 @@ fun SearchScreen(
             (filteredSuggestions.isNotEmpty() || isFetchingSuggestions)
         AnimatedVisibility(
             visible = shouldRenderSuggestions,
-            enter = fadeIn(tween(180)) + expandVertically(tween(220)),
-            exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
+            enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(220, easing = CineEase)),
+            exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(180, easing = CineEase))
         ) {
             RealTimeSuggestionsPanel(
                 query = searchQuery.trim(),
@@ -523,7 +533,8 @@ fun SearchScreen(
         AnimatedContent(
             targetState = viewMode,
             transitionSpec = {
-                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                fadeIn(animationSpec = tween(220, easing = CineEase)) togetherWith
+                    fadeOut(animationSpec = tween(160, easing = CineEase))
             },
             contentKey = { mode ->
                 when (mode) {
@@ -670,7 +681,11 @@ fun SearchScreen(
                             .fillMaxSize()
                             .testTag("search_results_grid")
                     ) {
-                        items(mode.items, key = { it.id }) { item ->
+                        items(
+                            items = mode.items,
+                            key = { it.id },
+                            contentType = { "movie_card" }
+                        ) { item ->
                             MovieCard(
                                 media = item,
                                 onClick = { onMediaClick(item) },
@@ -680,7 +695,11 @@ fun SearchScreen(
                             )
                         }
 
-                        item(span = { GridItemSpan(maxLineSpan) }, key = "search_load_more_footer") {
+                        item(
+                            span = { GridItemSpan(maxLineSpan) },
+                            key = "search_load_more_footer",
+                            contentType = "load_more_footer"
+                        ) {
                             LoadMoreBatchFooter(
                                 shownCount = mode.items.size,
                                 totalAvailable = effectiveSearchTotal,
@@ -787,7 +806,11 @@ private fun RealTimeSuggestionsPanel(
                         .heightIn(max = 310.dp)
                         .testTag("search_suggestions_list")
                 ) {
-                    items(suggestions, key = { "sug_${it.id}" }) { item ->
+                    items(
+                        items = suggestions,
+                        key = { "sug_${it.id}" },
+                        contentType = { "suggestion_row" }
+                    ) { item ->
                         SuggestionRowItem(
                             item = item,
                             query = query,
@@ -864,12 +887,22 @@ private fun SuggestionRowItem(
     val colors = CineTheme.colors
     val year = remember(item.releaseDate) { item.releaseDate.take(4) }
     val typeLabel = if (item.mediaType.equals("tv", ignoreCase = true)) "TV Series" else "Movie"
+    val ratingText = remember(item.voteAverage) {
+        if (item.voteAverage > 0.0) String.format(Locale.US, "%.1f", item.voteAverage) else ""
+    }
+    val rowInteraction = remember { MutableInteractionSource() }
+    val posterDarkPlaceholder = rememberDarkImagePainter(colors.surface)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
-            .clickable(onClick = onClick)
+            .cinePressScale(rowInteraction)
+            .clickable(
+                interactionSource = rowInteraction,
+                indication = ripple(bounded = true),
+                onClick = onClick
+            )
             .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)
             .testTag("search_suggestion_item_${item.id}"),
         verticalAlignment = Alignment.CenterVertically
@@ -884,8 +917,15 @@ private fun SuggestionRowItem(
             contentAlignment = Alignment.Center
         ) {
             if (item.fullPosterUrl.isNotBlank()) {
+                val posterRequest = rememberCineImageRequest(
+                    url = item.fullPosterUrl,
+                    widthDp = 36.dp,
+                    heightDp = 52.dp
+                )
                 AsyncImage(
-                    model = item.fullPosterUrl,
+                    model = posterRequest,
+                    placeholder = posterDarkPlaceholder,
+                    error = posterDarkPlaceholder,
                     contentDescription = item.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -951,7 +991,7 @@ private fun SuggestionRowItem(
                     )
                 }
 
-                if (item.voteAverage > 0.0) {
+                if (ratingText.isNotEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Star,
@@ -961,7 +1001,7 @@ private fun SuggestionRowItem(
                         )
                         Spacer(modifier = Modifier.width(2.dp))
                         Text(
-                            text = String.format(Locale.US, "%.1f", item.voteAverage),
+                            text = ratingText,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.gold

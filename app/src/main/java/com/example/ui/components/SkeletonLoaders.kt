@@ -300,7 +300,11 @@ fun HorizontalMovieListSkeleton(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             userScrollEnabled = false
         ) {
-            items(itemCount) {
+            items(
+                count = itemCount,
+                key = { it },
+                contentType = { "skeleton_card" }
+            ) {
                 MovieCardSkeleton(
                     cardWidth = cardWidth,
                     cardHeight = cardHeight,
@@ -363,7 +367,11 @@ fun SearchResultsSkeletonGrid(
             .fillMaxSize()
             .testTag("search_results_skeleton_grid")
     ) {
-        items(itemCount) {
+        items(
+            count = itemCount,
+            key = { it },
+            contentType = { "skeleton_grid_card" }
+        ) {
             MovieCardSkeleton(
                 cardWidth = 140.dp,
                 cardHeight = 205.dp,
@@ -387,7 +395,11 @@ fun TmdbSearchRowSkeleton(
             .fillMaxWidth()
             .testTag("admin_tmdb_skeleton_row")
     ) {
-        items(itemCount) {
+        items(
+            count = itemCount,
+            key = { it },
+            contentType = { "skeleton_tmdb_card" }
+        ) {
             Column(
                 modifier = Modifier
                     .width(140.dp)
@@ -419,6 +431,59 @@ fun TmdbSearchRowSkeleton(
                         .clip(RoundedCornerShape(4.dp))
                         .background(shimmerBrush)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailsEpisodesSkeleton(
+    modifier: Modifier = Modifier,
+    rowCount: Int = 4
+) {
+    val colors = CineTheme.colors
+    val shimmerBrush = rememberShimmerBrush()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .testTag("details_episodes_skeleton"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        repeat(rowCount) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.surfaceElevated)
+                    .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(shimmerBrush)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.65f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(shimmerBrush)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.4f)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(shimmerBrush)
+                    )
+                }
             }
         }
     }

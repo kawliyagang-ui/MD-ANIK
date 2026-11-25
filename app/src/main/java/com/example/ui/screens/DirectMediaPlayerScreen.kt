@@ -1,67 +1,39 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Rect
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.HighQuality
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -71,25 +43,24 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toAndroidRectF
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.graphics.toRect
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -97,37 +68,69 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.media3.ui.PlayerView
 import com.example.data.model.DownloadEntity
+import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
 import com.example.data.model.MovieBoxDownloadOption
 import com.example.data.model.PlaybackSourcePolicy
+import com.example.player.DirectPlaybackHolder
+import com.example.player.DirectPlaybackService
+import com.example.ui.components.CineEase
 import com.example.ui.components.WebViewFullscreenHost
-import com.example.ui.theme.CineTheme
+import com.example.ui.components.rememberVerticalGradientBrush
+import com.example.ui.player.DirectAspectRatio
+import com.example.ui.player.DirectPlayerActiveSheet
+import com.example.ui.player.DirectPlayerBottomBar
+import com.example.ui.player.DirectPlayerBufferingOverlay
+import com.example.ui.player.DirectPlayerCenterControls
+import com.example.ui.player.DirectPlayerErrorCard
+import com.example.ui.player.DirectPlayerPipEffects
+import com.example.ui.player.DirectPlayerSheetsHost
+import com.example.ui.player.DirectPlayerTopBar
+import com.example.ui.player.DirectTrackChoice
+import com.example.ui.player.DoubleTapSeekOverlay
+import com.example.ui.player.HorizontalDragSeekPill
+import com.example.ui.player.LongPressSpeedController
+import com.example.ui.player.LongPressSpeedPill
+import com.example.ui.player.PlayerLockOverlay
+import com.example.ui.player.SeriesUpNextCard
+import com.example.ui.player.VerticalAdjustmentPill
+import com.example.ui.player.enterPictureInPictureNow
+import com.example.ui.player.isPictureInPictureSupported
+import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem as Media3Item
+
+private enum class SurfaceGestureMode {
+    PENDING,
+    BOOSTING,
+    HORIZONTAL_SEEK,
+    VERTICAL_BRIGHTNESS,
+    VERTICAL_VOLUME
+}
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
-
-data class DirectTrackChoice(
-    val trackType: Int,
-    val group: Tracks.Group,
-    val trackIndex: Int,
-    val label: String,
-    val isSelected: Boolean
-)
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -139,6 +142,8 @@ fun DirectMediaPlayerScreen(
     isLocalFile: Boolean,
     downloadEntity: DownloadEntity? = null,
     initialPositionMs: Long = 0L,
+    loadedEpisodes: List<EpisodeInfo> = emptyList(),
+    onSwitchEpisode: ((EpisodeInfo) -> Unit)? = null,
     onSavePosition: (positionMs: Long, durationMs: Long) -> Unit,
     onFallbackToWebEmbed: (() -> Unit)? = null,
     onBack: () -> Unit,
@@ -146,10 +151,15 @@ fun DirectMediaPlayerScreen(
 ) {
     val context = LocalContext.current
     val hostView = LocalView.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val colors = CineTheme.colors
     val activity = remember(context) { context.findActivity() }
+    val audioManager = remember(context) {
+        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    }
+    val pipSupported = remember(context) { isPictureInPictureSupported(context) }
     val latestSavePosition by rememberUpdatedState(onSavePosition)
+    val latestOnBack by rememberUpdatedState(onBack)
+    val gestureScope = rememberCoroutineScope()
+    val ownerToken = remember { UUID.randomUUID().toString() }
 
     val initialOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -157,84 +167,233 @@ fun DirectMediaPlayerScreen(
     val initialCutoutMode = remember(activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             activity?.window?.attributes?.layoutInDisplayCutoutMode
-        } else {
-            null
+        } else null
+    }
+    val initialBrightness = remember(activity) {
+        val winVal = activity?.window?.attributes?.screenBrightness ?: -1f
+        if (winVal in 0.01f..1f) winVal else {
+            runCatching {
+                val sys = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
+                (sys / 255f).coerceIn(0.1f, 1f)
+            }.getOrDefault(0.5f)
         }
     }
 
     var isFullScreen by remember { mutableStateOf(false) }
+    var isInPipMode by remember { mutableStateOf(false) }
+    var isLocked by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     var controlInteractionTick by remember { mutableIntStateOf(0) }
+    var activeSheet by remember { mutableStateOf(DirectPlayerActiveSheet.NONE) }
+    var aspectRatio by remember { mutableStateOf(DirectAspectRatio.FIT) }
+
     var isPlaying by remember { mutableStateOf(true) }
     var isBuffering by remember { mutableStateOf(true) }
+    var isEnded by remember { mutableStateOf(false) }
+    var bufferedPercent by remember { mutableIntStateOf(0) }
+    var bufferedPositionMs by remember { mutableLongStateOf(0L) }
     var playbackError by remember(sourceUrl) { mutableStateOf<String?>(null) }
     var currentPositionMs by remember { mutableLongStateOf(initialPositionMs.coerceAtLeast(0L)) }
     var durationMs by remember { mutableLongStateOf(0L) }
-    var isSeeking by remember { mutableStateOf(false) }
-    var sliderSeekMs by remember { mutableLongStateOf(0L) }
-    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
-    var showSpeedDialog by remember { mutableStateOf(false) }
-    var showTracksDialog by remember { mutableStateOf(false) }
+    var videoWidth by remember { mutableIntStateOf(0) }
+    var videoHeight by remember { mutableIntStateOf(0) }
+    var pipSourceRect by remember { mutableStateOf<Rect?>(null) }
+
+    var isScrubbingBar by remember { mutableStateOf(false) }
+    var barScrubMs by remember { mutableLongStateOf(0L) }
+    var baseSpeed by remember { mutableFloatStateOf(1.0f) }
+    var isSpeedBoosted by remember { mutableStateOf(false) }
+    var hasAppliedInitialSeek by remember(sourceUrl) { mutableStateOf(false) }
+    var reloadKey by remember { mutableIntStateOf(0) }
+    var showPortraitPausedDetails by remember { mutableStateOf(false) }
+    var dismissedUpNextForEpisode by remember(media.id, season, episode) { mutableStateOf(false) }
+
+    // Gesture visual indicator states
+    var doubleTapForward by remember { mutableStateOf<Boolean?>(null) }
+    var doubleTapSeconds by remember { mutableIntStateOf(0) }
+    var doubleTapTargetMs by remember { mutableLongStateOf(0L) }
+    var doubleTapResetJob by remember { mutableStateOf<Job?>(null) }
+    var pendingSingleTapJob by remember { mutableStateOf<Job?>(null) }
+    var pendingTapIsRight by remember { mutableStateOf<Boolean?>(null) }
+
+    var isHorizontalGestureScrubbing by remember { mutableStateOf(false) }
+    var horizontalGestureTargetMs by remember { mutableLongStateOf(0L) }
+    var horizontalGestureDeltaMs by remember { mutableLongStateOf(0L) }
+
+    var brightnessFraction by remember { mutableFloatStateOf(initialBrightness) }
+    var showBrightnessPill by remember { mutableStateOf(false) }
+    var brightnessHideJob by remember { mutableStateOf<Job?>(null) }
+
+    var volumeFraction by remember {
+        mutableFloatStateOf(
+            audioManager?.let {
+                val max = it.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                it.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max.toFloat()
+            } ?: 0.6f
+        )
+    }
+    var showVolumePill by remember { mutableStateOf(false) }
+    var volumeHideJob by remember { mutableStateOf<Job?>(null) }
+
     var videoTrackChoices by remember { mutableStateOf<List<DirectTrackChoice>>(emptyList()) }
     var audioTrackChoices by remember { mutableStateOf<List<DirectTrackChoice>>(emptyList()) }
     var subtitleTrackChoices by remember { mutableStateOf<List<DirectTrackChoice>>(emptyList()) }
-    var hasAppliedInitialSeek by remember(sourceUrl) { mutableStateOf(false) }
-    var reloadKey by remember { mutableIntStateOf(0) }
+    var trackRevision by remember { mutableIntStateOf(0) }
+
+    val speedController = remember {
+        LongPressSpeedController(initialBaseSpeed = 1.0f) { _ -> }
+    }
+
+    val sortedEpisodes = remember(loadedEpisodes) {
+        loadedEpisodes.sortedBy { it.episodeNumber }
+    }
+    val currentEpisodeIndex = remember(sortedEpisodes, episode) {
+        sortedEpisodes.indexOfFirst { it.episodeNumber == episode }
+    }
+    val prevEpisode = remember(sortedEpisodes, currentEpisodeIndex) {
+        if (currentEpisodeIndex > 0) sortedEpisodes[currentEpisodeIndex - 1] else null
+    }
+    val nextEpisode = remember(sortedEpisodes, currentEpisodeIndex) {
+        if (currentEpisodeIndex >= 0 && currentEpisodeIndex + 1 < sortedEpisodes.size) {
+            sortedEpisodes[currentEpisodeIndex + 1]
+        } else null
+    }
+    val currentEpisodeTitle = remember(sortedEpisodes, currentEpisodeIndex) {
+        if (currentEpisodeIndex >= 0) sortedEpisodes[currentEpisodeIndex].name else ""
+    }
 
     val resolvedUri = remember(sourceUrl, isLocalFile) {
-        when {
-            isLocalFile && !sourceUrl.startsWith("file://") && !sourceUrl.startsWith("content://") ->
-                Uri.fromFile(File(sourceUrl))
-            else -> Uri.parse(sourceUrl)
+        if (isLocalFile && !sourceUrl.startsWith("file://") && !sourceUrl.startsWith("content://")) {
+            Uri.fromFile(File(sourceUrl))
+        } else {
+            Uri.parse(sourceUrl)
         }
     }
     val isHls = remember(sourceUrl) { PlaybackSourcePolicy.isHlsStreamUrl(sourceUrl) }
+    val notificationSubtitle = remember(media.mediaType, season, episode, currentEpisodeTitle) {
+        if (media.mediaType.equals("tv", ignoreCase = true)) {
+            if (currentEpisodeTitle.isNotBlank()) "S$season · E$episode — $currentEpisodeTitle" else "S$season · E$episode"
+        } else {
+            media.releaseDate.take(4).ifBlank { "Now Playing" }
+        }
+    }
 
     val exoPlayer = remember(sourceUrl, reloadKey) {
-        val headers = buildMap<String, String> {
+        val headers = buildMap {
             downloadEntity?.refererHeader?.takeIf { it.isNotBlank() }?.let { put("Referer", it) }
-            val cookie = downloadEntity?.cookieHeader?.takeIf { it.isNotBlank() }
-            if (cookie != null) put("Cookie", cookie)
+            downloadEntity?.cookieHeader?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
         }
         val ua = downloadEntity?.userAgentHeader?.takeIf { it.isNotBlank() }
             ?: MovieBoxDownloadOption.DEFAULT_USER_AGENT
-
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(ua)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(20_000)
             .setReadTimeoutMs(30_000)
-            .apply {
-                if (headers.isNotEmpty()) {
-                    setDefaultRequestProperties(headers)
-                }
-            }
-
+            .apply { if (headers.isNotEmpty()) setDefaultRequestProperties(headers) }
         val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        val audioAttrs = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
 
         ExoPlayer.Builder(context)
-            .setMediaSourceFactory(mediaSourceFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setAudioAttributes(audioAttrs, true)
+            .setHandleAudioBecomingNoisy(true)
             .build()
             .apply {
-                val itemBuilder = Media3Item.Builder().setUri(resolvedUri)
-                if (isHls) {
-                    itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
-                }
+                val artworkUri = media.fullPosterUrl.takeIf { it.isNotBlank() }?.let(Uri::parse)
+                val itemBuilder = Media3Item.Builder()
+                    .setUri(resolvedUri)
+                    .setMediaMetadata(
+                        DirectPlaybackService.buildMediaMetadata(
+                            title = media.title,
+                            subtitle = notificationSubtitle,
+                            artworkUri = artworkUri
+                        )
+                    )
+                if (isHls) itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
                 setMediaItem(itemBuilder.build())
+                playbackParameters = PlaybackParameters(baseSpeed)
                 playWhenReady = true
                 prepare()
             }
     }
 
-    val mediaSession = remember(exoPlayer) {
-        runCatching {
-            MediaSession.Builder(context, exoPlayer)
-                .setId("cinetra_direct_${media.id}_${System.currentTimeMillis()}")
-                .build()
-        }.getOrNull()
+    // Bind player to DirectPlaybackHolder & connect Media3 MediaSessionService for background playback
+    DisposableEffect(exoPlayer) {
+        DirectPlaybackHolder.setPlayer(
+            ownerToken = ownerToken,
+            sourceKey = "${media.id}_${season}_$episode",
+            player = exoPlayer,
+            onStopRequested = { latestOnBack() }
+        )
+        val sessionToken = SessionToken(context, ComponentName(context, DirectPlaybackService::class.java))
+        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture.addListener({ runCatching { controllerFuture.get() } }, MoreExecutors.directExecutor())
+
+        onDispose {
+            val finalPos = runCatching { exoPlayer.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
+            val finalDur = runCatching { exoPlayer.duration.coerceAtLeast(0L) }.getOrDefault(0L)
+            latestSavePosition(finalPos, finalDur)
+            MediaController.releaseFuture(controllerFuture)
+            DirectPlaybackHolder.releaseIfOwner(ownerToken)
+            runCatching { context.stopService(Intent(context, DirectPlaybackService::class.java)) }
+        }
     }
 
+    // Smooth 200ms ramp to 2.0x boost & clean restore to previous baseSpeed
+    LaunchedEffect(isSpeedBoosted, baseSpeed, exoPlayer) {
+        val target = if (isSpeedBoosted) speedController.boostSpeed else baseSpeed
+        val start = exoPlayer.playbackParameters.speed
+        if (abs(start - target) < 0.01f) {
+            exoPlayer.playbackParameters = PlaybackParameters(target)
+            return@LaunchedEffect
+        }
+        val duration = if (isSpeedBoosted) {
+            LongPressSpeedController.RAMP_DURATION_MS
+        } else {
+            LongPressSpeedController.RELEASE_RAMP_DURATION_MS
+        }
+        val steps = 8
+        val stepMs = (duration / steps).coerceAtLeast(12L)
+        for (step in 1..steps) {
+            val frac = step.toFloat() / steps.toFloat()
+            val nextSpeed = LongPressSpeedController.interpolateSpeed(start, target, frac)
+            exoPlayer.playbackParameters = PlaybackParameters(nextSpeed)
+            if (step < steps) delay(stepMs)
+        }
+        exoPlayer.playbackParameters = PlaybackParameters(target)
+    }
+
+    // Disengage speed boost immediately if playback stops/buffers/locks/opens menu/enters PiP
+    LaunchedEffect(
+        isPlaying,
+        isBuffering,
+        isEnded,
+        playbackError,
+        isLocked,
+        activeSheet,
+        isScrubbingBar,
+        isInPipMode
+    ) {
+        val eligible = speedController.canBoost(
+            isPlaying = isPlaying,
+            isBuffering = isBuffering,
+            isEnded = isEnded,
+            hasError = playbackError != null,
+            isLocked = isLocked,
+            hasOpenMenu = activeSheet != DirectPlayerActiveSheet.NONE,
+            isScrubbing = isScrubbingBar,
+            isInPipMode = isInPipMode
+        )
+        if (speedController.syncEligibility(eligible)) {
+            isSpeedBoosted = false
+        }
+    }
+
+    // Orientation + keepScreenOn strictly tied to playing state
     LaunchedEffect(isFullScreen) {
         WebViewFullscreenHost.applyFullScreenWindowState(
             activity = activity,
@@ -243,12 +402,57 @@ fun DirectMediaPlayerScreen(
             originalOrientation = initialOrientation,
             originalCutoutMode = initialCutoutMode
         )
+        if (!isPlaying) {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    LaunchedEffect(isPlaying, isFullScreen) {
+        if (!isPlaying) {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else if (isFullScreen) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            WebViewFullscreenHost.applyFullScreenWindowState(
+                activity = activity,
+                hostView = hostView,
+                isFullScreen = false,
+                originalOrientation = initialOrientation,
+                originalCutoutMode = initialCutoutMode
+            )
+            activity?.window?.attributes = activity?.window?.attributes?.apply {
+                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+        }
     }
 
-    DisposableEffect(exoPlayer, mediaSession) {
+    DirectPlayerPipEffects(
+        activity = activity,
+        isPlaying = isPlaying,
+        shouldAutoEnterPip = isPlaying && playbackError == null && !isEnded,
+        videoWidth = videoWidth,
+        videoHeight = videoHeight,
+        sourceRect = pipSourceRect,
+        onPipModeChanged = { inPip ->
+            isInPipMode = inPip
+            if (inPip) activeSheet = DirectPlayerActiveSheet.NONE
+        },
+        onPipClosedByUser = { exoPlayer.pause() },
+        onPipPlay = {
+            if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
+            exoPlayer.play()
+        },
+        onPipPause = { exoPlayer.pause() }
+    )
+
+    // ExoPlayer listener for tracks, state, errors, and video dimensions
+    DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = playbackState == Player.STATE_BUFFERING
+                isEnded = playbackState == Player.STATE_ENDED
                 if (playbackState == Player.STATE_READY) {
                     val dur = exoPlayer.duration.coerceAtLeast(0L)
                     durationMs = dur
@@ -261,6 +465,7 @@ fun DirectMediaPlayerScreen(
                     }
                 }
                 if (playbackState == Player.STATE_ENDED) {
+                    showControls = true
                     latestSavePosition(0L, exoPlayer.duration.coerceAtLeast(0L))
                 }
             }
@@ -274,55 +479,34 @@ fun DirectMediaPlayerScreen(
                 }
             }
 
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    videoWidth = videoSize.width
+                    videoHeight = videoSize.height
+                }
+            }
+
             override fun onTracksChanged(tracks: Tracks) {
                 val vids = mutableListOf<DirectTrackChoice>()
                 val auds = mutableListOf<DirectTrackChoice>()
                 val subs = mutableListOf<DirectTrackChoice>()
-
                 tracks.groups.forEach { group ->
-                    when (group.type) {
-                        C.TRACK_TYPE_VIDEO -> {
-                            for (i in 0 until group.length) {
-                                if (!group.isTrackSupported(i)) continue
-                                val fmt = group.getTrackFormat(i)
-                                val resLabel = if (fmt.height > 0) "${fmt.height}p" else "Video ${i + 1}"
-                                val bitrateLabel = if (fmt.bitrate > 0) " • ${fmt.bitrate / 1000} kbps" else ""
-                                vids += DirectTrackChoice(
-                                    trackType = C.TRACK_TYPE_VIDEO,
-                                    group = group,
-                                    trackIndex = i,
-                                    label = "$resLabel$bitrateLabel",
-                                    isSelected = group.isTrackSelected(i)
-                                )
+                    for (i in 0 until group.length) {
+                        if (!group.isTrackSupported(i)) continue
+                        val fmt = group.getTrackFormat(i)
+                        when (group.type) {
+                            C.TRACK_TYPE_VIDEO -> {
+                                val res = if (fmt.height > 0) "${fmt.height}p" else "Video ${i + 1}"
+                                val kbps = if (fmt.bitrate > 0) " • ${fmt.bitrate / 1000} kbps" else ""
+                                vids += DirectTrackChoice(C.TRACK_TYPE_VIDEO, group, i, "$res$kbps", group.isTrackSelected(i))
                             }
-                        }
-                        C.TRACK_TYPE_AUDIO -> {
-                            for (i in 0 until group.length) {
-                                if (!group.isTrackSupported(i)) continue
-                                val fmt = group.getTrackFormat(i)
-                                val lang = fmt.language?.uppercase(Locale.US) ?: "Default"
-                                val lbl = fmt.label ?: lang
-                                auds += DirectTrackChoice(
-                                    trackType = C.TRACK_TYPE_AUDIO,
-                                    group = group,
-                                    trackIndex = i,
-                                    label = lbl,
-                                    isSelected = group.isTrackSelected(i)
-                                )
+                            C.TRACK_TYPE_AUDIO -> {
+                                val lbl = fmt.label ?: fmt.language?.uppercase(Locale.US) ?: "Audio ${i + 1}"
+                                auds += DirectTrackChoice(C.TRACK_TYPE_AUDIO, group, i, lbl, group.isTrackSelected(i))
                             }
-                        }
-                        C.TRACK_TYPE_TEXT -> {
-                            for (i in 0 until group.length) {
-                                if (!group.isTrackSupported(i)) continue
-                                val fmt = group.getTrackFormat(i)
+                            C.TRACK_TYPE_TEXT -> {
                                 val lbl = fmt.label ?: fmt.language?.uppercase(Locale.US) ?: "Subtitle ${i + 1}"
-                                subs += DirectTrackChoice(
-                                    trackType = C.TRACK_TYPE_TEXT,
-                                    group = group,
-                                    trackIndex = i,
-                                    label = lbl,
-                                    isSelected = group.isTrackSelected(i)
-                                )
+                                subs += DirectTrackChoice(C.TRACK_TYPE_TEXT, group, i, lbl, group.isTrackSelected(i))
                             }
                         }
                     }
@@ -332,105 +516,136 @@ fun DirectMediaPlayerScreen(
                 }
                 audioTrackChoices = auds
                 subtitleTrackChoices = subs
+                trackRevision++
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 isBuffering = false
                 playbackError = if (isLocalFile) {
-                    "Unable to play downloaded file (${error.errorCodeName}). The file may be incomplete."
+                    "This downloaded file could not be played. Try playing again or re-downloading it."
                 } else {
-                    "Stream error (${error.errorCodeName}): ${error.localizedMessage ?: "Unable to connect"}"
+                    "Unable to stream this link right now. Check your connection and tap Retry."
                 }
             }
         }
         exoPlayer.addListener(listener)
-
-        onDispose {
-            val finalPos = runCatching { exoPlayer.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L)
-            val finalDur = runCatching { exoPlayer.duration.coerceAtLeast(0L) }.getOrDefault(0L)
-            latestSavePosition(finalPos, finalDur)
-
-            exoPlayer.removeListener(listener)
-            runCatching { mediaSession?.release() }
-            runCatching { exoPlayer.release() }
-            WebViewFullscreenHost.applyFullScreenWindowState(
-                activity = activity,
-                hostView = hostView,
-                isFullScreen = false,
-                originalOrientation = initialOrientation,
-                originalCutoutMode = initialCutoutMode
-            )
-        }
+        onDispose { exoPlayer.removeListener(listener) }
     }
 
-    DisposableEffect(lifecycleOwner, exoPlayer) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                exoPlayer.pause()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
+    // Periodic position / buffer polling & progress autosave
     LaunchedEffect(exoPlayer) {
         var tick = 0
         while (true) {
-            if (!isSeeking) {
+            if (!isScrubbingBar && !isHorizontalGestureScrubbing) {
                 currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
             }
+            bufferedPositionMs = exoPlayer.bufferedPosition.coerceAtLeast(0L)
+            bufferedPercent = exoPlayer.bufferedPercentage.coerceIn(0, 100)
             val dur = exoPlayer.duration.coerceAtLeast(0L)
             if (dur > 0L) durationMs = dur
-
             tick++
             if (tick % 10 == 0 && dur > 0L) {
                 latestSavePosition(exoPlayer.currentPosition.coerceAtLeast(0L), dur)
             }
-            delay(500L)
+            delay(400L)
         }
     }
 
-    LaunchedEffect(showControls, isPlaying, controlInteractionTick, showSpeedDialog, showTracksDialog) {
-        if (showControls && isPlaying && !showSpeedDialog && !showTracksDialog && playbackError == null) {
-            delay(3500L)
+    // Auto-hide controls after 3s while playing
+    LaunchedEffect(showControls, isPlaying, controlInteractionTick, activeSheet, isLocked, isScrubbingBar) {
+        if (showControls && isPlaying && activeSheet == DirectPlayerActiveSheet.NONE &&
+            !isLocked && !isScrubbingBar && playbackError == null
+        ) {
+            delay(3000L)
             showControls = false
+        }
+    }
+
+    // Portrait paused > 2 seconds metadata fade-in
+    LaunchedEffect(isPlaying, isFullScreen, isBuffering, playbackError, isInPipMode) {
+        if (!isPlaying && !isFullScreen && !isBuffering && playbackError == null && !isInPipMode) {
+            delay(2000L)
+            showPortraitPausedDetails = true
+        } else {
+            showPortraitPausedDetails = false
         }
     }
 
     BackHandler {
         when {
-            showTracksDialog -> showTracksDialog = false
-            showSpeedDialog -> showSpeedDialog = false
+            activeSheet != DirectPlayerActiveSheet.NONE -> activeSheet = DirectPlayerActiveSheet.NONE
+            isLocked -> Unit // Hold Unlock button to exit lock mode
             isFullScreen -> isFullScreen = false
             else -> onBack()
         }
     }
 
-    val episodeSubtitle = if (media.mediaType.equals("tv", ignoreCase = true)) {
-        "S$season:E$episode • ${if (isLocalFile) "Offline File" else if (isHls) "HLS Stream" else "Direct MP4"}"
-    } else {
-        if (isLocalFile) "Offline File • ${downloadEntity?.qualityLabel ?: "Local"}"
-        else if (isHls) "Direct HLS Stream"
-        else "Direct Stream"
+    val performSeekDelta: (Long) -> Long = { deltaMs ->
+        val base = exoPlayer.currentPosition.coerceAtLeast(0L)
+        val dur = exoPlayer.duration.coerceAtLeast(0L)
+        val target = if (dur > 0L) (base + deltaMs).coerceIn(0L, dur) else (base + deltaMs).coerceAtLeast(0L)
+        exoPlayer.seekTo(target)
+        currentPositionMs = target
+        target
     }
 
-    Box(
+    val showUpNextCard = remember(
+        nextEpisode,
+        dismissedUpNextForEpisode,
+        isInPipMode,
+        playbackError,
+        durationMs,
+        currentPositionMs,
+        isEnded,
+        isLocked
+    ) {
+        nextEpisode != null &&
+            !dismissedUpNextForEpisode &&
+            !isInPipMode &&
+            playbackError == null &&
+            !isLocked &&
+            (isEnded || (durationMs > 15_000L && currentPositionMs >= durationMs - 10_000L))
+    }
+
+    val topScrimBrush = rememberVerticalGradientBrush(Color.Black.copy(alpha = 0.78f), Color.Transparent)
+    val bottomScrimBrush = rememberVerticalGradientBrush(Color.Transparent, Color.Black.copy(alpha = 0.86f))
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                showControls = !showControls
-                controlInteractionTick++
+            .onGloballyPositioned { coords ->
+                pipSourceRect = coords.boundsInWindow().toAndroidRectF().toRect()
             }
             .testTag("direct_media_player_screen")
     ) {
+        val isPortraitLayout = maxHeight > maxWidth && !isFullScreen
+
+        // Video surface with Aspect Ratio framing
+        val videoContainerModifier = when (aspectRatio) {
+            DirectAspectRatio.RATIO_16_9 -> Modifier
+                .align(Alignment.Center)
+                .then(
+                    if (maxWidth / maxHeight > 16f / 9f) {
+                        Modifier.fillMaxHeight().aspectRatio(16f / 9f)
+                    } else {
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                    }
+                )
+            DirectAspectRatio.RATIO_4_3 -> Modifier
+                .align(Alignment.Center)
+                .then(
+                    if (maxWidth / maxHeight > 4f / 3f) {
+                        Modifier.fillMaxHeight().aspectRatio(4f / 3f)
+                    } else {
+                        Modifier.fillMaxWidth().aspectRatio(4f / 3f)
+                    }
+                )
+            else -> Modifier.fillMaxSize()
+        }
+
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = videoContainerModifier,
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     layoutParams = FrameLayout.LayoutParams(
@@ -438,582 +653,498 @@ fun DirectMediaPlayerScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     useController = false
-                    keepScreenOn = true
+                    keepScreenOn = isPlaying
+                    resizeMode = aspectRatio.toResizeMode()
                     player = exoPlayer
                 }
             },
             update = { view ->
-                if (view.player !== exoPlayer) {
-                    view.player = exoPlayer
-                }
+                if (view.player !== exoPlayer) view.player = exoPlayer
+                if (view.keepScreenOn != isPlaying) view.keepScreenOn = isPlaying
+                val targetResize = aspectRatio.toResizeMode()
+                if (view.resizeMode != targetResize) view.resizeMode = targetResize
             }
         )
 
-        if (isBuffering && playbackError == null) {
-            CircularProgressIndicator(
-                color = colors.primary,
+        // Unified gesture layer (disabled in PiP or Lock mode or while a sheet is open)
+        if (!isInPipMode && !isLocked && activeSheet == DirectPlayerActiveSheet.NONE && playbackError == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(exoPlayer, durationMs, isPlaying, isBuffering, isEnded) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val startPos = down.position
+                            val surfaceW = size.width.toFloat().coerceAtLeast(1f)
+                            val surfaceH = size.height.toFloat().coerceAtLeast(1f)
+                            val touchSlop = viewConfiguration.touchSlop
+                            var mode = SurfaceGestureMode.PENDING
+                            var seekOriginMs = currentPositionMs
+                            var completedNormally = false
+
+                            val holdJob = gestureScope.launch {
+                                delay(LongPressSpeedController.HOLD_THRESHOLD_MS)
+                                if (mode == SurfaceGestureMode.PENDING) {
+                                    val activated = speedController.onHoldThresholdReached(
+                                        isPlaying = isPlaying,
+                                        isBuffering = isBuffering,
+                                        isEnded = isEnded,
+                                        hasError = playbackError != null,
+                                        isLocked = isLocked,
+                                        hasOpenMenu = activeSheet != DirectPlayerActiveSheet.NONE,
+                                        isScrubbing = isScrubbingBar,
+                                        isInPipMode = isInPipMode
+                                    )
+                                    if (activated) {
+                                        mode = SurfaceGestureMode.BOOSTING
+                                        isSpeedBoosted = true
+                                        hostView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    }
+                                }
+                            }
+
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val anyPressed = event.changes.any { it.pressed }
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (!anyPressed || change == null || !change.pressed) {
+                                        completedNormally = anyPressed.not() && change != null && !change.isConsumed
+                                        break
+                                    }
+                                    val totalDx = change.position.x - startPos.x
+                                    val totalDy = change.position.y - startPos.y
+
+                                    if (mode == SurfaceGestureMode.PENDING && hypot(totalDx, totalDy) > touchSlop) {
+                                        holdJob.cancel()
+                                        if (abs(totalDx) > abs(totalDy) && durationMs > 0L) {
+                                            mode = SurfaceGestureMode.HORIZONTAL_SEEK
+                                            seekOriginMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                                            isHorizontalGestureScrubbing = true
+                                        } else if (startPos.x < surfaceW * 0.35f) {
+                                            mode = SurfaceGestureMode.VERTICAL_BRIGHTNESS
+                                            brightnessHideJob?.cancel()
+                                            showBrightnessPill = true
+                                        } else if (startPos.x > surfaceW * 0.65f) {
+                                            mode = SurfaceGestureMode.VERTICAL_VOLUME
+                                            volumeHideJob?.cancel()
+                                            showVolumePill = true
+                                        } else {
+                                            break
+                                        }
+                                    }
+
+                                    when (mode) {
+                                        SurfaceGestureMode.BOOSTING -> {
+                                            if (hypot(totalDx, totalDy) > touchSlop * 3f) {
+                                                if (speedController.onReleaseOrCancel()) {
+                                                    isSpeedBoosted = false
+                                                }
+                                                break
+                                            }
+                                            change.consume()
+                                        }
+                                        SurfaceGestureMode.HORIZONTAL_SEEK -> {
+                                            change.consume()
+                                            val delta = ((totalDx / surfaceW) * 90_000f).toLong()
+                                            val target = (seekOriginMs + delta).coerceIn(0L, durationMs)
+                                            horizontalGestureTargetMs = target
+                                            horizontalGestureDeltaMs = target - seekOriginMs
+                                        }
+                                        SurfaceGestureMode.VERTICAL_BRIGHTNESS -> {
+                                            change.consume()
+                                            val step = -change.positionChange().y / (surfaceH * 0.65f)
+                                            val updated = (brightnessFraction + step).coerceIn(0.02f, 1f)
+                                            brightnessFraction = updated
+                                            activity?.window?.attributes = activity?.window?.attributes?.apply {
+                                                screenBrightness = updated
+                                            }
+                                            showBrightnessPill = true
+                                        }
+                                        SurfaceGestureMode.VERTICAL_VOLUME -> {
+                                            change.consume()
+                                            val step = -change.positionChange().y / (surfaceH * 0.65f)
+                                            val updated = (volumeFraction + step).coerceIn(0f, 1f)
+                                            volumeFraction = updated
+                                            audioManager?.let { am ->
+                                                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                                val targetIdx = (updated * max).roundToInt().coerceIn(0, max)
+                                                am.setStreamVolume(AudioManager.STREAM_MUSIC, targetIdx, 0)
+                                            }
+                                            showVolumePill = true
+                                        }
+                                        SurfaceGestureMode.PENDING -> Unit
+                                    }
+                                }
+                            } finally {
+                                holdJob.cancel()
+                                if (speedController.onReleaseOrCancel() || isSpeedBoosted) {
+                                    isSpeedBoosted = false
+                                }
+                                if (mode == SurfaceGestureMode.HORIZONTAL_SEEK) {
+                                    isHorizontalGestureScrubbing = false
+                                    exoPlayer.seekTo(horizontalGestureTargetMs)
+                                    currentPositionMs = horizontalGestureTargetMs
+                                }
+                                if (mode == SurfaceGestureMode.VERTICAL_BRIGHTNESS) {
+                                    brightnessHideJob?.cancel()
+                                    brightnessHideJob = gestureScope.launch {
+                                        delay(850L)
+                                        showBrightnessPill = false
+                                    }
+                                }
+                                if (mode == SurfaceGestureMode.VERTICAL_VOLUME) {
+                                    volumeHideJob?.cancel()
+                                    volumeHideJob = gestureScope.launch {
+                                        delay(850L)
+                                        showVolumePill = false
+                                    }
+                                }
+                                if (mode == SurfaceGestureMode.PENDING && completedNormally) {
+                                    val isLeftZone = startPos.x < surfaceW * 0.35f
+                                    val isRightZone = startPos.x > surfaceW * 0.65f
+                                    if (!isLeftZone && !isRightZone) {
+                                        pendingSingleTapJob?.cancel()
+                                        pendingTapIsRight = null
+                                        showControls = !showControls
+                                        controlInteractionTick++
+                                    } else {
+                                        val isRight = isRightZone
+                                        val activeDouble = doubleTapForward
+                                        if (activeDouble == isRight) {
+                                            doubleTapSeconds += 10
+                                            doubleTapTargetMs = performSeekDelta(if (isRight) 10_000L else -10_000L)
+                                            doubleTapResetJob?.cancel()
+                                            doubleTapResetJob = gestureScope.launch {
+                                                delay(680L)
+                                                doubleTapForward = null
+                                                doubleTapSeconds = 0
+                                            }
+                                        } else if (pendingTapIsRight == isRight && pendingSingleTapJob?.isActive == true) {
+                                            pendingSingleTapJob?.cancel()
+                                            pendingTapIsRight = null
+                                            doubleTapForward = isRight
+                                            doubleTapSeconds = 10
+                                            doubleTapTargetMs = performSeekDelta(if (isRight) 10_000L else -10_000L)
+                                            doubleTapResetJob?.cancel()
+                                            doubleTapResetJob = gestureScope.launch {
+                                                delay(680L)
+                                                doubleTapForward = null
+                                                doubleTapSeconds = 0
+                                            }
+                                        } else {
+                                            pendingSingleTapJob?.cancel()
+                                            pendingTapIsRight = isRight
+                                            pendingSingleTapJob = gestureScope.launch {
+                                                delay(230L)
+                                                pendingTapIsRight = null
+                                                showControls = !showControls
+                                                controlInteractionTick++
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+            )
+        }
+
+        // Translucent top & bottom scrims + controls (hidden in PiP & Lock mode)
+        AnimatedVisibility(
+            visible = !isInPipMode && !isLocked && showControls && playbackError == null,
+            enter = fadeIn(tween(220, easing = CineEase)),
+            exit = fadeOut(tween(220, easing = CineEase)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .background(topScrimBrush)
+                ) {
+                    DirectPlayerTopBar(
+                        media = media,
+                        season = season,
+                        episode = episode,
+                        episodeTitle = currentEpisodeTitle,
+                        qualityLabel = downloadEntity?.qualityLabel.orEmpty(),
+                        isLocalFile = isLocalFile,
+                        showPortraitPausedDetails = isPortraitLayout && showPortraitPausedDetails,
+                        onBack = { if (isFullScreen) isFullScreen = false else onBack() }
+                    )
+                }
+
+                DirectPlayerCenterControls(
+                    isPlaying = isPlaying,
+                    isSeries = media.mediaType.equals("tv", ignoreCase = true) && onSwitchEpisode != null && sortedEpisodes.isNotEmpty(),
+                    hasPrevEpisode = prevEpisode != null,
+                    hasNextEpisode = nextEpisode != null,
+                    onRewind10 = {
+                        controlInteractionTick++
+                        performSeekDelta(-10_000L)
+                    },
+                    onPlayPause = {
+                        controlInteractionTick++
+                        if (exoPlayer.isPlaying) {
+                            exoPlayer.pause()
+                        } else {
+                            if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
+                            exoPlayer.play()
+                        }
+                    },
+                    onForward10 = {
+                        controlInteractionTick++
+                        performSeekDelta(10_000L)
+                    },
+                    onPrevEpisode = {
+                        prevEpisode?.let { ep -> onSwitchEpisode?.invoke(ep) }
+                    },
+                    onNextEpisode = {
+                        nextEpisode?.let { ep -> onSwitchEpisode?.invoke(ep) }
+                    },
+                    modifier = Modifier.align(Alignment.Center)
+                )
+
+                val activeSubEnabled = remember(trackRevision, subtitleTrackChoices) {
+                    val disabled = exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+                    !disabled && subtitleTrackChoices.any { it.isSelected }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(bottomScrimBrush)
+                ) {
+                    DirectPlayerBottomBar(
+                        currentPositionMs = if (isScrubbingBar) barScrubMs else currentPositionMs,
+                        bufferedPositionMs = bufferedPositionMs,
+                        durationMs = durationMs,
+                        currentBaseSpeed = baseSpeed,
+                        aspectRatio = aspectRatio,
+                        hasMultipleVideoQualities = videoTrackChoices.size > 1,
+                        hasActiveSubtitles = activeSubEnabled,
+                        isPipSupported = pipSupported,
+                        isFullScreen = isFullScreen,
+                        onScrubStart = { target ->
+                            controlInteractionTick++
+                            isScrubbingBar = true
+                            barScrubMs = target
+                        },
+                        onScrubChange = { target ->
+                            controlInteractionTick++
+                            barScrubMs = target
+                        },
+                        onScrubFinished = { target ->
+                            controlInteractionTick++
+                            exoPlayer.seekTo(target)
+                            currentPositionMs = target
+                            isScrubbingBar = false
+                        },
+                        onOpenSpeed = { activeSheet = DirectPlayerActiveSheet.SPEED },
+                        onOpenSubtitles = { activeSheet = DirectPlayerActiveSheet.SUBTITLES },
+                        onOpenAudio = { activeSheet = DirectPlayerActiveSheet.AUDIO },
+                        onOpenQuality = { activeSheet = DirectPlayerActiveSheet.QUALITY },
+                        onOpenAspectRatio = { activeSheet = DirectPlayerActiveSheet.ASPECT_RATIO },
+                        onEnterPip = {
+                            enterPictureInPictureNow(
+                                activity = activity,
+                                isPlaying = isPlaying,
+                                videoWidth = videoWidth,
+                                videoHeight = videoHeight,
+                                sourceRect = pipSourceRect
+                            )
+                        },
+                        onLock = {
+                            isLocked = true
+                            showControls = false
+                        },
+                        onToggleFullScreen = {
+                            controlInteractionTick++
+                            isFullScreen = !isFullScreen
+                        }
+                    )
+                }
+            }
+        }
+
+        // Double-tap seek ripples
+        doubleTapForward?.let { isForward ->
+            if (!isInPipMode && !isLocked) {
+                DoubleTapSeekOverlay(
+                    isForward = isForward,
+                    accumulatedSeconds = doubleTapSeconds,
+                    targetPositionMs = doubleTapTargetMs
+                )
+            }
+        }
+
+        // Horizontal drag seek pill
+        AnimatedVisibility(
+            visible = isHorizontalGestureScrubbing && !isInPipMode && !isLocked,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(140)),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            HorizontalDragSeekPill(
+                targetPositionMs = horizontalGestureTargetMs,
+                deltaMs = horizontalGestureDeltaMs
+            )
+        }
+
+        // Left Brightness / Right Volume vertical pills
+        AnimatedVisibility(
+            visible = showBrightnessPill && !isInPipMode && !isLocked,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(160)),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 20.dp)
+        ) {
+            VerticalAdjustmentPill(isBrightness = true, fraction = brightnessFraction)
+        }
+        AnimatedVisibility(
+            visible = showVolumePill && !isInPipMode && !isLocked,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(160)),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 20.dp)
+        ) {
+            VerticalAdjustmentPill(isBrightness = false, fraction = volumeFraction)
+        }
+
+        // Top-Center "▶▶ 2.0x" speed boost pill (~12dp below top edge)
+        LongPressSpeedPill(
+            visible = isSpeedBoosted && !isInPipMode && !isLocked,
+            speedLabel = "2.0x",
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+
+        // Series Up Next card
+        AnimatedVisibility(
+            visible = showUpNextCard,
+            enter = fadeIn(tween(240, easing = CineEase)),
+            exit = fadeOut(tween(180, easing = CineEase)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(end = 16.dp, bottom = if (showControls) 108.dp else 20.dp)
+        ) {
+            nextEpisode?.let { nextEp ->
+                SeriesUpNextCard(
+                    season = season,
+                    nextEpisode = nextEp,
+                    fallbackThumbUrl = media.fullBackdropUrl.ifBlank { media.fullPosterUrl },
+                    onPlayNow = { onSwitchEpisode?.invoke(nextEp) },
+                    onDismiss = { dismissedUpNextForEpisode = true }
+                )
+            }
+        }
+
+        // Buffering overlay
+        if (isBuffering && playbackError == null && !isInPipMode) {
+            DirectPlayerBufferingOverlay(
+                bufferedPercent = bufferedPercent,
                 modifier = Modifier.align(Alignment.Center)
             )
         }
 
-        AnimatedVisibility(
-            visible = showControls && playbackError == null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Black.copy(alpha = 0.78f),
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.85f)
-                            )
-                        )
-                    )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter)
-                        .windowInsetsPadding(WindowInsets.statusBars)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (isFullScreen) isFullScreen = false else onBack()
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("direct_player_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = media.title,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Surface(
-                                color = if (isLocalFile) colors.success.copy(alpha = 0.24f) else colors.primary.copy(alpha = 0.24f),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = if (isLocalFile) "OFFLINE" else "DIRECT",
-                                    color = if (isLocalFile) colors.success else colors.gold,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                )
-                            }
-                            Text(
-                                text = episodeSubtitle,
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Surface(
-                        color = Color.White.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                controlInteractionTick++
-                                showSpeedDialog = true
-                            }
-                            .testTag("direct_player_speed_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Speed,
-                                contentDescription = "Playback speed",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "${playbackSpeed}x",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (videoTrackChoices.isNotEmpty() || audioTrackChoices.isNotEmpty() || subtitleTrackChoices.isNotEmpty()) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        IconButton(
-                            onClick = {
-                                controlInteractionTick++
-                                showTracksDialog = true
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .testTag("direct_player_quality_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.HighQuality,
-                                contentDescription = "Video quality and tracks",
-                                tint = Color.White
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = {
-                            controlInteractionTick++
-                            isFullScreen = !isFullScreen
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("direct_player_fullscreen_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            contentDescription = if (isFullScreen) "Exit fullscreen" else "Fullscreen",
-                            tint = Color.White
-                        )
-                    }
+        // Lock overlay
+        if (isLocked && !isInPipMode) {
+            PlayerLockOverlay(
+                onUnlock = {
+                    isLocked = false
+                    showControls = true
+                    controlInteractionTick++
                 }
-
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(28.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            controlInteractionTick++
-                            val target = (exoPlayer.currentPosition - 10_000L).coerceAtLeast(0L)
-                            exoPlayer.seekTo(target)
-                            currentPositionMs = target
-                        },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                            .testTag("direct_player_rewind")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Replay10,
-                            contentDescription = "Rewind 10 seconds",
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            controlInteractionTick++
-                            if (exoPlayer.isPlaying) {
-                                exoPlayer.pause()
-                            } else {
-                                if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                                    exoPlayer.seekTo(0L)
-                                }
-                                exoPlayer.play()
-                            }
-                        },
-                        modifier = Modifier
-                            .size(68.dp)
-                            .background(colors.primary.copy(alpha = 0.92f), CircleShape)
-                            .testTag("direct_player_play_pause")
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            controlInteractionTick++
-                            val dur = exoPlayer.duration.coerceAtLeast(0L)
-                            val target = if (dur > 0L) {
-                                (exoPlayer.currentPosition + 10_000L).coerceAtMost(dur)
-                            } else {
-                                exoPlayer.currentPosition + 10_000L
-                            }
-                            exoPlayer.seekTo(target)
-                            currentPositionMs = target
-                        },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                            .testTag("direct_player_forward")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Forward10,
-                            contentDescription = "Forward 10 seconds",
-                            tint = Color.White,
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
-                ) {
-                    val displayedPos = if (isSeeking) sliderSeekMs else currentPositionMs
-                    val maxDur = durationMs.coerceAtLeast(1L)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = formatDurationMs(displayedPos),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = if (durationMs > 0L) formatDurationMs(durationMs) else "--:--",
-                            color = Color.White.copy(alpha = 0.78f),
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Slider(
-                        value = displayedPos.toFloat().coerceIn(0f, maxDur.toFloat()),
-                        onValueChange = { value ->
-                            controlInteractionTick++
-                            isSeeking = true
-                            sliderSeekMs = value.toLong()
-                        },
-                        onValueChangeFinished = {
-                            controlInteractionTick++
-                            exoPlayer.seekTo(sliderSeekMs)
-                            currentPositionMs = sliderSeekMs
-                            isSeeking = false
-                        },
-                        valueRange = 0f..maxDur.toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = colors.primary,
-                            activeTrackColor = colors.primary,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("direct_player_seek_bar")
-                    )
-                }
-            }
-        }
-
-        playbackError?.let { err ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp)
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "Playback Error",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Text(
-                        text = err,
-                        fontSize = 13.sp,
-                        color = colors.textSecondary
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = {
-                                playbackError = null
-                                isBuffering = true
-                                reloadKey++
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                            modifier = Modifier.height(48.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                        if (onFallbackToWebEmbed != null && !isLocalFile) {
-                            OutlinedButton(
-                                onClick = onFallbackToWebEmbed,
-                                modifier = Modifier.height(48.dp)
-                            ) {
-                                Text("Web Embed", color = colors.gold, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
-                    OutlinedButton(onClick = onBack, modifier = Modifier.height(44.dp)) {
-                        Text("Back", color = colors.textPrimary)
-                    }
-                }
-            }
-        }
-    }
-
-    if (showSpeedDialog) {
-        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        Dialog(onDismissRequest = { showSpeedDialog = false }) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.border(1.dp, colors.border, RoundedCornerShape(16.dp))
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Text(
-                        text = "Playback Speed",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    speeds.forEach { speed ->
-                        val selected = kotlin.math.abs(playbackSpeed - speed) < 0.01f
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    playbackSpeed = speed
-                                    exoPlayer.playbackParameters = PlaybackParameters(speed)
-                                    showSpeedDialog = false
-                                }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = if (speed == 1.0f) "1.0x (Normal)" else "${speed}x",
-                                color = if (selected) colors.primary else colors.textPrimary,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 14.sp
-                            )
-                            if (selected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = colors.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showTracksDialog) {
-        Dialog(onDismissRequest = { showTracksDialog = false }) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.border(1.dp, colors.border, RoundedCornerShape(16.dp))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(18.dp)
-                ) {
-                    Text(
-                        text = "Quality & Tracks",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    if (videoTrackChoices.isNotEmpty()) {
-                        Text(
-                            text = "Video Quality",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.gold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val isAutoVideo = exoPlayer.trackSelectionParameters.overrides
-                            .values.none { it.type == C.TRACK_TYPE_VIDEO }
-
-                        TrackOptionRow(
-                            label = "Auto (Adaptive)",
-                            selected = isAutoVideo,
-                            onClick = {
-                                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                    .buildUpon()
-                                    .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-                                    .build()
-                                showTracksDialog = false
-                            }
-                        )
-                        videoTrackChoices.forEach { choice ->
-                            TrackOptionRow(
-                                label = choice.label,
-                                selected = !isAutoVideo && choice.isSelected,
-                                onClick = {
-                                    val override = TrackSelectionOverride(
-                                        choice.group.mediaTrackGroup,
-                                        choice.trackIndex
-                                    )
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .setOverrideForType(override)
-                                        .build()
-                                    showTracksDialog = false
-                                }
-                            )
-                        }
-                    }
-
-                    if (audioTrackChoices.isNotEmpty()) {
-                        HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 10.dp))
-                        Text(
-                            text = "Audio Track",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.gold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        audioTrackChoices.forEach { choice ->
-                            TrackOptionRow(
-                                label = choice.label,
-                                selected = choice.isSelected,
-                                onClick = {
-                                    val override = TrackSelectionOverride(
-                                        choice.group.mediaTrackGroup,
-                                        choice.trackIndex
-                                    )
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .setOverrideForType(override)
-                                        .build()
-                                    showTracksDialog = false
-                                }
-                            )
-                        }
-                    }
-
-                    if (subtitleTrackChoices.isNotEmpty()) {
-                        HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 10.dp))
-                        Text(
-                            text = "Subtitles",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.gold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val textDisabled = exoPlayer.trackSelectionParameters.disabledTrackTypes
-                            .contains(C.TRACK_TYPE_TEXT)
-                        TrackOptionRow(
-                            label = "Off",
-                            selected = textDisabled || subtitleTrackChoices.none { it.isSelected },
-                            onClick = {
-                                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                    .buildUpon()
-                                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                                    .build()
-                                showTracksDialog = false
-                            }
-                        )
-                        subtitleTrackChoices.forEach { choice ->
-                            TrackOptionRow(
-                                label = choice.label,
-                                selected = !textDisabled && choice.isSelected,
-                                onClick = {
-                                    val override = TrackSelectionOverride(
-                                        choice.group.mediaTrackGroup,
-                                        choice.trackIndex
-                                    )
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                        .setOverrideForType(override)
-                                        .build()
-                                    showTracksDialog = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrackOptionRow(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val colors = CineTheme.colors
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = if (selected) colors.primary else colors.textPrimary,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-        )
-        if (selected) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Selected",
-                tint = colors.primary,
-                modifier = Modifier.size(18.dp)
             )
         }
-    }
-}
 
-private fun formatDurationMs(ms: Long): String {
-    val totalSec = (ms / 1000L).coerceAtLeast(0L)
-    val hrs = totalSec / 3600L
-    val mins = (totalSec % 3600L) / 60L
-    val secs = totalSec % 60L
-    return if (hrs > 0L) {
-        String.format(Locale.US, "%d:%02d:%02d", hrs, mins, secs)
-    } else {
-        String.format(Locale.US, "%02d:%02d", mins, secs)
+        // Playback error card
+        playbackError?.let { err ->
+            if (!isInPipMode) {
+                DirectPlayerErrorCard(
+                    message = err,
+                    canFallbackToEmbed = onFallbackToWebEmbed != null && !isLocalFile,
+                    onRetry = {
+                        playbackError = null
+                        isBuffering = true
+                        reloadKey++
+                    },
+                    onFallbackToWebEmbed = onFallbackToWebEmbed,
+                    onBack = onBack,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+
+        // Bottom sheets for Speed / CC / Audio / Quality / Aspect Ratio
+        if (!isInPipMode) {
+            val isAutoVideo = remember(trackRevision, videoTrackChoices) {
+                exoPlayer.trackSelectionParameters.overrides.values.none { it.type == C.TRACK_TYPE_VIDEO }
+            }
+            val textDisabled = remember(trackRevision, subtitleTrackChoices) {
+                exoPlayer.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+            }
+            DirectPlayerSheetsHost(
+                activeSheet = activeSheet,
+                currentBaseSpeed = baseSpeed,
+                currentAspectRatio = aspectRatio,
+                videoTrackChoices = videoTrackChoices,
+                isAutoVideoSelected = isAutoVideo,
+                audioTrackChoices = audioTrackChoices,
+                subtitleTrackChoices = subtitleTrackChoices,
+                areSubtitlesDisabled = textDisabled,
+                onDismiss = {
+                    activeSheet = DirectPlayerActiveSheet.NONE
+                    controlInteractionTick++
+                },
+                onSelectSpeed = { selected ->
+                    baseSpeed = selected
+                    speedController.setUserSpeed(selected)
+                    exoPlayer.playbackParameters = PlaybackParameters(selected)
+                },
+                onSelectAspectRatio = { aspectRatio = it },
+                onSelectAutoVideo = {
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                        .build()
+                    trackRevision++
+                },
+                onSelectVideoTrack = { choice ->
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(choice.group.mediaTrackGroup, choice.trackIndex))
+                        .build()
+                    trackRevision++
+                },
+                onSelectAudioTrack = { choice ->
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(choice.group.mediaTrackGroup, choice.trackIndex))
+                        .build()
+                    trackRevision++
+                },
+                onDisableSubtitles = {
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                    trackRevision++
+                },
+                onSelectSubtitleTrack = { choice ->
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setOverrideForType(TrackSelectionOverride(choice.group.mediaTrackGroup, choice.trackIndex))
+                        .build()
+                    trackRevision++
+                }
+            )
+        }
     }
 }

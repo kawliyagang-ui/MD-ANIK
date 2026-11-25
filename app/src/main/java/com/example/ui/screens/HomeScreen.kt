@@ -1,13 +1,14 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -76,15 +78,17 @@ import com.example.data.model.mergeWithCatalog
 import com.example.data.model.toMediaItem
 import com.example.ui.components.AnnouncementBanner
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.GenreFilterBar
-import com.example.ui.components.HeroBanner
+import com.example.ui.components.HeroBannerCarousel
 import com.example.ui.components.HeroBannerSkeleton
 import com.example.ui.components.HomeCatalogSkeleton
 import com.example.ui.components.HomeGenreCatalog
 import com.example.ui.components.HorizontalMovieListSkeleton
 import com.example.ui.components.MovieCard
 import com.example.ui.components.TopTenCard
+import com.example.ui.components.cinePressScale
 import com.example.ui.theme.CineTheme
 
 @Composable
@@ -133,13 +137,23 @@ fun HomeScreen(
     val colors = CineTheme.colors
     val gradients = CineTheme.gradients
     val isCatalogEmpty = trending.isEmpty() && popularMovies.isEmpty() && topRatedTv.isEmpty() && trendingMovies.isEmpty()
+    val showInitialSkeleton = isLoading && isCatalogEmpty && continueWatching.isEmpty() && customMedia.isEmpty()
 
-    if (isLoading && isCatalogEmpty && continueWatching.isEmpty() && customMedia.isEmpty()) {
-        HomeCatalogSkeleton(modifier = modifier)
-        return
+    AnimatedContent(
+        targetState = showInitialSkeleton,
+        transitionSpec = {
+            fadeIn(tween(durationMillis = 260, easing = CineEase)) togetherWith
+                fadeOut(tween(durationMillis = 180, easing = CineEase))
+        },
+        modifier = modifier.fillMaxSize(),
+        label = "home_skeleton_to_catalog"
+    ) { showingSkeleton ->
+        if (showingSkeleton) {
+            HomeCatalogSkeleton(modifier = Modifier.fillMaxSize())
+        } else {
+    val heroItems = remember(trending, popularMovies) {
+        (trending.ifEmpty { popularMovies }).distinctBy { it.id }.take(6)
     }
-
-    val heroItem = trending.firstOrNull() ?: popularMovies.firstOrNull()
     val availableGenres = remember(trending) { HomeGenreCatalog.availableGenres(trending) }
     val filteredTrending = remember(trending, selectedHomeGenre) {
         HomeGenreCatalog.filterByGenre(trending, selectedHomeGenre)
@@ -150,9 +164,10 @@ fun HomeScreen(
     val topTenTvList = remember(trendingTv, topRatedTv) {
         (trendingTv.ifEmpty { topRatedTv }).take(10)
     }
+    val searchBarInteraction = remember { MutableInteractionSource() }
 
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(gradients.appBackdrop)
             .verticalScroll(rememberScrollState())
@@ -163,10 +178,15 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp)
                 .minimumInteractiveComponentSize()
+                .cinePressScale(interactionSource = searchBarInteraction)
                 .clip(RoundedCornerShape(14.dp))
                 .background(colors.surfaceElevated)
                 .border(1.dp, colors.border, RoundedCornerShape(14.dp))
-                .clickable(onClick = onSearchClick)
+                .clickable(
+                    interactionSource = searchBarInteraction,
+                    indication = ripple(),
+                    onClick = onSearchClick
+                )
                 .padding(horizontal = 14.dp, vertical = 12.dp)
                 .testTag("home_search_bar"),
             verticalAlignment = Alignment.CenterVertically
@@ -185,15 +205,15 @@ fun HomeScreen(
             )
         }
 
-        // Hero Banner (or skeleton while live TMDb data is loading)
-        if (heroItem != null) {
-            HeroBanner(
-                media = heroItem,
-                isInWatchlist = isItemInWatchlist(heroItem.id),
-                onWatchClick = { onWatchClick(heroItem) },
-                onWatchlistClick = { onWatchlistToggle(heroItem) },
-                onTrailerClick = { onTrailerClick(heroItem) },
-                onCardClick = { onMediaClick(heroItem) }
+        // Hero Banner Carousel (or skeleton while live TMDb data is loading)
+        if (heroItems.isNotEmpty()) {
+            HeroBannerCarousel(
+                items = heroItems,
+                isItemInWatchlist = isItemInWatchlist,
+                onWatchClick = onWatchClick,
+                onWatchlistClick = onWatchlistToggle,
+                onTrailerClick = onTrailerClick,
+                onCardClick = onMediaClick
             )
         } else if (isLoading) {
             HeroBannerSkeleton()
@@ -324,26 +344,34 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(continueWatching, key = { it.id }) { item ->
-                        val media = item.toMediaItem().mergeWithCatalog(catalogById[item.id])
-                        val (safeSeason, safeEp) = ContinueWatchingPolicy.normalizeSeasonEpisode(
-                            mediaType = item.mediaType,
-                            season = item.season,
-                            episode = item.episode
-                        )
-                        val watchedLabel = ContinueWatchingPolicy.formatWatchedDuration(item.watchedSeconds)
-                        val cardLabel = when {
-                            item.mediaType == "tv" && item.progressPercent > 0 ->
-                                "S$safeSeason:E$safeEp • ${item.progressPercent}%"
-                            item.mediaType == "tv" && watchedLabel.isNotBlank() ->
-                                "S$safeSeason:E$safeEp • $watchedLabel"
-                            item.mediaType == "tv" ->
-                                "S$safeSeason:E$safeEp"
-                            item.progressPercent > 0 ->
-                                "${item.progressPercent}% watched"
-                            watchedLabel.isNotBlank() ->
-                                "$watchedLabel watched"
-                            else -> "Resume"
+                    items(
+                        items = continueWatching,
+                        key = { it.id },
+                        contentType = { "continue_watching_card" }
+                    ) { item ->
+                        val media = remember(item, catalogById) {
+                            item.toMediaItem().mergeWithCatalog(catalogById[item.id])
+                        }
+                        val cardLabel = remember(item.mediaType, item.season, item.episode, item.progressPercent, item.watchedSeconds) {
+                            val (safeSeason, safeEp) = ContinueWatchingPolicy.normalizeSeasonEpisode(
+                                mediaType = item.mediaType,
+                                season = item.season,
+                                episode = item.episode
+                            )
+                            val watchedLabel = ContinueWatchingPolicy.formatWatchedDuration(item.watchedSeconds)
+                            when {
+                                item.mediaType == "tv" && item.progressPercent > 0 ->
+                                    "S$safeSeason:E$safeEp • ${item.progressPercent}%"
+                                item.mediaType == "tv" && watchedLabel.isNotBlank() ->
+                                    "S$safeSeason:E$safeEp • $watchedLabel"
+                                item.mediaType == "tv" ->
+                                    "S$safeSeason:E$safeEp"
+                                item.progressPercent > 0 ->
+                                    "${item.progressPercent}% watched"
+                                watchedLabel.isNotBlank() ->
+                                    "$watchedLabel watched"
+                                else -> "Resume"
+                            }
                         }
                         MovieCard(
                             media = media,
@@ -383,7 +411,11 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_new_releases_row")
                 ) {
-                    items(newReleases, key = { "new_${it.id}" }) { item ->
+                    items(
+                        items = newReleases,
+                        key = { "new_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -408,7 +440,11 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_top10_movies_row")
                 ) {
-                    items(topTenMoviesList.size, key = { idx -> "top10_m_${topTenMoviesList[idx].id}" }) { idx ->
+                    items(
+                        count = topTenMoviesList.size,
+                        key = { idx -> "top10_m_${topTenMoviesList[idx].id}" },
+                        contentType = { "top_ten_card" }
+                    ) { idx ->
                         val item = topTenMoviesList[idx]
                         TopTenCard(
                             rank = idx + 1,
@@ -435,7 +471,11 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_top10_tv_row")
                 ) {
-                    items(topTenTvList.size, key = { idx -> "top10_tv_${topTenTvList[idx].id}" }) { idx ->
+                    items(
+                        count = topTenTvList.size,
+                        key = { idx -> "top10_tv_${topTenTvList[idx].id}" },
+                        contentType = { "top_ten_card" }
+                    ) { idx ->
                         val item = topTenTvList[idx]
                         TopTenCard(
                             rank = idx + 1,
@@ -462,7 +502,11 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_recommended_for_you_row")
                 ) {
-                    items(recommendedForYou, key = { "rec_${it.id}" }) { item ->
+                    items(
+                        items = recommendedForYou,
+                        key = { "rec_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -510,7 +554,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(trendingMovies, key = { "tm_${it.id}" }) { item ->
+                    items(
+                        items = trendingMovies,
+                        key = { "tm_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -537,7 +585,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(trendingTv, key = { "ttv_${it.id}" }) { item ->
+                    items(
+                        items = trendingTv,
+                        key = { "ttv_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -565,7 +617,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(becauseYouWatchedItems, key = { "bcw_${it.id}" }) { item ->
+                    items(
+                        items = becauseYouWatchedItems,
+                        key = { "bcw_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -588,7 +644,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(popularInGenreItems, key = { "pig_${it.id}" }) { item ->
+                    items(
+                        items = popularInGenreItems,
+                        key = { "pig_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -612,7 +672,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(customMedia, key = { it.id }) { item ->
+                    items(
+                        items = customMedia,
+                        key = { it.id },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -639,7 +703,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(popularMovies, key = { it.id }) { item ->
+                    items(
+                        items = popularMovies,
+                        key = { it.id },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -667,7 +735,11 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_upcoming_row")
                 ) {
-                    items(upcomingMovies, key = { "upc_${it.id}" }) { item ->
+                    items(
+                        items = upcomingMovies,
+                        key = { "upc_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -700,7 +772,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(topRatedMovies, key = { "trm_${it.id}" }) { item ->
+                    items(
+                        items = topRatedMovies,
+                        key = { "trm_${it.id}" },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -727,7 +803,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(topRatedTv, key = { it.id }) { item ->
+                    items(
+                        items = topRatedTv,
+                        key = { it.id },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) },
@@ -739,6 +819,8 @@ fun HomeScreen(
         }
 
         Spacer(modifier = Modifier.height(30.dp))
+    }
+        }
     }
 }
 
@@ -903,7 +985,11 @@ private fun TrendingGenreSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("home_trending_list")
                 ) {
-                    items(itemsForGenre, key = { it.id }) { item ->
+                    items(
+                        items = itemsForGenre,
+                        key = { it.id },
+                        contentType = { "movie_card" }
+                    ) { item ->
                         MovieCard(
                             media = item,
                             onClick = { onMediaClick(item) }
@@ -1132,16 +1218,25 @@ private fun LanguagesBrowseSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.testTag("home_languages_row")
         ) {
-            items(languages, key = { "lang_${it.code}" }) { lang ->
+            items(
+                items = languages,
+                key = { "lang_${it.code}" },
+                contentType = { "language_card" }
+            ) { lang ->
+                val langInteraction = remember { MutableInteractionSource() }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .widthIn(min = 148.dp)
                         .minimumInteractiveComponentSize()
+                        .cinePressScale(interactionSource = langInteraction)
                         .clip(RoundedCornerShape(14.dp))
                         .background(colors.surfaceElevated)
                         .border(1.dp, colors.border, RoundedCornerShape(14.dp))
-                        .clickable { onLanguageClick(lang.code, lang.name) }
+                        .clickable(
+                            interactionSource = langInteraction,
+                            indication = ripple()
+                        ) { onLanguageClick(lang.code, lang.name) }
                         .padding(horizontal = 12.dp, vertical = 10.dp)
                         .testTag("home_language_card_${lang.code}")
                 ) {

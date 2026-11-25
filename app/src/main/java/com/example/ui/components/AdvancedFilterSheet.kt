@@ -71,13 +71,14 @@ fun AdvancedFilterSheet(
         contentColor = colors.textPrimary,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp)
-        ) {
+        CineSheetEntryBox(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 16.dp)
+            ) {
             // Sheet Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -353,6 +354,7 @@ fun AdvancedFilterSheet(
                     )
                 }
             }
+        }
         }
     }
 }

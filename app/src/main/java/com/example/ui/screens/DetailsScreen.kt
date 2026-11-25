@@ -3,10 +3,14 @@ package com.example.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -83,8 +87,10 @@ import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
 import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
+import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.DetailedMovieView
+import com.example.ui.components.DetailsEpisodesSkeleton
 import com.example.ui.components.MovieCard
 import com.example.ui.components.formatReleaseDate
 import com.example.ui.theme.CineTheme
@@ -191,7 +197,10 @@ fun DetailsScreen(
             .background(gradients.appBackdrop),
         contentPadding = PaddingValues(bottom = 40.dp)
     ) {
-        item(key = "details_header_${media.id}") {
+        item(
+            key = "details_header_${media.id}",
+            contentType = "details_header"
+        ) {
             DetailedMovieView(
                 media = media,
                 backdropHeight = 260.dp,
@@ -271,11 +280,8 @@ fun DetailsScreen(
 
                         // Secondary CTAs: Favorite & Watch Trailer
                         val favScale by animateFloatAsState(
-                            targetValue = if (isInWatchlist) 1.04f else 1f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
+                            targetValue = if (isInWatchlist) 1.03f else 1f,
+                            animationSpec = tween(durationMillis = 180, easing = CineEase),
                             label = "favorite_button_scale"
                         )
                         val favContainerColor by animateColorAsState(
@@ -450,7 +456,10 @@ fun DetailsScreen(
 
         // TV Series / Anime Episodes & Seasons Section
         if (media.mediaType == "tv") {
-            item(key = "tv_seasons_header_${media.id}") {
+            item(
+                key = "tv_seasons_header_${media.id}",
+                contentType = "tv_seasons_header"
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -558,6 +567,7 @@ fun DetailsScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .animateContentSize(tween(durationMillis = 220, easing = CineEase))
                                 .padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -645,7 +655,11 @@ fun DetailsScreen(
                                 }
                             }
 
-                            AnimatedVisibility(visible = currentSeasonSelection.isNotEmpty()) {
+                            AnimatedVisibility(
+                                visible = currentSeasonSelection.isNotEmpty(),
+                                enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(220, easing = CineEase)),
+                                exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(180, easing = CineEase))
+                            ) {
                                 CineGradientButton(
                                     onClick = {
                                         val picked = currentSeasonSelection
@@ -682,10 +696,19 @@ fun DetailsScreen(
                 }
             }
 
-            items(
-                items = episodeEntries,
-                key = { epInfo -> "ep_${media.id}_${selectedSeason}_${epInfo.episodeNumber}" }
-            ) { epInfo ->
+            if (loadedEpisodesForSeason.isEmpty() && (isLoadingSeasons || loadingSeasonNumber == selectedSeason)) {
+                item(
+                    key = "details_ep_skeleton_${media.id}_$selectedSeason",
+                    contentType = "episodes_skeleton"
+                ) {
+                    DetailsEpisodesSkeleton()
+                }
+            } else {
+                items(
+                    items = episodeEntries,
+                    key = { epInfo -> "ep_${media.id}_${selectedSeason}_${epInfo.episodeNumber}" },
+                    contentType = { "episode_row" }
+                ) { epInfo ->
                 val epNum = epInfo.episodeNumber
                 val epDownload = mediaDownloads
                     .filter { it.season == selectedSeason && it.episode == epNum }
@@ -898,12 +921,16 @@ fun DetailsScreen(
                         }
                     }
                 }
+                }
             }
         }
 
         // Similar Movies & Series Row
         if (similarMedia.isNotEmpty()) {
-            item(key = "details_similar_section_${media.id}") {
+            item(
+                key = "details_similar_section_${media.id}",
+                contentType = "similar_section"
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -921,7 +948,11 @@ fun DetailsScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(similarMedia, key = { "sim_${it.id}" }) { simItem ->
+                        items(
+                            items = similarMedia,
+                            key = { "sim_${it.id}" },
+                            contentType = { "movie_card" }
+                        ) { simItem ->
                             MovieCard(
                                 media = simItem,
                                 onClick = { onSimilarMediaClick(simItem) },
@@ -1004,6 +1035,16 @@ private fun LiveDownloadControlCard(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = (download.progressPercent / 100f).coerceIn(0f, 1f),
+                        animationSpec = tween(durationMillis = 220, easing = CineEase),
+                        label = "detailsLiveDownloadProgress"
+                    )
+                    val animatedPercent by animateIntAsState(
+                        targetValue = download.progressPercent.coerceIn(0, 100),
+                        animationSpec = tween(durationMillis = 200, easing = CineEase),
+                        label = "detailsLiveDownloadPercent"
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1011,8 +1052,8 @@ private fun LiveDownloadControlCard(
                     ) {
                         Text(
                             text = when (status) {
-                                DownloadStatus.RUNNING -> "Downloading • ${download.progressPercent}%"
-                                DownloadStatus.PAUSED -> "Paused • ${download.progressPercent}%"
+                                DownloadStatus.RUNNING -> "Downloading • $animatedPercent%"
+                                DownloadStatus.PAUSED -> "Paused • $animatedPercent%"
                                 DownloadStatus.QUEUED -> "Queued • Waiting for slot"
                                 DownloadStatus.FAILED -> "Download Failed"
                                 else -> status.displayLabel
@@ -1042,7 +1083,7 @@ private fun LiveDownloadControlCard(
                     if (status != DownloadStatus.FAILED) {
                         if (download.progressPercent > 0) {
                             LinearProgressIndicator(
-                                progress = { download.progressPercent / 100f },
+                                progress = { animatedProgress },
                                 color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
                                 trackColor = colors.background,
                                 modifier = Modifier
@@ -1192,6 +1233,16 @@ private fun InlineEpisodeDownloadRow(
 ) {
     val colors = CineTheme.colors
     val status = download.parsedStatus
+    val animatedProgress by animateFloatAsState(
+        targetValue = (download.progressPercent / 100f).coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 220, easing = CineEase),
+        label = "inlineEpProgress"
+    )
+    val animatedPercent by animateIntAsState(
+        targetValue = download.progressPercent.coerceIn(0, 100),
+        animationSpec = tween(durationMillis = 200, easing = CineEase),
+        label = "inlineEpPercent"
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1201,7 +1252,7 @@ private fun InlineEpisodeDownloadRow(
         if (status != DownloadStatus.FAILED) {
             if (download.progressPercent > 0) {
                 LinearProgressIndicator(
-                    progress = { download.progressPercent / 100f },
+                    progress = { animatedProgress },
                     color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
                     trackColor = colors.background,
                     modifier = Modifier
@@ -1227,8 +1278,8 @@ private fun InlineEpisodeDownloadRow(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             val statusSummary = when (status) {
-                DownloadStatus.RUNNING -> "${download.progressPercent}% • ${formatDownloadBytes(download.bytesDownloaded)}"
-                DownloadStatus.PAUSED -> "Paused (${download.progressPercent}%)"
+                DownloadStatus.RUNNING -> "$animatedPercent% • ${formatDownloadBytes(download.bytesDownloaded)}"
+                DownloadStatus.PAUSED -> "Paused ($animatedPercent%)"
                 DownloadStatus.QUEUED -> "Queued"
                 DownloadStatus.FAILED -> download.errorReason.ifBlank { "Failed" }
                 else -> status.displayLabel

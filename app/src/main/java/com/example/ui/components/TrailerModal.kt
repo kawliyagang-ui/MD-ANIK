@@ -124,10 +124,17 @@ fun TrailerModal(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, webViewRef, rendererCrashed) {
         val observer = LifecycleEventObserver { _, event ->
-            if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(webViewRef)) {
+            val activeWebView = webViewRef
+            if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(activeWebView)) {
                 when (event) {
-                    Lifecycle.Event.ON_RESUME -> runCatching { webViewRef?.onResume() }
-                    Lifecycle.Event.ON_PAUSE -> runCatching { webViewRef?.onPause() }
+                    Lifecycle.Event.ON_RESUME -> {
+                        WebViewFullscreenHost.updateRendererPriority(activeWebView, isForeground = true)
+                        runCatching { activeWebView?.onResume() }
+                    }
+                    Lifecycle.Event.ON_PAUSE -> {
+                        WebViewFullscreenHost.updateRendererPriority(activeWebView, isForeground = false)
+                        runCatching { activeWebView?.onPause() }
+                    }
                     else -> Unit
                 }
             }
@@ -396,8 +403,8 @@ fun TrailerModal(
                                         }
                                         webViewClient = object : WebViewClient() {
                                             override fun onPageFinished(view: WebView?, url: String?) {
+                                                if (rendererCrashed || WebViewFullscreenHost.isDestroyed(view)) return
                                                 isWebLoading = false
-                                                rendererCrashed = false
                                             }
 
                                             override fun shouldOverrideUrlLoading(
@@ -439,14 +446,15 @@ fun TrailerModal(
                                                 runCatching { cb?.onCustomViewHidden() }
                                                 isFullScreen = false
                                                 isWebLoading = false
-                                                WebViewFullscreenHost.trimHostMemoryForWebView(view?.context ?: context)
-                                                WebViewFullscreenHost.safelyDestroyWebView(view)
                                                 rendererCrashed = true
+                                                WebViewFullscreenHost.trimHostMemoryForWebView(view?.context ?: context)
+                                                WebViewFullscreenHost.safelyDestroyWebView(view, rendererAlreadyGone = true)
                                                 return true
                                             }
                                         }
                                         webChromeClient = object : WebChromeClient() {
                                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                                if (rendererCrashed || WebViewFullscreenHost.isDestroyed(view)) return
                                                 if (newProgress >= 85) {
                                                     isWebLoading = false
                                                 }
@@ -508,9 +516,6 @@ fun TrailerModal(
                                 onRelease = { wv ->
                                     if (webViewRef === wv) {
                                         webViewRef = null
-                                    }
-                                    if (!rendererCrashed && !WebViewFullscreenHost.isDestroyed(wv)) {
-                                        runCatching { wv.loadUrl("about:blank") }
                                     }
                                     WebViewFullscreenHost.safelyDestroyWebView(wv)
                                 }

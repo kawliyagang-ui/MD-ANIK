@@ -42,6 +42,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,9 +60,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.data.model.IssueReportCategory
 import com.example.data.model.IssueReportEntity
 import com.example.data.model.IssueReportStatus
+import com.example.ui.components.CineDialogEntryBox
 import com.example.ui.theme.CineTheme
 import com.example.ui.viewmodel.AdminUiState
 import com.example.ui.viewmodel.AdminViewModel
@@ -94,7 +97,7 @@ fun AdminReportsTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item {
+        item(key = "admin_reports_header", contentType = "reports_header") {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "User Problem Reports (${reports.size})",
@@ -162,7 +165,7 @@ fun AdminReportsTab(
         }
 
         if (filteredReports.isEmpty()) {
-            item {
+            item(key = "admin_reports_empty", contentType = "empty_card") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
                     shape = RoundedCornerShape(12.dp),
@@ -192,7 +195,11 @@ fun AdminReportsTab(
                 }
             }
         } else {
-            items(filteredReports, key = { it.id }) { report ->
+            items(
+                items = filteredReports,
+                key = { it.id },
+                contentType = { "report_card" }
+            ) { report ->
                 AdminReportItemCard(
                     report = report,
                     onSaveUpdate = { newStatus, notes ->
@@ -214,31 +221,48 @@ fun AdminReportsTab(
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             }.getOrNull()
         }
-        AlertDialog(
-            onDismissRequest = { previewScreenshotBase64 = null },
-            containerColor = colors.surface,
-            title = { Text("Attached Screenshot", color = colors.textPrimary) },
-            text = {
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "User uploaded screenshot",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                    )
-                } else {
-                    Text("Unable to decode image attachment.", color = colors.textSecondary)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { previewScreenshotBase64 = null }) {
-                    Text("Close", color = colors.primary)
+        Dialog(onDismissRequest = { previewScreenshotBase64 = null }) {
+            CineDialogEntryBox {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = colors.surface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.border, RoundedCornerShape(24.dp))
+                ) {
+                    Column(modifier = Modifier.padding(22.dp)) {
+                        Text(
+                            text = "Attached Screenshot",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "User uploaded screenshot",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(300.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                            )
+                        } else {
+                            Text("Unable to decode image attachment.", color = colors.textSecondary)
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { previewScreenshotBase64 = null }) {
+                                Text("Close", color = colors.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 }
 

@@ -6,12 +6,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,11 +72,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +96,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.R
 import com.example.data.local.DownloadPreferences
 import com.example.data.local.NotificationPreferences
@@ -101,6 +104,9 @@ import com.example.data.model.AppLanguageOption
 import com.example.data.model.PlayerServer
 import com.example.data.model.PreferredDownloadQuality
 import com.example.data.notifications.EpisodeNotificationHelper
+import com.example.ui.components.CineDialogEntryBox
+import com.example.ui.components.CineEase
+import com.example.ui.components.cinePressScale
 import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.CineTheme
 import com.example.ui.theme.DarkThemePalette
@@ -170,7 +176,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Screen Header
-        item {
+        item(key = "settings_header", contentType = "header") {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -206,7 +212,7 @@ fun SettingsScreen(
         }
 
         // Settings Action Feedback Banner
-        item {
+        item(key = "settings_feedback_banner", contentType = "feedback_banner") {
             AnimatedVisibility(visible = feedbackMessage != null) {
                 Row(
                     modifier = Modifier
@@ -238,7 +244,7 @@ fun SettingsScreen(
         }
 
         // Theme Mode, Accent Color & Readability Appearance Card
-        item {
+        item(key = "settings_appearance_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -461,7 +467,7 @@ fun SettingsScreen(
         }
 
         // Content Language Selection Card
-        item {
+        item(key = "settings_language_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -526,7 +532,7 @@ fun SettingsScreen(
         }
 
         // Notifications & Release Alerts Card
-        item {
+        item(key = "settings_notifications_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -664,7 +670,7 @@ fun SettingsScreen(
         }
 
         // Default Streaming Server Card
-        item {
+        item(key = "settings_server_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -752,7 +758,7 @@ fun SettingsScreen(
         }
 
         // Offline Download Preferences Card
-        item {
+        item(key = "settings_downloads_card", contentType = "settings_card") {
             var qualitySelection by remember(downloadPreferences.preferredQuality) {
                 mutableStateOf(downloadPreferences.preferredQuality)
             }
@@ -865,7 +871,7 @@ fun SettingsScreen(
         }
 
         // Local Data, Storage & Cache Card
-        item {
+        item(key = "settings_library_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -968,7 +974,7 @@ fun SettingsScreen(
         }
 
         // Support, Legal & About Card
-        item {
+        item(key = "settings_support_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
                 shape = RoundedCornerShape(16.dp),
@@ -1044,45 +1050,79 @@ fun SettingsScreen(
     }
 
     if (showPrivacyDialog) {
-        AlertDialog(
-            onDismissRequest = { showPrivacyDialog = false },
-            containerColor = colors.surface,
-            title = { Text("Privacy Policy", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    text = "Cinetra stores your Watchlist, Continue Watching progress, Search History, and Display Preferences locally on your device without requiring an account.\n\nIf you submit a Problem Report, only the selected issue category, description, media identifier, and optional screenshot image you choose are transmitted to the Cinetra Admin team for troubleshooting.",
-                    fontSize = 13.sp,
-                    color = colors.textSecondary,
-                    lineHeight = 19.sp
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showPrivacyDialog = false }) {
-                    Text("Close", color = colors.primary, fontWeight = FontWeight.Bold)
+        Dialog(onDismissRequest = { showPrivacyDialog = false }) {
+            CineDialogEntryBox {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = colors.surface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.border, RoundedCornerShape(24.dp))
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(
+                            text = "Privacy Policy",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Cinetra stores your Watchlist, Continue Watching progress, Search History, and Display Preferences locally on your device without requiring an account.\n\nIf you submit a Problem Report, only the selected issue category, description, media identifier, and optional screenshot image you choose are transmitted to the Cinetra Admin team for troubleshooting.",
+                            fontSize = 13.sp,
+                            color = colors.textSecondary,
+                            lineHeight = 19.sp
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showPrivacyDialog = false }) {
+                                Text("Close", color = colors.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 
     if (showTermsDialog) {
-        AlertDialog(
-            onDismissRequest = { showTermsDialog = false },
-            containerColor = colors.surface,
-            title = { Text("Terms & Conditions", color = colors.textPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    text = "Cinetra is an aggregator interface powered by The Movie Database (TMDb) metadata APIs. Third-party streaming providers operate independently of Cinetra.\n\nBy using this application, you agree to report broken links responsibly and adhere to all applicable local laws and content guidelines.",
-                    fontSize = 13.sp,
-                    color = colors.textSecondary,
-                    lineHeight = 19.sp
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showTermsDialog = false }) {
-                    Text("Accept", color = colors.primary, fontWeight = FontWeight.Bold)
+        Dialog(onDismissRequest = { showTermsDialog = false }) {
+            CineDialogEntryBox {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = colors.surface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.border, RoundedCornerShape(24.dp))
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(
+                            text = "Terms & Conditions",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Cinetra is an aggregator interface powered by The Movie Database (TMDb) metadata APIs. Third-party streaming providers operate independently of Cinetra.\n\nBy using this application, you agree to report broken links responsibly and adhere to all applicable local laws and content guidelines.",
+                            fontSize = 13.sp,
+                            color = colors.textSecondary,
+                            lineHeight = 19.sp
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showTermsDialog = false }) {
+                                Text("Accept", color = colors.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
-        )
+        }
     }
 }
 
@@ -1146,12 +1186,18 @@ private fun SettingsActionRow(
     testTag: String
 ) {
     val colors = CineTheme.colors
+    val rowInteraction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
+            .cinePressScale(rowInteraction)
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = rowInteraction,
+                indication = ripple(bounded = true),
+                onClick = onClick
+            )
             .padding(vertical = 8.dp, horizontal = 4.dp)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically
@@ -1192,14 +1238,15 @@ private fun PaletteOptionCard(
 ) {
     val activeColors = CineTheme.colors
     val previewColors = paletteColorsFor(palette)
+    val cardInteraction = remember { MutableInteractionSource() }
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) activeColors.primary else activeColors.border,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 180, easing = CineEase),
         label = "palette_card_border"
     )
     val containerColor by animateColorAsState(
         targetValue = if (isSelected) activeColors.surfaceHover else activeColors.surfaceElevated,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 180, easing = CineEase),
         label = "palette_card_bg"
     )
 
@@ -1207,10 +1254,16 @@ private fun PaletteOptionCard(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
+            .cinePressScale(cardInteraction)
             .clip(RoundedCornerShape(12.dp))
             .background(containerColor)
             .border(width = if (isSelected) 1.5.dp else 1.dp, color = borderColor, shape = RoundedCornerShape(12.dp))
-            .clickable(role = Role.RadioButton, onClick = onClick)
+            .clickable(
+                interactionSource = cardInteraction,
+                indication = ripple(bounded = true),
+                role = Role.RadioButton,
+                onClick = onClick
+            )
             .padding(12.dp)
             .testTag("settings_palette_${palette.storageKey}"),
         verticalAlignment = Alignment.CenterVertically

@@ -185,7 +185,7 @@ fun ReportProblemScreen(
         ) {
             // Context card if opened from a specific movie/episode/server
             if (prefilledMedia != null) {
-                item {
+                item(key = "report_context_card", contentType = "context_card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
                         shape = RoundedCornerShape(14.dp),
@@ -225,7 +225,7 @@ fun ReportProblemScreen(
             }
 
             // Issue Category Selector (All 8 Requested Categories)
-            item {
+            item(key = "report_form_card", contentType = "form_card") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = colors.surface),
                     shape = RoundedCornerShape(16.dp),
@@ -464,7 +464,7 @@ fun ReportProblemScreen(
             }
 
             // Live Report History & Status Section
-            item {
+            item(key = "report_history_header", contentType = "section_header") {
                 Text(
                     text = "Submitted Reports (${reportHistory.size})",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -474,7 +474,7 @@ fun ReportProblemScreen(
             }
 
             if (reportHistory.isEmpty()) {
-                item {
+                item(key = "report_history_empty", contentType = "empty_card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surface),
                         shape = RoundedCornerShape(14.dp),
@@ -491,7 +491,11 @@ fun ReportProblemScreen(
                     }
                 }
             } else {
-                items(reportHistory, key = { it.id }) { report ->
+                items(
+                    items = reportHistory,
+                    key = { it.id },
+                    contentType = { "report_history_item" }
+                ) { report ->
                     val statusEnum = IssueReportStatus.fromKey(report.status)
                     val categoryEnum = IssueReportCategory.fromKey(report.category)
                     val statusColor = when (statusEnum) {
@@ -585,7 +589,7 @@ fun ReportProblemScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item(key = "report_bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 }

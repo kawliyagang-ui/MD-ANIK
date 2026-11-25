@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,6 +48,9 @@ import com.example.data.model.mergeWithCatalog
 import com.example.data.model.toMediaItem
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.CineGradientProgressBar
+import com.example.ui.components.cinePressScale
+import com.example.ui.components.rememberCineImageRequest
+import com.example.ui.components.rememberDarkImagePainter
 import com.example.ui.theme.CineTheme
 
 @Composable
@@ -140,16 +145,45 @@ fun ContinueWatchingScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(items, key = { it.id }) { item ->
-                    val media = item.toMediaItem().mergeWithCatalog(catalogById[item.id])
-                    val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
-                        mediaType = item.mediaType,
-                        season = item.season,
-                        episode = item.episode
-                    )
-                    val watchedLabel = ContinueWatchingPolicy.formatWatchedDuration(item.watchedSeconds)
-                    val relativeTime = ContinueWatchingPolicy.formatRelativeTime(item.lastWatchedAt)
-                    val releaseYear = media.releaseDate.take(4)
+                items(
+                    items = items,
+                    key = { it.id },
+                    contentType = { "continue_item" }
+                ) { item ->
+                    val media = remember(item, catalogById) {
+                        item.toMediaItem().mergeWithCatalog(catalogById[item.id])
+                    }
+                    val (safeSeason, safeEpisode) = remember(item.mediaType, item.season, item.episode) {
+                        ContinueWatchingPolicy.normalizeSeasonEpisode(
+                            mediaType = item.mediaType,
+                            season = item.season,
+                            episode = item.episode
+                        )
+                    }
+                    val watchedLabel = remember(item.watchedSeconds) {
+                        ContinueWatchingPolicy.formatWatchedDuration(item.watchedSeconds)
+                    }
+                    val relativeTime = remember(item.lastWatchedAt) {
+                        ContinueWatchingPolicy.formatRelativeTime(item.lastWatchedAt)
+                    }
+                    val releaseYear = remember(media.releaseDate) { media.releaseDate.take(4) }
+                    val subtitleText = remember(item.mediaType, safeSeason, safeEpisode, releaseYear) {
+                        if (item.mediaType == "tv") {
+                            val seasonPrefix = if (safeSeason == 0) "Specials" else "Season $safeSeason"
+                            "$seasonPrefix • Episode $safeEpisode"
+                        } else {
+                            if (releaseYear.isNotBlank()) "Feature Movie • $releaseYear" else "Feature Movie"
+                        }
+                    }
+                    val statusText = remember(watchedLabel, relativeTime) {
+                        if (watchedLabel.isNotBlank()) {
+                            "Watched $watchedLabel • $relativeTime"
+                        } else {
+                            "Started • $relativeTime"
+                        }
+                    }
+                    val cardInteraction = remember { MutableInteractionSource() }
+                    val posterDarkPlaceholder = rememberDarkImagePainter(colors.surface)
 
                     Surface(
                         color = colors.surfaceElevated,
@@ -157,7 +191,12 @@ fun ContinueWatchingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .animateItem()
-                            .clickable { onMediaClick(media) }
+                            .cinePressScale(cardInteraction)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(
+                                interactionSource = cardInteraction,
+                                indication = ripple(bounded = true)
+                            ) { onMediaClick(media) }
                             .testTag("continue_card_${item.id}")
                     ) {
                         Row(
@@ -176,8 +215,15 @@ fun ContinueWatchingScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (media.fullPosterUrl.isNotBlank()) {
+                                    val posterRequest = rememberCineImageRequest(
+                                        url = media.fullPosterUrl,
+                                        widthDp = 65.dp,
+                                        heightDp = 95.dp
+                                    )
                                     AsyncImage(
-                                        model = media.fullPosterUrl,
+                                        model = posterRequest,
+                                        placeholder = posterDarkPlaceholder,
+                                        error = posterDarkPlaceholder,
                                         contentDescription = item.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
@@ -221,12 +267,7 @@ fun ContinueWatchingScreen(
                                 Spacer(modifier = Modifier.height(3.dp))
 
                                 Text(
-                                    text = if (item.mediaType == "tv") {
-                                        val seasonPrefix = if (safeSeason == 0) "Specials" else "Season $safeSeason"
-                                        "$seasonPrefix • Episode $safeEpisode"
-                                    } else {
-                                        if (releaseYear.isNotBlank()) "Feature Movie • $releaseYear" else "Feature Movie"
-                                    },
+                                    text = subtitleText,
                                     fontSize = 12.sp,
                                     color = colors.gold,
                                     fontWeight = FontWeight.Medium
@@ -254,11 +295,6 @@ fun ContinueWatchingScreen(
                                         )
                                     }
                                 } else {
-                                    val statusText = if (watchedLabel.isNotBlank()) {
-                                        "Watched $watchedLabel • $relativeTime"
-                                    } else {
-                                        "Started • $relativeTime"
-                                    }
                                     Text(
                                         text = statusText,
                                         fontSize = 11.sp,

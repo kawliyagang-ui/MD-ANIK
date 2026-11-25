@@ -2022,6 +2022,96 @@ class MovieViewModel(
         }
     }
 
+    fun switchDirectEpisode(media: MediaItem, season: Int, episode: Int) {
+        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
+            mediaType = resolvedMedia.mediaType,
+            season = season,
+            episode = episode
+        )
+        val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(safeSeason).orEmpty()
+        val playbackSource = PlaybackSourcePolicy.resolvePlaybackSource(
+            media = resolvedMedia,
+            season = safeSeason,
+            episode = safeEpisode,
+            episodesInSeason = episodesInSeason,
+            downloads = downloads.value
+        )
+
+        fun replaceTopPlayerScreen(nextScreen: Screen) {
+            _uiState.update { current ->
+                val trimmedStack = if (current.backStack.lastOrNull() is Screen.DirectPlayer) {
+                    current.backStack.dropLast(1)
+                } else {
+                    current.backStack
+                }
+                current.copy(
+                    playingMedia = resolvedMedia,
+                    currentSeason = safeSeason,
+                    currentEpisode = safeEpisode,
+                    currentScreen = nextScreen,
+                    backStack = trimmedStack + nextScreen,
+                    isNavigatingBack = false
+                )
+            }
+        }
+
+        when (playbackSource) {
+            is PlaybackSource.LocalFile -> {
+                viewModelScope.launch {
+                    val savedPosMs = repository.getPlaybackPosition(
+                        mediaId = resolvedMedia.id,
+                        mediaType = resolvedMedia.mediaType,
+                        season = safeSeason,
+                        episode = safeEpisode
+                    )
+                    replaceTopPlayerScreen(
+                        Screen.DirectPlayer(
+                            media = resolvedMedia,
+                            season = safeSeason,
+                            episode = safeEpisode,
+                            sourceUrl = playbackSource.filePath,
+                            isLocalFile = true,
+                            downloadEntity = playbackSource.download,
+                            initialPositionMs = savedPosMs
+                        )
+                    )
+                }
+            }
+            is PlaybackSource.DirectStream -> {
+                viewModelScope.launch {
+                    val savedPosMs = repository.getPlaybackPosition(
+                        mediaId = resolvedMedia.id,
+                        mediaType = resolvedMedia.mediaType,
+                        season = safeSeason,
+                        episode = safeEpisode
+                    )
+                    replaceTopPlayerScreen(
+                        Screen.DirectPlayer(
+                            media = resolvedMedia,
+                            season = safeSeason,
+                            episode = safeEpisode,
+                            sourceUrl = playbackSource.url,
+                            isLocalFile = false,
+                            downloadEntity = null,
+                            initialPositionMs = savedPosMs
+                        )
+                    )
+                }
+                if (resolvedMedia.mediaType == "tv") {
+                    ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
+                }
+            }
+            is PlaybackSource.WebEmbed -> {
+                val basePlayerScreen = Screen.Player(resolvedMedia, safeSeason, safeEpisode)
+                replaceTopPlayerScreen(basePlayerScreen)
+                if (resolvedMedia.mediaType == "tv") {
+                    ensureTvSeriesLoaded(resolvedMedia, initialSeason = safeSeason)
+                }
+            }
+        }
+    }
+
     fun openWebEmbedPlayer(media: MediaItem, season: Int = 1, episode: Int = 1) {
         val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
         val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
