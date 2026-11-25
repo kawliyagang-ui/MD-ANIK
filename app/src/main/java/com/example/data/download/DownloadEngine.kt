@@ -23,7 +23,9 @@ import com.example.data.model.DownloadStatus
 import com.example.data.model.MediaItem
 import com.example.data.model.MovieBoxDownloadOption
 import com.example.data.model.MovieBoxSubtitleOption
+import com.example.data.model.TmdbCanonicalMetadata
 import com.example.data.remote.MovieBoxApiClient
+import com.example.data.remote.TmdbMetadataResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -83,7 +85,17 @@ class DownloadEngine(
             qualityLabel = effectiveQualityLabel
         )
 
-        val existing = mediaDao.getDownloadById(downloadId)
+        val resolvedTmdbId = media.resolvedTmdbId()
+        val existingByTmdb = if (resolvedTmdbId != null) {
+            mediaDao.getDownloadsByTmdbId(resolvedTmdbId, media.mediaType).firstOrNull { dl ->
+                (!media.mediaType.equals("tv", ignoreCase = true) ||
+                    (dl.season == safeSeason && dl.episode == safeEpisode)) &&
+                    dl.qualityLabel.equals(effectiveQualityLabel, ignoreCase = true)
+            }
+        } else {
+            null
+        }
+        val existing = mediaDao.getDownloadById(downloadId) ?: existingByTmdb
         if (existing?.parsedStatus == DownloadStatus.COMPLETED &&
             existing.localFilePath.isNotBlank() &&
             File(existing.localFilePath).let { it.exists() && it.length() > 0L }
@@ -93,6 +105,9 @@ class DownloadEngine(
 
         cancelWorkQuietly(downloadId)
         if (existing != null) {
+            if (existing.id != downloadId) {
+                cancelWorkQuietly(existing.id)
+            }
             if (existing.systemDownloadId > 0L) {
                 runCatching { getLegacyDownloadManager()?.remove(existing.systemDownloadId) }
             }
@@ -125,7 +140,7 @@ class DownloadEngine(
             id = downloadId,
             systemDownloadId = IN_APP_ENGINE_ID,
             mediaId = media.id,
-            tmdbId = media.tmdbId,
+            tmdbId = resolvedTmdbId,
             title = media.title,
             posterPath = media.posterPath,
             backdropPath = media.backdropPath,
@@ -213,7 +228,14 @@ class DownloadEngine(
             val safeSeason = if (req.media.mediaType.equals("tv", ignoreCase = true)) req.season.coerceAtLeast(0) else 1
             val safeEpisode = if (req.media.mediaType.equals("tv", ignoreCase = true)) req.episode.coerceAtLeast(1) else 1
 
-            val existingEp = existingByMedia[req.media.id].orEmpty()
+            val resolvedTmdbId = req.media.resolvedTmdbId()
+            val existingByMediaList = existingByMedia[req.media.id].orEmpty()
+            val existingByTmdbList = if (resolvedTmdbId != null) {
+                mediaDao.getDownloadsByTmdbId(resolvedTmdbId, req.media.mediaType)
+            } else {
+                emptyList()
+            }
+            val existingEp = (existingByMediaList + existingByTmdbList)
                 .firstOrNull { it.season == safeSeason && it.episode == safeEpisode }
 
             val alreadyDoneOrActive = existingEp != null && (
@@ -249,7 +271,7 @@ class DownloadEngine(
                 id = downloadId,
                 systemDownloadId = IN_APP_ENGINE_ID,
                 mediaId = req.media.id,
-                tmdbId = req.media.tmdbId,
+                tmdbId = resolvedTmdbId,
                 title = req.media.title,
                 posterPath = req.media.posterPath,
                 backdropPath = req.media.backdropPath,
@@ -356,18 +378,20 @@ class DownloadEngine(
         wifiOnly: Boolean = false
     ): Result<DownloadEntity> = withContext(Dispatchers.IO) {
         cancelWorkQuietly(download.id)
-        val media = MediaItem(
+        val baseMedia = MediaItem(
             id = download.mediaId,
-            tmdbId = download.tmdbId,
+            tmdbId = download.tmdbId ?: download.mediaId.toLongOrNull()?.takeIf { it > 0L },
             title = download.title,
             overview = "",
             posterPath = download.posterPath,
             backdropPath = download.backdropPath,
             mediaType = download.mediaType
         )
+        val canonical = TmdbMetadataResolver.resolveForMedia(baseMedia)
+        val media = TmdbMetadataResolver.enrichMediaItem(baseMedia, canonical)
         val targetRes = Regex("(\\d{3,4})").find(download.qualityLabel)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 720
         val freshOption = if (isManagedApiProvider(download.providerName)) {
-            resolveFreshOptionForDownload(media, download.season, download.episode, targetRes)
+            resolveFreshOptionForDownload(media, download.season, download.episode, targetRes, canonical)
         } else {
             null
         }
@@ -377,6 +401,7 @@ class DownloadEngine(
         val updatedUrl = freshOption?.downloadUrl?.takeIf { it.isNotBlank() } ?: download.sourceUrl
         val now = System.currentTimeMillis()
         val requeued = download.copy(
+            tmdbId = media.resolvedTmdbId() ?: download.tmdbId,
             sourceUrl = updatedUrl,
             refererHeader = freshOption?.refererHeader ?: download.refererHeader,
             userAgentHeader = freshOption?.userAgentHeader ?: download.userAgentHeader,
@@ -511,9 +536,14 @@ class DownloadEngine(
         media: MediaItem,
         season: Int,
         episode: Int,
-        targetResolution: Int
+        targetResolution: Int,
+        canonical: TmdbCanonicalMetadata? = null
     ): MovieBoxDownloadOption? {
-        val subj = MovieBoxApiClient.resolveSubjectForMedia(media).getOrNull() ?: return null
+        val subj = MovieBoxApiClient.resolveSubjectForMedia(
+            media = media,
+            season = season,
+            canonicalMetadata = canonical
+        ).getOrNull() ?: return null
         val bundle = MovieBoxApiClient.fetchDownloadBundle(
             subject = subj,
             season = season,

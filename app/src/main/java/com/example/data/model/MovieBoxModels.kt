@@ -13,7 +13,11 @@ data class MovieBoxSubject(
     val coverUrl: String = "",
     val hasResource: Boolean = true,
     val sourceHost: String = "",
-    val language: String = ""
+    val language: String = "",
+    val tmdbId: Long? = null,
+    val imdbId: String = "",
+    val originalTitle: String = "",
+    val availableSeasons: List<Int> = emptyList()
 ) {
     val mediaTypeLabel: String
         get() = if (subjectType == 2) "TV Series" else "Movie"

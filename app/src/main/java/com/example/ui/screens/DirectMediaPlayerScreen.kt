@@ -10,7 +10,6 @@ import android.graphics.Rect
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -51,7 +50,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toAndroidRectF
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -103,7 +101,10 @@ import com.example.ui.player.LongPressSpeedController
 import com.example.ui.player.LongPressSpeedPill
 import com.example.ui.player.PlayerLockOverlay
 import com.example.ui.player.SeriesUpNextCard
+import com.example.ui.player.SwipeAxis
+import com.example.ui.player.SwipeGestureMath
 import com.example.ui.player.VerticalAdjustmentPill
+import com.example.ui.player.VerticalSwipeSide
 import com.example.ui.player.enterPictureInPictureNow
 import com.example.ui.player.isPictureInPictureSupported
 import com.google.common.util.concurrent.MoreExecutors
@@ -114,8 +115,6 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
-import kotlin.math.hypot
-import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem as Media3Item
 
 private enum class SurfaceGestureMode {
@@ -130,6 +129,16 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+private fun applyWindowBrightness(activity: Activity?, brightness: Float) {
+    val win = activity?.window ?: return
+    val currentAttrs = win.attributes ?: return
+    val updatedAttrs = WindowManager.LayoutParams().apply {
+        copyFrom(currentAttrs)
+        screenBrightness = brightness
+    }
+    win.attributes = updatedAttrs
 }
 
 @OptIn(UnstableApi::class)
@@ -170,13 +179,9 @@ fun DirectMediaPlayerScreen(
         } else null
     }
     val initialBrightness = remember(activity) {
-        val winVal = activity?.window?.attributes?.screenBrightness ?: -1f
-        if (winVal in 0.01f..1f) winVal else {
-            runCatching {
-                val sys = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128)
-                (sys / 255f).coerceIn(0.1f, 1f)
-            }.getOrDefault(0.5f)
-        }
+        SwipeGestureMath.resolveStartBrightness(
+            windowBrightness = activity?.window?.attributes?.screenBrightness ?: -1f
+        )
     }
 
     var isFullScreen by remember { mutableStateOf(false) }
@@ -422,9 +427,7 @@ fun DirectMediaPlayerScreen(
                 originalOrientation = initialOrientation,
                 originalCutoutMode = initialCutoutMode
             )
-            activity?.window?.attributes = activity?.window?.attributes?.apply {
-                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            }
+            applyWindowBrightness(activity, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
         }
     }
 
@@ -653,6 +656,8 @@ fun DirectMediaPlayerScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     useController = false
+                    isClickable = false
+                    isFocusable = false
                     keepScreenOn = isPlaying
                     resizeMode = aspectRatio.toResizeMode()
                     player = exoPlayer
@@ -666,34 +671,59 @@ fun DirectMediaPlayerScreen(
             }
         )
 
-        // Unified gesture layer (disabled in PiP or Lock mode or while a sheet is open)
+        val currentExoPlayer by rememberUpdatedState(exoPlayer)
+        val currentDurationMs by rememberUpdatedState(durationMs)
+        val currentIsPlaying by rememberUpdatedState(isPlaying)
+        val currentIsBuffering by rememberUpdatedState(isBuffering)
+        val currentIsEnded by rememberUpdatedState(isEnded)
+        val currentHasError by rememberUpdatedState(playbackError != null)
+        val currentIsLocked by rememberUpdatedState(isLocked)
+        val currentHasOpenMenu by rememberUpdatedState(activeSheet != DirectPlayerActiveSheet.NONE)
+        val currentIsScrubbingBar by rememberUpdatedState(isScrubbingBar)
+        val currentIsInPipMode by rememberUpdatedState(isInPipMode)
+
+        // Unified gesture layer placed above the video surface and below the chrome
+        // (disabled in PiP, Lock mode, playback error, or while a bottom-sheet menu is open)
         if (!isInPipMode && !isLocked && activeSheet == DirectPlayerActiveSheet.NONE && playbackError == null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(exoPlayer, durationMs, isPlaying, isBuffering, isEnded) {
+                    .pointerInput(Unit) {
+                        val dragSlopPx = maxOf(
+                            viewConfiguration.touchSlop,
+                            SwipeGestureMath.DRAG_SLOP_DP.dp.toPx()
+                        )
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val startPos = down.position
+                            val down = awaitFirstDown(requireUnconsumed = true)
+                            if (currentIsLocked || currentIsInPipMode || currentHasOpenMenu || currentHasError) {
+                                return@awaitEachGesture
+                            }
+
+                            val downPos = down.position
                             val surfaceW = size.width.toFloat().coerceAtLeast(1f)
                             val surfaceH = size.height.toFloat().coerceAtLeast(1f)
-                            val touchSlop = viewConfiguration.touchSlop
+
                             var mode = SurfaceGestureMode.PENDING
-                            var seekOriginMs = currentPositionMs
-                            var completedNormally = false
+                            var seekOriginMs = 0L
+                            var dragStartBrightness = SwipeGestureMath.DEFAULT_FALLBACK_BRIGHTNESS
+                            var dragStartVolume = 0
+                            var dragMaxVolume = 15
+                            var lastAppliedVolume = -1
+                            var gestureFinishedByUp = false
+                            var gestureCancelled = false
 
                             val holdJob = gestureScope.launch {
                                 delay(LongPressSpeedController.HOLD_THRESHOLD_MS)
-                                if (mode == SurfaceGestureMode.PENDING) {
+                                if (mode == SurfaceGestureMode.PENDING && !gestureFinishedByUp && !gestureCancelled) {
                                     val activated = speedController.onHoldThresholdReached(
-                                        isPlaying = isPlaying,
-                                        isBuffering = isBuffering,
-                                        isEnded = isEnded,
-                                        hasError = playbackError != null,
-                                        isLocked = isLocked,
-                                        hasOpenMenu = activeSheet != DirectPlayerActiveSheet.NONE,
-                                        isScrubbing = isScrubbingBar,
-                                        isInPipMode = isInPipMode
+                                        isPlaying = currentIsPlaying,
+                                        isBuffering = currentIsBuffering,
+                                        isEnded = currentIsEnded,
+                                        hasError = currentHasError,
+                                        isLocked = currentIsLocked,
+                                        hasOpenMenu = currentHasOpenMenu,
+                                        isScrubbing = currentIsScrubbingBar,
+                                        isInPipMode = currentIsInPipMode
                                     )
                                     if (activated) {
                                         mode = SurfaceGestureMode.BOOSTING
@@ -706,70 +736,124 @@ fun DirectMediaPlayerScreen(
                             try {
                                 while (true) {
                                     val event = awaitPointerEvent()
-                                    val anyPressed = event.changes.any { it.pressed }
                                     val change = event.changes.firstOrNull { it.id == down.id }
-                                    if (!anyPressed || change == null || !change.pressed) {
-                                        completedNormally = anyPressed.not() && change != null && !change.isConsumed
+                                    if (change == null || change.isConsumed) {
+                                        gestureCancelled = true
                                         break
                                     }
-                                    val totalDx = change.position.x - startPos.x
-                                    val totalDy = change.position.y - startPos.y
+                                    if (!change.pressed) {
+                                        gestureFinishedByUp = true
+                                        break
+                                    }
+                                    if (currentIsLocked || currentIsInPipMode || currentHasOpenMenu || currentHasError) {
+                                        gestureCancelled = true
+                                        break
+                                    }
 
-                                    if (mode == SurfaceGestureMode.PENDING && hypot(totalDx, totalDy) > touchSlop) {
-                                        holdJob.cancel()
-                                        if (abs(totalDx) > abs(totalDy) && durationMs > 0L) {
-                                            mode = SurfaceGestureMode.HORIZONTAL_SEEK
-                                            seekOriginMs = exoPlayer.currentPosition.coerceAtLeast(0L)
-                                            isHorizontalGestureScrubbing = true
-                                        } else if (startPos.x < surfaceW * 0.35f) {
-                                            mode = SurfaceGestureMode.VERTICAL_BRIGHTNESS
-                                            brightnessHideJob?.cancel()
-                                            showBrightnessPill = true
-                                        } else if (startPos.x > surfaceW * 0.65f) {
-                                            mode = SurfaceGestureMode.VERTICAL_VOLUME
-                                            volumeHideJob?.cancel()
-                                            showVolumePill = true
-                                        } else {
-                                            break
+                                    val totalDx = change.position.x - downPos.x
+                                    val totalDy = change.position.y - downPos.y
+
+                                    if (mode == SurfaceGestureMode.PENDING) {
+                                        val axis = SwipeGestureMath.decideSwipeAxis(
+                                            dx = totalDx,
+                                            dy = totalDy,
+                                            touchSlopPx = dragSlopPx
+                                        )
+                                        if (axis != null) {
+                                            holdJob.cancel()
+                                            when (axis) {
+                                                SwipeAxis.HORIZONTAL -> {
+                                                    mode = SurfaceGestureMode.HORIZONTAL_SEEK
+                                                    val dur = currentDurationMs
+                                                    if (dur > 0L) {
+                                                        seekOriginMs = currentExoPlayer.currentPosition.coerceIn(0L, dur)
+                                                        val initial = SwipeGestureMath.mapSeekTarget(
+                                                            startPositionMs = seekOriginMs,
+                                                            durationMs = dur,
+                                                            dragDxPx = totalDx,
+                                                            screenWidthPx = surfaceW
+                                                        )
+                                                        horizontalGestureTargetMs = initial.targetPositionMs
+                                                        horizontalGestureDeltaMs = initial.deltaMs
+                                                        isHorizontalGestureScrubbing = true
+                                                    }
+                                                }
+                                                SwipeAxis.VERTICAL -> {
+                                                    when (SwipeGestureMath.decideVerticalSide(downPos.x, surfaceW)) {
+                                                        VerticalSwipeSide.LEFT_BRIGHTNESS -> {
+                                                            mode = SurfaceGestureMode.VERTICAL_BRIGHTNESS
+                                                            val winBrightness = activity?.window?.attributes?.screenBrightness ?: -1f
+                                                            dragStartBrightness = SwipeGestureMath.resolveStartBrightness(
+                                                                windowBrightness = winBrightness,
+                                                                fallbackBrightness = brightnessFraction
+                                                            )
+                                                            brightnessHideJob?.cancel()
+                                                            brightnessFraction = dragStartBrightness
+                                                            showBrightnessPill = true
+                                                        }
+                                                        VerticalSwipeSide.RIGHT_VOLUME -> {
+                                                            mode = SurfaceGestureMode.VERTICAL_VOLUME
+                                                            audioManager?.let { am ->
+                                                                dragMaxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                                                dragStartVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(0, dragMaxVolume)
+                                                                lastAppliedVolume = dragStartVolume
+                                                                volumeFraction = dragStartVolume.toFloat() / dragMaxVolume.toFloat()
+                                                            }
+                                                            volumeHideJob?.cancel()
+                                                            showVolumePill = true
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            change.consume()
                                         }
                                     }
 
                                     when (mode) {
                                         SurfaceGestureMode.BOOSTING -> {
-                                            if (hypot(totalDx, totalDy) > touchSlop * 3f) {
-                                                if (speedController.onReleaseOrCancel()) {
-                                                    isSpeedBoosted = false
-                                                }
-                                                break
-                                            }
+                                            // Stationary hold remains in boost mode until release; never converts to a drag
                                             change.consume()
                                         }
                                         SurfaceGestureMode.HORIZONTAL_SEEK -> {
                                             change.consume()
-                                            val delta = ((totalDx / surfaceW) * 90_000f).toLong()
-                                            val target = (seekOriginMs + delta).coerceIn(0L, durationMs)
-                                            horizontalGestureTargetMs = target
-                                            horizontalGestureDeltaMs = target - seekOriginMs
+                                            val dur = currentDurationMs
+                                            if (dur > 0L) {
+                                                val mapped = SwipeGestureMath.mapSeekTarget(
+                                                    startPositionMs = seekOriginMs,
+                                                    durationMs = dur,
+                                                    dragDxPx = totalDx,
+                                                    screenWidthPx = surfaceW
+                                                )
+                                                horizontalGestureTargetMs = mapped.targetPositionMs
+                                                horizontalGestureDeltaMs = mapped.deltaMs
+                                                isHorizontalGestureScrubbing = true
+                                            }
                                         }
                                         SurfaceGestureMode.VERTICAL_BRIGHTNESS -> {
                                             change.consume()
-                                            val step = -change.positionChange().y / (surfaceH * 0.65f)
-                                            val updated = (brightnessFraction + step).coerceIn(0.02f, 1f)
+                                            val dragUpPx = downPos.y - change.position.y
+                                            val updated = SwipeGestureMath.mapBrightness(
+                                                startBrightness = dragStartBrightness,
+                                                dragUpPx = dragUpPx,
+                                                screenHeightPx = surfaceH
+                                            )
                                             brightnessFraction = updated
-                                            activity?.window?.attributes = activity?.window?.attributes?.apply {
-                                                screenBrightness = updated
-                                            }
+                                            applyWindowBrightness(activity, updated)
                                             showBrightnessPill = true
                                         }
                                         SurfaceGestureMode.VERTICAL_VOLUME -> {
                                             change.consume()
-                                            val step = -change.positionChange().y / (surfaceH * 0.65f)
-                                            val updated = (volumeFraction + step).coerceIn(0f, 1f)
-                                            volumeFraction = updated
-                                            audioManager?.let { am ->
-                                                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                                                val targetIdx = (updated * max).roundToInt().coerceIn(0, max)
-                                                am.setStreamVolume(AudioManager.STREAM_MUSIC, targetIdx, 0)
+                                            val dragUpPx = downPos.y - change.position.y
+                                            val mapped = SwipeGestureMath.mapVolume(
+                                                startVolume = dragStartVolume,
+                                                maxVolume = dragMaxVolume,
+                                                dragUpPx = dragUpPx,
+                                                screenHeightPx = surfaceH
+                                            )
+                                            volumeFraction = mapped.fraction
+                                            if (mapped.step != lastAppliedVolume) {
+                                                lastAppliedVolume = mapped.step
+                                                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, mapped.step, 0)
                                             }
                                             showVolumePill = true
                                         }
@@ -783,26 +867,28 @@ fun DirectMediaPlayerScreen(
                                 }
                                 if (mode == SurfaceGestureMode.HORIZONTAL_SEEK) {
                                     isHorizontalGestureScrubbing = false
-                                    exoPlayer.seekTo(horizontalGestureTargetMs)
-                                    currentPositionMs = horizontalGestureTargetMs
+                                    if (gestureFinishedByUp && !gestureCancelled && currentDurationMs > 0L) {
+                                        currentExoPlayer.seekTo(horizontalGestureTargetMs)
+                                        currentPositionMs = horizontalGestureTargetMs
+                                    }
                                 }
                                 if (mode == SurfaceGestureMode.VERTICAL_BRIGHTNESS) {
                                     brightnessHideJob?.cancel()
                                     brightnessHideJob = gestureScope.launch {
-                                        delay(850L)
+                                        delay(SwipeGestureMath.INDICATOR_HIDE_DELAY_MS)
                                         showBrightnessPill = false
                                     }
                                 }
                                 if (mode == SurfaceGestureMode.VERTICAL_VOLUME) {
                                     volumeHideJob?.cancel()
                                     volumeHideJob = gestureScope.launch {
-                                        delay(850L)
+                                        delay(SwipeGestureMath.INDICATOR_HIDE_DELAY_MS)
                                         showVolumePill = false
                                     }
                                 }
-                                if (mode == SurfaceGestureMode.PENDING && completedNormally) {
-                                    val isLeftZone = startPos.x < surfaceW * 0.35f
-                                    val isRightZone = startPos.x > surfaceW * 0.65f
+                                if (mode == SurfaceGestureMode.PENDING && gestureFinishedByUp && !gestureCancelled) {
+                                    val isLeftZone = downPos.x < surfaceW * 0.35f
+                                    val isRightZone = downPos.x > surfaceW * 0.65f
                                     if (!isLeftZone && !isRightZone) {
                                         pendingSingleTapJob?.cancel()
                                         pendingTapIsRight = null

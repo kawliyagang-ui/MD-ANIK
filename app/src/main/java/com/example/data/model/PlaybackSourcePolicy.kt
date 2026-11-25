@@ -75,7 +75,7 @@ object PlaybackSourcePolicy {
         val completedDownload = downloads
             .asSequence()
             .filter { dl ->
-                dl.mediaId == media.id &&
+                dl.matchesMedia(media) &&
                     dl.parsedStatus == DownloadStatus.COMPLETED &&
                     fileExistsChecker(dl.localFilePath) &&
                     (!isTv || (dl.season == season && dl.episode == episode))
@@ -133,7 +133,7 @@ object PlaybackSourcePolicy {
 
         episodeNumbers.distinct().sorted().forEach { epNum ->
             val existing = downloads
-                .filter { it.mediaId == media.id && it.season == seasonNumber && it.episode == epNum }
+                .filter { it.matchesMedia(media) && it.season == seasonNumber && it.episode == epNum }
                 .maxByOrNull { it.updatedAt }
 
             val isCompleted = existing?.parsedStatus == DownloadStatus.COMPLETED &&
@@ -167,10 +167,13 @@ object PlaybackSourcePolicy {
             .sortedByDescending { it.createdAt }
 
         val seriesGroups = tvDownloads
-            .groupBy { it.mediaId }
-            .map { (mediaId, seriesItems) ->
+            .groupBy { dl ->
+                dl.tmdbId?.takeIf { it > 0L }?.let { "tmdb_$it" } ?: dl.mediaId
+            }
+            .map { (groupKey, seriesItems) ->
                 val sortedItems = seriesItems.sortedByDescending { it.createdAt }
                 val sample = sortedItems.first()
+                val mediaId = sample.mediaId
                 val seasons = seriesItems
                     .groupBy { it.season }
                     .toSortedMap()
@@ -221,4 +224,11 @@ object PlaybackSourcePolicy {
             movieDownloads = movieDownloads
         )
     }
+}
+
+fun DownloadEntity.matchesMedia(media: MediaItem): Boolean {
+    if (mediaId == media.id) return true
+    val targetTmdbId = media.resolvedTmdbId() ?: return false
+    val dlTmdbId = tmdbId?.takeIf { it > 0L } ?: mediaId.trim().toLongOrNull()?.takeIf { it > 0L } ?: return false
+    return dlTmdbId == targetTmdbId && mediaType.equals(media.mediaType, ignoreCase = true)
 }

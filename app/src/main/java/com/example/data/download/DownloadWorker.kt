@@ -408,16 +408,22 @@ class DownloadWorker(
         entity: DownloadEntity,
         targetResolution: Int
     ): MovieBoxDownloadOption? {
-        val media = MediaItem(
+        val baseMedia = MediaItem(
             id = entity.mediaId,
-            tmdbId = entity.tmdbId,
+            tmdbId = entity.tmdbId ?: entity.mediaId.toLongOrNull()?.takeIf { it > 0L },
             title = entity.title,
             overview = "",
             posterPath = entity.posterPath,
             backdropPath = entity.backdropPath,
             mediaType = entity.mediaType
         )
-        val subj = MovieBoxApiClient.resolveSubjectForMedia(media).getOrNull() ?: return null
+        val canonical = com.example.data.remote.TmdbMetadataResolver.resolveForMedia(baseMedia)
+        val media = com.example.data.remote.TmdbMetadataResolver.enrichMediaItem(baseMedia, canonical)
+        val subj = MovieBoxApiClient.resolveSubjectForMedia(
+            media = media,
+            season = entity.season,
+            canonicalMetadata = canonical
+        ).getOrNull() ?: return null
         val bundle = MovieBoxApiClient.fetchDownloadBundle(
             subject = subj,
             season = entity.season,

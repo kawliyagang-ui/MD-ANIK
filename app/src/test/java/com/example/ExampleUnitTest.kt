@@ -13,6 +13,7 @@ import com.example.ui.theme.paletteColorsFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -2113,5 +2114,267 @@ class ExampleUnitTest {
         assertTrue(com.example.data.download.DownloadEngine.isManagedApiProvider("MovieBox API"))
         assertFalse(com.example.data.download.DownloadEngine.isManagedApiProvider("Direct Stream"))
     }
+
+    @Test
+    fun testTmdbIdVerificationAndSeasonDisambiguation() {
+        val tmdbMetadata = com.example.data.model.TmdbCanonicalMetadata(
+            tmdbId = 438631L,
+            mediaType = "movie",
+            title = "Dune",
+            originalTitle = "Dune",
+            releaseDate = "2021-09-15",
+            imdbId = "tt1160419"
+        )
+        val duneMedia = MediaItem(
+            id = "custom_dune",
+            tmdbId = 438631L,
+            title = "Dune",
+            overview = "",
+            posterPath = "",
+            mediaType = "movie",
+            releaseDate = "2021-09-15"
+        )
+
+        // 1. Exact TMDB ID overrides homonym / wrong TMDB ID (e.g. 1984 Dune vs 2021 Dune)
+        val dune1984WrongId = MovieBoxSubject(
+            subjectId = "mb_1984",
+            subjectType = 1,
+            title = "Dune",
+            releaseDate = "1984-12-14",
+            tmdbId = 841L,
+            imdbId = "tt0087182"
+        )
+        val dune2021ExactId = MovieBoxSubject(
+            subjectId = "mb_2021",
+            subjectType = 1,
+            title = "Dune: Part One",
+            releaseDate = "2021-10-22",
+            tmdbId = 438631L,
+            imdbId = "tt1160419"
+        )
+        val pickedMovie = MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+            media = duneMedia,
+            candidates = listOf(dune1984WrongId, dune2021ExactId),
+            canonical = tmdbMetadata
+        )
+        assertEquals("mb_2021", pickedMovie?.subjectId)
+
+        // Mismatched TMDB ID alone must be rejected even if title matches
+        assertNull(
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = duneMedia,
+                candidates = listOf(dune1984WrongId),
+                canonical = tmdbMetadata
+            )
+        )
+
+        // 2. TMDB movie IDs and TV IDs are separate namespaces: type mismatch MUST be rejected
+        val sameTmdbIdWrongType = dune2021ExactId.copy(subjectId = "mb_tv_collision", subjectType = 2)
+        assertNull(
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = duneMedia,
+                candidates = listOf(sameTmdbIdWrongType),
+                canonical = tmdbMetadata
+            )
+        )
+
+        // 3. IMDb ID verification rejects mismatched IMDb ID and accepts matching IMDb ID
+        val wrongImdb = MovieBoxSubject(
+            subjectId = "mb_wrong_imdb",
+            subjectType = 1,
+            title = "Dune",
+            releaseDate = "2021-09-15",
+            imdbId = "tt9999999"
+        )
+        assertNull(
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = duneMedia,
+                candidates = listOf(wrongImdb),
+                canonical = tmdbMetadata
+            )
+        )
+        val matchingImdbLocalized = MovieBoxSubject(
+            subjectId = "mb_match_imdb",
+            subjectType = 1,
+            title = "Duna",
+            releaseDate = "2021-09-15",
+            imdbId = "TT1160419"
+        )
+        assertEquals(
+            "mb_match_imdb",
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = duneMedia,
+                candidates = listOf(matchingImdbLocalized),
+                canonical = tmdbMetadata
+            )?.subjectId
+        )
+
+        // 4. Remake release year mismatch and auxiliary titles rejected when IDs are absent
+        val dune1984NoIds = MovieBoxSubject(
+            subjectId = "mb_1984_noids",
+            subjectType = 1,
+            title = "Dune",
+            releaseDate = "1984-12-14"
+        )
+        val duneMakingOf = MovieBoxSubject(
+            subjectId = "mb_making",
+            subjectType = 1,
+            title = "Dune: Making Of",
+            releaseDate = "2021-10-01"
+        )
+        assertNull(
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = duneMedia,
+                candidates = listOf(dune1984NoIds, duneMakingOf),
+                canonical = tmdbMetadata
+            )
+        )
+
+        // 5. TV Series Season Verification & single-season S2 disambiguation
+        val tvMedia = MediaItem(
+            id = "1396",
+            tmdbId = 1396L,
+            title = "Breaking Bad",
+            overview = "",
+            posterPath = "",
+            mediaType = "tv",
+            releaseDate = "2008-01-20"
+        )
+        val tvCanonical = com.example.data.model.TmdbCanonicalMetadata(
+            tmdbId = 1396L,
+            mediaType = "tv",
+            title = "Breaking Bad",
+            originalTitle = "Breaking Bad",
+            releaseDate = "2008-01-20",
+            imdbId = "tt0903747",
+            seasonAirDates = mapOf(1 to "2008-01-20", 2 to "2009-03-08")
+        )
+        val bbSeason1Only = MovieBoxSubject(
+            subjectId = "bb_s1",
+            subjectType = 2,
+            title = "Breaking Bad S1",
+            releaseDate = "2008-01-20",
+            tmdbId = 1396L
+        )
+        val bbSeason2Only = MovieBoxSubject(
+            subjectId = "bb_s2",
+            subjectType = 2,
+            title = "Breaking Bad S2",
+            releaseDate = "2009-03-08",
+            tmdbId = 1396L
+        )
+        val pickedS2 = MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+            media = tvMedia,
+            candidates = listOf(bbSeason1Only, bbSeason2Only),
+            canonical = tvCanonical,
+            targetSeason = 2
+        )
+        assertEquals("bb_s2", pickedS2?.subjectId)
+        assertTrue(MovieBoxApiClient.subjectMatchesSingleSeasonOnly(bbSeason2Only, 2))
+        assertFalse(MovieBoxApiClient.subjectMatchesSingleSeasonOnly(bbSeason1Only, 2))
+        assertNull(
+            MovieBoxApiClient.pickBestVerifiedSubjectCandidate(
+                media = tvMedia,
+                candidates = listOf(bbSeason1Only),
+                canonical = tvCanonical,
+                targetSeason = 2
+            )
+        )
+
+        // 6. Search & Detail JSON parsing for tmdbId, imdbId, originalTitle, availableSeasons
+        val searchWithIdsJson = """
+            {
+              "code": 0,
+              "data": {
+                "items": [
+                  {
+                    "subjectId": "777",
+                    "subjectType": 2,
+                    "title": "Breaking Bad",
+                    "originalTitle": "Breaking Bad",
+                    "releaseDate": "2008-01-20",
+                    "tmdbId": 1396,
+                    "imdbId": "tt0903747",
+                    "detailPath": "breaking-bad"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val parsedSubjects = MovieBoxApiClient.parseSearchResponseJson(searchWithIdsJson)
+        assertEquals(1, parsedSubjects.size)
+        assertEquals(1396L, parsedSubjects[0].tmdbId)
+        assertEquals("tt0903747", parsedSubjects[0].imdbId)
+
+        val detailWithSeasonsJson = """
+            {
+              "code": 0,
+              "data": {
+                "subject": {
+                  "subjectId": "777",
+                  "subjectType": 2,
+                  "title": "Breaking Bad",
+                  "externalIds": { "tmdb_id": "1396", "imdb_id": "TT0903747" }
+                },
+                "resource": {
+                  "seasons": [ { "se": 1 }, { "se": 2 }, { "se": 3 } ]
+                }
+              }
+            }
+        """.trimIndent()
+        val detailMeta = MovieBoxApiClient.parseSubjectDetailMetadataJson(
+            json = detailWithSeasonsJson,
+            baseSubject = MovieBoxSubject(subjectId = "777", subjectType = 2, title = "Breaking Bad")
+        )
+        assertEquals(1396L, detailMeta.subject.tmdbId)
+        assertEquals("tt0903747", detailMeta.subject.imdbId)
+        assertEquals(listOf(1, 2, 3), detailMeta.subject.availableSeasons)
+
+        // 7. collectSameTitleLanguageVariants must reject conflicting TMDB IDs or TV seasons
+        val bbS2Hindi = bbSeason2Only.copy(subjectId = "bb_s2_hi", title = "Breaking Bad S2 [Hindi]", language = "Hindi")
+        val bbS1Hindi = bbSeason1Only.copy(subjectId = "bb_s1_hi", title = "Breaking Bad S1 [Hindi]", language = "Hindi")
+        val bbWrongTmdbHindi = bbSeason2Only.copy(subjectId = "bb_wrong_hi", tmdbId = 99999L, title = "Breaking Bad S2 [Hindi]", language = "Hindi")
+        val filteredVariants = MovieBoxApiClient.collectSameTitleLanguageVariants(
+            media = tvMedia,
+            primarySubject = bbSeason2Only,
+            candidates = listOf(bbSeason2Only, bbS2Hindi, bbS1Hindi, bbWrongTmdbHindi),
+            canonical = tvCanonical,
+            targetSeason = 2
+        )
+        assertEquals(listOf("bb_s2_hi"), filteredVariants.map { it.subjectId })
+
+        // 8. MediaItem.resolvedTmdbId and DownloadEntity.matchesMedia across custom & TMDB IDs
+        val customWithVidly = MediaItem(
+            id = "custom_show_99",
+            vidlyId = "1396",
+            title = "Breaking Bad",
+            overview = "",
+            posterPath = "",
+            mediaType = "tv"
+        )
+        assertEquals(1396L, customWithVidly.resolvedTmdbId())
+
+        val dlByTmdb = com.example.data.model.DownloadEntity(
+            id = "1396_tv_s2e1_1080p",
+            mediaId = "1396",
+            tmdbId = 1396L,
+            title = "Breaking Bad",
+            posterPath = "",
+            mediaType = "tv",
+            season = 2,
+            episode = 1,
+            sourceUrl = "https://cdn.example.com/bb_s2e1.mp4",
+            localFilePath = "/tmp/bb_s2e1.mp4",
+            status = com.example.data.model.DownloadStatus.COMPLETED.name
+        )
+        assertTrue(dlByTmdb.matchesMedia(customWithVidly))
+        assertFalse(dlByTmdb.matchesMedia(duneMedia))
+
+        val dlByCustomId = dlByTmdb.copy(id = "custom_show_99_tv_s2e2_1080p", mediaId = "custom_show_99", episode = 2)
+        val grouped = com.example.data.model.PlaybackSourcePolicy.groupDownloadsForDisplay(listOf(dlByTmdb, dlByCustomId))
+        assertEquals(1, grouped.seriesGroups.size)
+        assertEquals(2, grouped.seriesGroups.first().seasons.first().episodes.size)
+    }
 }
+
 

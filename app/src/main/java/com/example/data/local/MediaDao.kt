@@ -204,6 +204,9 @@ interface MediaDao {
     @Query("SELECT * FROM downloads WHERE mediaId = :mediaId ORDER BY season ASC, episode ASC")
     suspend fun getDownloadsByMediaId(mediaId: String): List<com.example.data.model.DownloadEntity>
 
+    @Query("SELECT * FROM downloads WHERE tmdbId = :tmdbId AND LOWER(mediaType) = LOWER(:mediaType) ORDER BY season ASC, episode ASC")
+    suspend fun getDownloadsByTmdbId(tmdbId: Long, mediaType: String): List<com.example.data.model.DownloadEntity>
+
     @Query("SELECT * FROM downloads WHERE id = :id LIMIT 1")
     suspend fun getDownloadById(id: String): com.example.data.model.DownloadEntity?
 

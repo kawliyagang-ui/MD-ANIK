@@ -1,5 +1,7 @@
 package com.example.data.remote
 
+import com.example.data.model.TmdbExternalIdsDto
+import com.example.data.model.TmdbMovieDetailsDto
 import com.example.data.model.TmdbMovieReleaseDatesResponse
 import com.example.data.model.TmdbPageResponse
 import com.example.data.model.TmdbSeasonDetailsDto
@@ -151,12 +153,33 @@ interface TmdbApiService {
         @Query("include_adult") includeAdult: Boolean = false
     ): TmdbPageResponse
 
+    @GET("movie/{movie_id}")
+    suspend fun getMovieDetails(
+        @Path("movie_id") movieId: Long,
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "en-US",
+        @Query("append_to_response") appendToResponse: String? = "external_ids"
+    ): TmdbMovieDetailsDto
+
+    @GET("movie/{movie_id}/external_ids")
+    suspend fun getMovieExternalIds(
+        @Path("movie_id") movieId: Long,
+        @Query("api_key") apiKey: String
+    ): TmdbExternalIdsDto
+
     @GET("tv/{tv_id}")
     suspend fun getTvDetails(
         @Path("tv_id") tvId: Long,
         @Query("api_key") apiKey: String,
-        @Query("language") language: String = "en-US"
+        @Query("language") language: String = "en-US",
+        @Query("append_to_response") appendToResponse: String? = "external_ids"
     ): TmdbTvDetailsDto
+
+    @GET("tv/{tv_id}/external_ids")
+    suspend fun getTvExternalIds(
+        @Path("tv_id") tvId: Long,
+        @Query("api_key") apiKey: String
+    ): TmdbExternalIdsDto
 
     @GET("tv/{tv_id}/season/{season_number}")
     suspend fun getTvSeasonDetails(

@@ -194,7 +194,9 @@ data class MediaItem(
     }
 
     fun resolvedTmdbId(): Long? {
-        return tmdbId ?: vidlyId.toLongOrNull() ?: id.toLongOrNull()
+        return tmdbId?.takeIf { it > 0L }
+            ?: vidlyId.trim().toLongOrNull()?.takeIf { it > 0L }
+            ?: id.trim().toLongOrNull()?.takeIf { it > 0L }
     }
 
     fun resolvedSeasonList(): List<SeasonInfo> {

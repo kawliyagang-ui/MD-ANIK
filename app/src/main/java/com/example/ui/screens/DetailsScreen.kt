@@ -87,6 +87,7 @@ import com.example.data.model.EpisodeInfo
 import com.example.data.model.MediaItem
 import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
+import com.example.data.model.matchesMedia
 import com.example.ui.components.CineEase
 import com.example.ui.components.CineGradientButton
 import com.example.ui.components.DetailedMovieView
@@ -138,8 +139,8 @@ fun DetailsScreen(
     var selectedSeason by remember(media.id) { mutableIntStateOf(initialSeason) }
     var selectedEpisodesBySeason by remember(media.id) { mutableStateOf<Map<Int, Set<Int>>>(emptyMap()) }
 
-    val mediaDownloads = remember(downloads, media.id) {
-        downloads.filter { it.mediaId == media.id }
+    val mediaDownloads = remember(downloads, media.id, media.tmdbId, media.vidlyId, media.mediaType) {
+        downloads.filter { it.matchesMedia(media) }
     }
 
     LaunchedEffect(seasonList) {

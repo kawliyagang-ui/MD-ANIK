@@ -59,9 +59,47 @@ data class TmdbAirEpisodeDto(
 )
 
 @JsonClass(generateAdapter = true)
+data class TmdbExternalIdsDto(
+    val id: Long = 0L,
+    @param:Json(name = "imdb_id") val imdbId: String? = null,
+    @param:Json(name = "tvdb_id") val tvdbId: Long? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbMovieDetailsDto(
+    val id: Long,
+    val title: String? = null,
+    @param:Json(name = "original_title") val originalTitle: String? = null,
+    val overview: String? = null,
+    @param:Json(name = "poster_path") val posterPath: String? = null,
+    @param:Json(name = "backdrop_path") val backdropPath: String? = null,
+    @param:Json(name = "release_date") val releaseDate: String? = null,
+    @param:Json(name = "imdb_id") val imdbId: String? = null,
+    @param:Json(name = "external_ids") val externalIds: TmdbExternalIdsDto? = null
+)
+
+data class TmdbCanonicalMetadata(
+    val tmdbId: Long,
+    val mediaType: String, // "movie" or "tv"
+    val title: String,
+    val originalTitle: String = "",
+    val releaseDate: String = "",
+    val imdbId: String = "",
+    val seasonAirDates: Map<Int, String> = emptyMap(),
+    val numberOfSeasons: Int = 1
+) {
+    val releaseYear: String
+        get() = releaseDate.take(4).takeIf { it.length == 4 && it.all(Char::isDigit) }.orEmpty()
+
+    fun seasonAirYear(season: Int): String =
+        seasonAirDates[season]?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }.orEmpty()
+}
+
+@JsonClass(generateAdapter = true)
 data class TmdbTvDetailsDto(
     val id: Long,
     val name: String? = null,
+    @param:Json(name = "original_name") val originalName: String? = null,
     val overview: String? = null,
     @param:Json(name = "poster_path") val posterPath: String? = null,
     @param:Json(name = "backdrop_path") val backdropPath: String? = null,
@@ -75,7 +113,8 @@ data class TmdbTvDetailsDto(
     @param:Json(name = "last_episode_to_air") val lastEpisodeToAir: TmdbAirEpisodeDto? = null,
     @param:Json(name = "next_episode_to_air") val nextEpisodeToAir: TmdbAirEpisodeDto? = null,
     val status: String? = null,
-    val seasons: List<TmdbSeasonSummaryDto>? = emptyList()
+    val seasons: List<TmdbSeasonSummaryDto>? = emptyList(),
+    @param:Json(name = "external_ids") val externalIds: TmdbExternalIdsDto? = null
 )
 
 @JsonClass(generateAdapter = true)

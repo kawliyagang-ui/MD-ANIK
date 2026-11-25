@@ -2525,7 +2525,13 @@ class MovieViewModel(
         episode: Int = 1,
         episodeTitle: String = ""
     ) {
-        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val rawResolved = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val resolvedTmdb = rawResolved.resolvedTmdbId()
+        val resolvedMedia = if (resolvedTmdb != null && rawResolved.tmdbId != resolvedTmdb) {
+            rawResolved.copy(tmdbId = resolvedTmdb)
+        } else {
+            rawResolved
+        }
         val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(season).orEmpty()
         val link = resolvedMedia.resolveDirectLinkForEpisode(
             season = season,
@@ -2576,7 +2582,13 @@ class MovieViewModel(
         seasonNumber: Int,
         selectedEpisodesOnly: Set<Int>? = null
     ) {
-        val resolvedMedia = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val rawResolved = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val resolvedTmdb = rawResolved.resolvedTmdbId()
+        val resolvedMedia = if (resolvedTmdb != null && rawResolved.tmdbId != resolvedTmdb) {
+            rawResolved.copy(tmdbId = resolvedTmdb)
+        } else {
+            rawResolved
+        }
         val episodesInSeason = _uiState.value.episodesByMediaAndSeason[resolvedMedia.id]?.get(seasonNumber).orEmpty()
         val episodeCount = resolvedMedia.episodesForSeason(seasonNumber)
         val allEpisodeNums = if (episodesInSeason.isNotEmpty()) {
@@ -2651,8 +2663,15 @@ class MovieViewModel(
         episode: Int = 1,
         episodeTitle: String = ""
     ) {
+        val rawResolved = CatalogOverridePolicy.resolveItemWithOverrides(media, _uiState.value.customMedia)
+        val resolvedTmdb = rawResolved.resolvedTmdbId()
+        val resolvedMedia = if (resolvedTmdb != null && rawResolved.tmdbId != resolvedTmdb) {
+            rawResolved.copy(tmdbId = resolvedTmdb)
+        } else {
+            rawResolved
+        }
         val (safeSeason, safeEpisode) = ContinueWatchingPolicy.normalizeSeasonEpisode(
-            mediaType = media.mediaType,
+            mediaType = resolvedMedia.mediaType,
             season = season,
             episode = episode
         )
@@ -2661,14 +2680,14 @@ class MovieViewModel(
             it.copy(
                 downloadSheet = DownloadSheetUiState(
                     isOpen = true,
-                    targetMedia = media,
+                    targetMedia = resolvedMedia,
                     season = safeSeason,
                     episode = safeEpisode,
                     episodeTitle = episodeTitle,
                     isLoading = true,
                     errorMessage = null,
                     bundle = null,
-                    searchQuery = media.title,
+                    searchQuery = resolvedMedia.title,
                     searchCandidates = emptyList(),
                     isSearchingCandidates = false
                 )
@@ -2678,7 +2697,7 @@ class MovieViewModel(
         val customHost = _uiState.value.downloadPrefs.movieBoxHostUrl
         downloadFetchJob = viewModelScope.launch {
             val bundleResult = repository.resolveMovieBoxDownloadBundle(
-                media = media,
+                media = resolvedMedia,
                 season = safeSeason,
                 episode = safeEpisode,
                 customHost = customHost
@@ -2891,7 +2910,8 @@ class MovieViewModel(
 
     fun openDownloadSheetForMovieBoxSubject(subject: MovieBoxSubject, season: Int = 1, episode: Int = 1) {
         val media = MediaItem(
-            id = "mb_${subject.subjectId}",
+            id = subject.tmdbId?.toString() ?: "mb_${subject.subjectId}",
+            tmdbId = subject.tmdbId,
             title = subject.title,
             overview = subject.description,
             posterPath = subject.coverUrl,

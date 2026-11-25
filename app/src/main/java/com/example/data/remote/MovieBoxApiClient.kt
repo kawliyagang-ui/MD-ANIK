@@ -7,6 +7,7 @@ import com.example.data.model.MovieBoxLanguageGroup
 import com.example.data.model.MovieBoxSubject
 import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.PreferredDownloadQuality
+import com.example.data.model.TmdbCanonicalMetadata
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -116,6 +117,8 @@ object MovieBoxApiClient {
     private val cookieStore = ConcurrentHashMap<String, MutableList<Cookie>>()
     private val h5TokenByHost = ConcurrentHashMap<String, String>()
     private val mobileTokenByHost = ConcurrentHashMap<String, String>()
+    private val subjectDetailCache = ConcurrentHashMap<String, MovieBoxSubject>()
+    private val subjectDubsCache = ConcurrentHashMap<String, List<MovieBoxSubject>>()
     @Volatile
     private var cachedGslbHosts: List<String> = emptyList()
     @Volatile
@@ -381,45 +384,40 @@ object MovieBoxApiClient {
         )
     }
 
+    data class CandidateVerificationResult(
+        val isVerifiedCompatible: Boolean,
+        val isIdVerified: Boolean,
+        val score: Int,
+        val rejectionReason: String = ""
+    )
+
     suspend fun resolveSubjectForMedia(
         media: MediaItem,
-        customHost: String = ""
-    ): Result<MovieBoxSubject> {
-        val searchResult = searchSubjects(
-            query = media.title,
-            mediaType = media.mediaType,
+        customHost: String = "",
+        season: Int = 1,
+        canonicalMetadata: TmdbCanonicalMetadata? = null
+    ): Result<MovieBoxSubject> = withContext(Dispatchers.IO) {
+        val canonical = canonicalMetadata ?: TmdbMetadataResolver.resolveForMedia(media)
+        val enrichedMedia = TmdbMetadataResolver.enrichMediaItem(media, canonical)
+        val safeSeason = if (enrichedMedia.mediaType.equals("tv", ignoreCase = true)) {
+            season.coerceAtLeast(1)
+        } else {
+            1
+        }
+        val resolution = searchAndVerifyCandidates(
+            media = enrichedMedia,
+            canonical = canonical,
+            season = safeSeason,
             customHost = customHost
         )
-        val candidates = searchResult.getOrNull().orEmpty()
-        if (candidates.isNotEmpty()) {
-            val best = pickBestSubjectCandidate(media, candidates)
-            if (best != null) return Result.success(best)
+        val best = resolution.bestSubject
+        if (best != null) {
+            return@withContext Result.success(best)
         }
-
-        if (!media.mediaType.equals("all", ignoreCase = true)) {
-            val broadResult = searchSubjects(
-                query = media.title,
-                mediaType = "all",
-                customHost = customHost
+        Result.failure(
+            resolution.error ?: NoSuchElementException(
+                buildTmdbNotFoundMessage(enrichedMedia, canonical, safeSeason)
             )
-            val broadCandidates = broadResult.getOrNull().orEmpty()
-            if (broadCandidates.isNotEmpty()) {
-                val best = pickBestSubjectCandidate(media, broadCandidates)
-                if (best != null) return Result.success(best)
-            }
-            return broadResult.fold(
-                onSuccess = {
-                    Result.failure(NoSuchElementException("No downloadable source found for \"${media.title}\"."))
-                },
-                onFailure = { Result.failure(it) }
-            )
-        }
-
-        return searchResult.fold(
-            onSuccess = {
-                Result.failure(NoSuchElementException("No downloadable source found for \"${media.title}\"."))
-            },
-            onFailure = { Result.failure(it) }
         )
     }
 
@@ -429,33 +427,33 @@ object MovieBoxApiClient {
         episode: Int = 1,
         customHost: String = ""
     ): Result<MovieBoxDownloadBundle> = withContext(Dispatchers.IO) {
-        val primarySearch = searchSubjects(
-            query = media.title,
-            mediaType = media.mediaType,
+        val canonical = TmdbMetadataResolver.resolveForMedia(media)
+        val enrichedMedia = TmdbMetadataResolver.enrichMediaItem(media, canonical)
+        val isTv = enrichedMedia.mediaType.equals("tv", ignoreCase = true)
+        val safeSeason = if (isTv) season.coerceAtLeast(1) else 1
+        val safeEpisode = if (isTv) episode.coerceAtLeast(1) else 1
+
+        val resolution = searchAndVerifyCandidates(
+            media = enrichedMedia,
+            canonical = canonical,
+            season = safeSeason,
             customHost = customHost
         )
-        var candidates = primarySearch.getOrNull().orEmpty()
-        if (candidates.isEmpty() && !media.mediaType.equals("all", ignoreCase = true)) {
-            candidates = searchSubjects(
-                query = media.title,
-                mediaType = "all",
-                customHost = customHost
-            ).getOrNull().orEmpty()
-        }
-
-        if (candidates.isEmpty()) {
-            val err = primarySearch.exceptionOrNull()
-                ?: NoSuchElementException("No downloadable source found for \"${media.title}\".")
-            return@withContext Result.failure(err)
-        }
-
-        val bestSubject = pickBestSubjectCandidate(media, candidates)
+        val bestSubject = resolution.bestSubject
             ?: return@withContext Result.failure(
-                NoSuchElementException("No downloadable source found for \"${media.title}\".")
+                resolution.error ?: NoSuchElementException(
+                    buildTmdbNotFoundMessage(enrichedMedia, canonical, safeSeason)
+                )
             )
 
-        val isTv = media.mediaType.equals("tv", ignoreCase = true) || bestSubject.subjectType == 2
-        val matchingVariants = collectSameTitleLanguageVariants(media, bestSubject, candidates)
+        val resolvedIsTv = isTv || bestSubject.subjectType == 2
+        val matchingVariants = collectSameTitleLanguageVariants(
+            media = enrichedMedia,
+            primarySubject = bestSubject,
+            candidates = resolution.candidates,
+            canonical = canonical,
+            targetSeason = safeSeason
+        )
         val detailDubs = fetchSubjectDetailDubs(bestSubject, customHost)
 
         val combinedSubjects = buildList {
@@ -467,9 +465,9 @@ object MovieBoxApiClient {
         if (combinedSubjects.size <= 1) {
             return@withContext fetchDownloadBundle(
                 subject = bestSubject,
-                season = season,
-                episode = episode,
-                isTv = isTv,
+                season = safeSeason,
+                episode = safeEpisode,
+                isTv = resolvedIsTv,
                 customHost = customHost
             )
         }
@@ -479,9 +477,9 @@ object MovieBoxApiClient {
                 async {
                     subj to fetchDownloadBundle(
                         subject = subj,
-                        season = season,
-                        episode = episode,
-                        isTv = isTv,
+                        season = safeSeason,
+                        episode = safeEpisode,
+                        isTv = resolvedIsTv,
                         customHost = customHost
                     ).getOrNull()
                 }
@@ -494,9 +492,9 @@ object MovieBoxApiClient {
         if (successfulBundles.isEmpty()) {
             return@withContext fetchDownloadBundle(
                 subject = bestSubject,
-                season = season,
-                episode = episode,
-                isTv = isTv,
+                season = safeSeason,
+                episode = safeEpisode,
+                isTv = resolvedIsTv,
                 customHost = customHost
             )
         }
@@ -505,10 +503,166 @@ object MovieBoxApiClient {
             mergeLanguageBundles(
                 primarySubject = bestSubject,
                 bundlesWithSubjects = successfulBundles,
-                season = if (isTv) season.coerceAtLeast(1) else 1,
-                episode = if (isTv) episode.coerceAtLeast(1) else 1
+                season = if (resolvedIsTv) safeSeason else 1,
+                episode = if (resolvedIsTv) safeEpisode else 1
             )
         )
+    }
+
+    private data class CandidateResolutionOutcome(
+        val bestSubject: MovieBoxSubject? = null,
+        val candidates: List<MovieBoxSubject> = emptyList(),
+        val error: Throwable? = null
+    )
+
+    private suspend fun searchAndVerifyCandidates(
+        media: MediaItem,
+        canonical: TmdbCanonicalMetadata?,
+        season: Int,
+        customHost: String
+    ): CandidateResolutionOutcome = coroutineScope {
+        val isTv = media.mediaType.equals("tv", ignoreCase = true)
+        val primaryQueries = buildPrimarySearchQueries(media, canonical)
+        val allCandidates = linkedMapOf<String, MovieBoxSubject>()
+        var lastError: Throwable? = null
+
+        suspend fun runQueryAndCollect(query: String, mediaTypeFilter: String) {
+            val res = searchSubjects(
+                query = query,
+                mediaType = mediaTypeFilter,
+                customHost = customHost
+            )
+            val found = res.getOrNull().orEmpty()
+            if (found.isNotEmpty()) {
+                found.forEach { subj ->
+                    val existing = allCandidates[subj.subjectId]
+                    allCandidates[subj.subjectId] = if (existing != null) mergeSubjectMetadata(existing, subj) else subj
+                }
+            } else if (lastError == null) {
+                lastError = res.exceptionOrNull()
+            }
+        }
+
+        for (query in primaryQueries) {
+            runQueryAndCollect(query, media.mediaType)
+            val preliminary = pickBestVerifiedSubjectCandidate(
+                media = media,
+                candidates = allCandidates.values.toList(),
+                canonical = canonical,
+                targetSeason = season
+            )
+            if (preliminary != null && (preliminary.tmdbId != null || preliminary.imdbId.isNotBlank())) {
+                break
+            }
+            if (preliminary != null && query == primaryQueries.first()) {
+                break
+            }
+        }
+
+        // For TV season > 1, if no candidate matches that specific season or is unified, also try "Title S2" / "Title Season 2"
+        if (isTv && season > 1) {
+            val hasSeasonMatchedOrUnified = allCandidates.values.any { cand ->
+                val eval = evaluateSubjectCandidate(media, cand, canonical, season)
+                if (!eval.isVerifiedCompatible) return@any false
+                val explicitSeason = extractSeasonNumberFromTitle(cand.title)
+                val range = extractSeasonRangeFromTitle(cand.title)
+                explicitSeason == season ||
+                    (range != null && season in range) ||
+                    season in cand.availableSeasons ||
+                    (explicitSeason == null && range == null)
+            }
+            if (!hasSeasonMatchedOrUnified) {
+                val baseTitle = (canonical?.title?.takeIf { it.isNotBlank() } ?: media.title).trim()
+                if (baseTitle.isNotBlank()) {
+                    for (seasonQuery in listOf("$baseTitle S$season", "$baseTitle Season $season")) {
+                        runQueryAndCollect(seasonQuery, "tv")
+                        val matched = allCandidates.values.any { cand ->
+                            val eval = evaluateSubjectCandidate(media, cand, canonical, season)
+                            eval.isVerifiedCompatible &&
+                                (extractSeasonNumberFromTitle(cand.title) == season || season in cand.availableSeasons)
+                        }
+                        if (matched) break
+                    }
+                }
+            }
+        }
+
+        // Broaden search type to "all" only if typed search yielded nothing, still keeping strict verification
+        if (allCandidates.isEmpty() && !media.mediaType.equals("all", ignoreCase = true)) {
+            for (query in primaryQueries.take(2)) {
+                runQueryAndCollect(query, "all")
+                if (allCandidates.isNotEmpty()) break
+            }
+        }
+
+        if (allCandidates.isEmpty()) {
+            return@coroutineScope CandidateResolutionOutcome(
+                bestSubject = null,
+                candidates = emptyList(),
+                error = lastError
+            )
+        }
+
+        // Inspect top plausible candidates via detail endpoints to verify tmdbId / imdbId / releaseDate / seasons
+        val rankedForDetailCheck = allCandidates.values
+            .map { cand -> cand to evaluateSubjectCandidate(media, cand, canonical, season) }
+            .filter { (_, eval) -> eval.isVerifiedCompatible }
+            .sortedByDescending { (_, eval) -> eval.score }
+            .take(3)
+            .map { (cand, _) -> cand }
+
+        if (rankedForDetailCheck.isNotEmpty()) {
+            val enrichedTop = rankedForDetailCheck.map { cand ->
+                async { fetchSubjectDetailMetadata(cand, customHost) }
+            }.awaitAll()
+            enrichedTop.forEach { enriched ->
+                val prev = allCandidates[enriched.subjectId]
+                allCandidates[enriched.subjectId] = if (prev != null) mergeSubjectMetadata(prev, enriched) else enriched
+            }
+        }
+
+        val finalList = allCandidates.values.toList()
+        val bestVerified = pickBestVerifiedSubjectCandidate(
+            media = media,
+            candidates = finalList,
+            canonical = canonical,
+            targetSeason = season
+        )
+        CandidateResolutionOutcome(
+            bestSubject = bestVerified,
+            candidates = finalList,
+            error = if (bestVerified == null) {
+                NoSuchElementException(buildTmdbNotFoundMessage(media, canonical, season))
+            } else {
+                null
+            }
+        )
+    }
+
+    private fun buildPrimarySearchQueries(
+        media: MediaItem,
+        canonical: TmdbCanonicalMetadata?
+    ): List<String> {
+        return buildList {
+            canonical?.title?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            media.title.trim().takeIf { it.isNotBlank() }?.let { add(it) }
+            canonical?.originalTitle?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }.distinctBy { it.lowercase(Locale.ROOT) }
+    }
+
+    private fun buildTmdbNotFoundMessage(
+        media: MediaItem,
+        canonical: TmdbCanonicalMetadata?,
+        season: Int
+    ): String {
+        val displayTitle = canonical?.title?.takeIf { it.isNotBlank() } ?: media.title
+        val tmdbId = canonical?.tmdbId ?: media.resolvedTmdbId()
+        val seasonSuffix = if (media.mediaType.equals("tv", ignoreCase = true) && season > 0) " (S$season)" else ""
+        return if (tmdbId != null) {
+            "No verified download matching TMDB #$tmdbId for \"$displayTitle\"$seasonSuffix."
+        } else {
+            "No downloadable source found for \"$displayTitle\"$seasonSuffix."
+        }
     }
 
     suspend fun fetchMultiLanguageDownloadBundleForSubject(
@@ -576,6 +730,11 @@ object MovieBoxApiClient {
     ): Result<MovieBoxDownloadBundle> = withContext(Dispatchers.IO) {
         val safeSeason = if (isTv) season.coerceAtLeast(1) else 0
         val safeEpisode = if (isTv) episode.coerceAtLeast(1) else 0
+        if (isTv && subject.availableSeasons.isNotEmpty() && safeSeason !in subject.availableSeasons) {
+            return@withContext Result.failure(
+                NoSuchElementException("Season $safeSeason is not available for \"${subject.title}\".")
+            )
+        }
         var resolvedDetailPath = subject.detailPath
         val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
 
@@ -675,7 +834,8 @@ object MovieBoxApiClient {
                 add("subjectId=$encodedId&se=$safeSeason&ep=$safeEpisode$querySuffix")
                 if (!isTv) {
                     add("subjectId=$encodedId&se=1&ep=1$querySuffix")
-                } else if (safeSeason > 1) {
+                } else if (safeSeason > 1 && subjectMatchesSingleSeasonOnly(subject, safeSeason)) {
+                    // Only remap se=1 when this subject itself represents that exact standalone season (e.g. "Show S2")
                     add("subjectId=$encodedId&se=1&ep=$safeEpisode$querySuffix")
                 }
             }
@@ -728,6 +888,10 @@ object MovieBoxApiClient {
                         val altMovieQuery = "subjectId=$encodedId&se=1&ep=1$querySuffix"
                         add("$host/wefeed-h5api-bff/subject/download?$altMovieQuery")
                         add("$host/wefeed-h5api-bff/subject/play?$altMovieQuery")
+                    } else if (safeSeason > 1 && subjectMatchesSingleSeasonOnly(subject, safeSeason)) {
+                        val seasonOneQuery = "subjectId=$encodedId&se=1&ep=$safeEpisode$querySuffix"
+                        add("$host/wefeed-h5api-bff/subject/download?$seasonOneQuery")
+                        add("$host/wefeed-h5api-bff/subject/play?$seasonOneQuery")
                     }
                     add("$host/wefeed-h5-api/subject/download?$primaryQuery")
                     add("$host/wefeed-h5-api/subject/play?$primaryQuery")
@@ -1166,37 +1330,14 @@ object MovieBoxApiClient {
     }
 
     private fun fetchMobileDetailPath(host: String, subject: MovieBoxSubject): String? {
-        val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
-        val endpoints = listOf(
-            "$host/wefeed-mobile-bff/subject-api/get?subjectId=$encodedId",
-            "$host/wefeed-mobile-bff/subject-api/detail?subjectId=$encodedId"
-        )
-        for (url in endpoints) {
-            val found = runCatching {
-                val (code, body) = executeMobileSigned(host = host, url = url)
-                if (code !in 200..299) return@runCatching null
-                val (detailPath, _) = parseSubjectDetailDubsJson(body, subject, host)
-                detailPath.ifBlank { null }
-            }.getOrNull()
-            if (!found.isNullOrBlank()) return found
-        }
-        return null
+        val enriched = fetchSubjectDetailFromHost(host, subject, isMobile = true)
+        return enriched?.detailPath?.ifBlank { null }
     }
 
     private fun fetchH5DetailPath(host: String, subject: MovieBoxSubject): String? {
-        val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
-        val endpoints = listOf(
-            "$host/wefeed-h5api-bff/subject/detail?subjectId=$encodedId",
-            "$host/wefeed-h5-api/subject/detail?subjectId=$encodedId"
-        )
-        for (url in endpoints) {
-            val found = runCatching {
-                val (code, body) = executeH5WithSession(host = host, url = url, referer = "$host/")
-                if (code !in 200..299) return@runCatching null
-                val (detailPath, _) = parseSubjectDetailDubsJson(body, subject, host)
-                detailPath.ifBlank { null }
-            }.getOrNull()
-            if (!found.isNullOrBlank()) return found
+        val enriched = fetchSubjectDetailFromHost(host, subject, isMobile = false)
+        if (!enriched?.detailPath.isNullOrBlank()) {
+            return enriched?.detailPath?.ifBlank { null }
         }
         if (subject.title.isNotBlank()) {
             val payload = mapAdapter.toJson(
@@ -1218,10 +1359,71 @@ object MovieBoxApiClient {
         return null
     }
 
+    private fun fetchSubjectDetailMetadata(
+        subject: MovieBoxSubject,
+        customHost: String = ""
+    ): MovieBoxSubject {
+        subjectDetailCache[subject.subjectId]?.let { cached ->
+            return mergeSubjectMetadata(subject, cached)
+        }
+        val hosts = buildList {
+            if (subject.sourceHost.isNotBlank()) add(normalizeHostUrl(subject.sourceHost))
+            addAll(candidateHosts(customHost))
+        }.distinct()
+
+        for (host in hosts.take(3)) {
+            val detailed = fetchSubjectDetailFromHost(host, subject, isMobile = isMobileBackendHost(host))
+            if (detailed != null) {
+                return mergeSubjectMetadata(subject, detailed)
+            }
+        }
+        return subject
+    }
+
+    private fun fetchSubjectDetailFromHost(
+        host: String,
+        subject: MovieBoxSubject,
+        isMobile: Boolean
+    ): MovieBoxSubject? {
+        val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
+        val endpoints = if (isMobile) {
+            listOf(
+                "$host/wefeed-mobile-bff/subject-api/get?subjectId=$encodedId",
+                "$host/wefeed-mobile-bff/subject-api/detail?subjectId=$encodedId"
+            )
+        } else {
+            listOf(
+                "$host/wefeed-h5api-bff/subject/detail?subjectId=$encodedId",
+                "$host/wefeed-h5-api/subject/detail?subjectId=$encodedId"
+            )
+        }
+        for (url in endpoints) {
+            val result = runCatching {
+                val (code, body) = if (isMobile) {
+                    executeMobileSigned(host = host, url = url)
+                } else {
+                    executeH5WithSession(host = host, url = url, referer = "$host/")
+                }
+                if (code !in 200..299) return@runCatching null
+                val parsed = parseSubjectDetailMetadataJson(body, subject, host)
+                if (parsed.dubs.isNotEmpty()) {
+                    subjectDubsCache[subject.subjectId] = parsed.dubs
+                }
+                subjectDetailCache[subject.subjectId] = parsed.subject
+                parsed.subject
+            }.getOrNull()
+            if (result != null) return result
+        }
+        return null
+    }
+
     private fun fetchSubjectDetailDubs(
         subject: MovieBoxSubject,
         customHost: String = ""
     ): List<MovieBoxSubject> {
+        subjectDubsCache[subject.subjectId]?.let { cached ->
+            if (cached.isNotEmpty()) return cached
+        }
         val encodedId = URLEncoder.encode(subject.subjectId, "UTF-8")
         val hosts = buildList {
             if (subject.sourceHost.isNotBlank()) add(normalizeHostUrl(subject.sourceHost))
@@ -1238,9 +1440,15 @@ object MovieBoxApiClient {
                     val dubs = runCatching {
                         val (code, body) = executeMobileSigned(host = host, url = url)
                         if (code !in 200..299) return@runCatching emptyList()
-                        parseSubjectDetailDubsJson(body, subject, host).second
+                        parseSubjectDetailMetadataJson(body, subject, host).let { parsed ->
+                            subjectDetailCache.putIfAbsent(subject.subjectId, parsed.subject)
+                            parsed.dubs
+                        }
                     }.getOrDefault(emptyList())
-                    if (dubs.isNotEmpty()) return dubs
+                    if (dubs.isNotEmpty()) {
+                        subjectDubsCache[subject.subjectId] = dubs
+                        return dubs
+                    }
                 }
             } else {
                 val endpoints = listOf(
@@ -1251,28 +1459,78 @@ object MovieBoxApiClient {
                     val dubs = runCatching {
                         val (code, body) = executeH5WithSession(host = host, url = url, referer = "$host/")
                         if (code !in 200..299) return@runCatching emptyList()
-                        parseSubjectDetailDubsJson(body, subject, host).second
+                        parseSubjectDetailMetadataJson(body, subject, host).let { parsed ->
+                            subjectDetailCache.putIfAbsent(subject.subjectId, parsed.subject)
+                            parsed.dubs
+                        }
                     }.getOrDefault(emptyList())
-                    if (dubs.isNotEmpty()) return dubs
+                    if (dubs.isNotEmpty()) {
+                        subjectDubsCache[subject.subjectId] = dubs
+                        return dubs
+                    }
                 }
             }
         }
         return emptyList()
     }
 
+    data class SubjectDetailMetadataResult(
+        val subject: MovieBoxSubject,
+        val dubs: List<MovieBoxSubject>
+    )
+
     fun parseSubjectDetailDubsJson(
         json: String,
         baseSubject: MovieBoxSubject,
         sourceHost: String = DEFAULT_HOST
     ): Pair<String, List<MovieBoxSubject>> {
+        val parsed = parseSubjectDetailMetadataJson(json, baseSubject, sourceHost)
+        return parsed.subject.detailPath to parsed.dubs
+    }
+
+    fun parseSubjectDetailMetadataJson(
+        json: String,
+        baseSubject: MovieBoxSubject,
+        sourceHost: String = DEFAULT_HOST
+    ): SubjectDetailMetadataResult {
         val trimmed = json.trim()
-        if (trimmed.isBlank()) return "" to emptyList()
-        val root = runCatching { mapAdapter.fromJson(trimmed) }.getOrNull() ?: return "" to emptyList()
+        if (trimmed.isBlank()) return SubjectDetailMetadataResult(baseSubject.copy(detailPath = ""), emptyList())
+        val root = runCatching { mapAdapter.fromJson(trimmed) }.getOrNull()
+            ?: return SubjectDetailMetadataResult(baseSubject.copy(detailPath = ""), emptyList())
         val data = root["data"].asMapOrNull() ?: root
         val subj = data["subject"].asMapOrNull() ?: data
         val detailPath = subj["detailPath"].asCleanString()
             .ifBlank { data["detailPath"].asCleanString() }
             .ifBlank { baseSubject.detailPath }
+
+        val parsedTmdbId = extractTmdbIdFromMap(subj) ?: extractTmdbIdFromMap(data) ?: baseSubject.tmdbId
+        val parsedImdbId = extractImdbIdFromMap(subj).ifBlank { extractImdbIdFromMap(data) }.ifBlank { baseSubject.imdbId }
+        val parsedOriginalTitle = extractOriginalTitleFromMap(subj)
+            .ifBlank { extractOriginalTitleFromMap(data) }
+            .ifBlank { baseSubject.originalTitle }
+        val parsedReleaseDate = extractReleaseDateFromMap(subj)
+            .ifBlank { extractReleaseDateFromMap(data) }
+            .ifBlank { baseSubject.releaseDate }
+        val parsedType = subj["subjectType"].asIntOrNull()
+            ?: data["subjectType"].asIntOrNull()
+            ?: baseSubject.subjectType
+        val parsedTitle = subj["title"].asCleanString()
+            .ifBlank { subj["name"].asCleanString() }
+            .ifBlank { baseSubject.title }
+        val parsedSeasons = extractAvailableSeasonsFromDetail(data, subj)
+            .ifEmpty { baseSubject.availableSeasons }
+
+        val enrichedSubject = baseSubject.copy(
+            title = parsedTitle,
+            subjectType = parsedType,
+            releaseDate = parsedReleaseDate,
+            detailPath = detailPath,
+            sourceHost = sourceHost.ifBlank { baseSubject.sourceHost },
+            tmdbId = parsedTmdbId,
+            imdbId = parsedImdbId,
+            originalTitle = parsedOriginalTitle,
+            availableSeasons = parsedSeasons
+        )
 
         val rawDubs = buildList {
             addAll(subj["dubs"].asMapListOrEmpty())
@@ -1292,7 +1550,7 @@ object MovieBoxApiClient {
                 .ifBlank { dub["lanCode"].asCleanString() }
             val normalizedLang = normalizeLanguageLabel(rawLang)
             val dubPath = dub["detailPath"].asCleanString().ifBlank { detailPath }
-            baseSubject.copy(
+            enrichedSubject.copy(
                 subjectId = dubId,
                 detailPath = dubPath,
                 sourceHost = sourceHost,
@@ -1300,7 +1558,7 @@ object MovieBoxApiClient {
             )
         }.distinctBy { it.subjectId }
 
-        return detailPath to dubSubjects
+        return SubjectDetailMetadataResult(enrichedSubject, dubSubjects)
     }
 
     private fun buildH5BaseRequest(
@@ -1361,7 +1619,7 @@ object MovieBoxApiClient {
         return items.groupBy { it.subjectId }
             .values
             .map { group ->
-                group.minByOrNull { item ->
+                val preferred = group.minByOrNull { item ->
                     val title = item.title
                     when {
                         Regex("\\bS1\\b", RegexOption.IGNORE_CASE).containsMatchIn(title) -> 0
@@ -1369,6 +1627,7 @@ object MovieBoxApiClient {
                         else -> 2
                     }
                 } ?: group.first()
+                group.fold(preferred) { acc, next -> mergeSubjectMetadata(acc, next) }
             }
     }
 
@@ -1411,14 +1670,17 @@ object MovieBoxApiClient {
                 subjectType = rawSubjectType,
                 title = title,
                 description = item["description"].asCleanString().ifBlank { item["overview"].asCleanString() },
-                releaseDate = item["releaseDate"].asCleanString(),
+                releaseDate = extractReleaseDateFromMap(item),
                 imdbRating = item["imdbRatingValue"].asCleanString()
                     .ifBlank { item["imdbRating"].asCleanString() },
                 detailPath = item["detailPath"].asCleanString(),
                 coverUrl = coverUrl,
                 hasResource = item["hasResource"] as? Boolean ?: true,
                 sourceHost = sourceHost,
-                language = normalizeLanguageLabel(rawLang)
+                language = normalizeLanguageLabel(rawLang),
+                tmdbId = extractTmdbIdFromMap(item),
+                imdbId = extractImdbIdFromMap(item),
+                originalTitle = extractOriginalTitleFromMap(item)
             )
         }
     }
@@ -1628,18 +1890,61 @@ object MovieBoxApiClient {
     fun collectSameTitleLanguageVariants(
         media: MediaItem,
         primarySubject: MovieBoxSubject,
-        candidates: List<MovieBoxSubject>
+        candidates: List<MovieBoxSubject>,
+        canonical: TmdbCanonicalMetadata? = null,
+        targetSeason: Int = 1
     ): List<MovieBoxSubject> {
-        val baseMediaTitle = normalizeTitle(stripTitleLanguageAndSeason(media.title))
-        val basePrimaryTitle = normalizeTitle(stripTitleLanguageAndSeason(primarySubject.title))
+        val targetTitles = buildTargetTitleSet(media, canonical, primarySubject)
         val expectedType = primarySubject.subjectType
+        val targetTmdbId = canonical?.tmdbId ?: media.resolvedTmdbId() ?: primarySubject.tmdbId
+        val targetImdbId = canonical?.imdbId?.ifBlank { primarySubject.imdbId } ?: primarySubject.imdbId
+        val isTv = expectedType == 2
+        val primaryExplicitSeason = if (isTv) extractSeasonNumberFromTitle(primarySubject.title) else null
+
         return candidates.filter { cand ->
             if (cand.subjectId == primarySubject.subjectId) return@filter false
             if (cand.subjectType != expectedType) return@filter false
-            val candBase = normalizeTitle(stripTitleLanguageAndSeason(cand.title))
-            val titleMatches = candBase.isNotBlank() &&
-                (candBase == basePrimaryTitle || candBase == baseMediaTitle)
-            if (!titleMatches) return@filter false
+
+            // Reject explicit external ID conflicts
+            if (targetTmdbId != null && cand.tmdbId != null && cand.tmdbId != targetTmdbId) {
+                return@filter false
+            }
+            if (targetImdbId.isNotBlank() && cand.imdbId.isNotBlank() &&
+                !cand.imdbId.equals(targetImdbId, ignoreCase = true)
+            ) {
+                return@filter false
+            }
+
+            // If TV season differs explicitly, do not merge another season's dub
+            if (isTv) {
+                val candExplicitSeason = extractSeasonNumberFromTitle(cand.title)
+                if (candExplicitSeason != null && candExplicitSeason != targetSeason &&
+                    targetSeason !in cand.availableSeasons
+                ) {
+                    return@filter false
+                }
+                if (primaryExplicitSeason != null && candExplicitSeason != null &&
+                    primaryExplicitSeason != candExplicitSeason
+                ) {
+                    return@filter false
+                }
+            }
+
+            val idsExplicitlyMatch = (targetTmdbId != null && cand.tmdbId == targetTmdbId) ||
+                (targetImdbId.isNotBlank() && cand.imdbId.equals(targetImdbId, ignoreCase = true))
+
+            if (!idsExplicitlyMatch) {
+                // Reject incompatible release year for homonyms/remakes
+                if (!isReleaseYearCompatible(media, cand, canonical, targetSeason, isTv)) {
+                    return@filter false
+                }
+                val candBase = normalizeTitle(stripTitleLanguageAndSeason(cand.title))
+                val candOrigBase = normalizeTitle(stripTitleLanguageAndSeason(cand.originalTitle))
+                val titleMatches = (candBase.isNotBlank() && candBase in targetTitles) ||
+                    (candOrigBase.isNotBlank() && candOrigBase in targetTitles)
+                if (!titleMatches) return@filter false
+            }
+
             cand.language.isNotBlank() || extractLanguageFromTitle(cand.title).isNotBlank()
         }
     }
@@ -1743,37 +2048,381 @@ object MovieBoxApiClient {
         media: MediaItem,
         candidates: List<MovieBoxSubject>
     ): MovieBoxSubject? {
-        return candidates.maxByOrNull { scoreSubjectCandidate(media, it) }
+        return pickBestVerifiedSubjectCandidate(
+            media = media,
+            candidates = candidates,
+            canonical = null,
+            targetSeason = 1
+        )
+    }
+
+    fun pickBestVerifiedSubjectCandidate(
+        media: MediaItem,
+        candidates: List<MovieBoxSubject>,
+        canonical: TmdbCanonicalMetadata? = null,
+        targetSeason: Int = 1
+    ): MovieBoxSubject? {
+        return candidates
+            .asSequence()
+            .map { cand -> cand to evaluateSubjectCandidate(media, cand, canonical, targetSeason) }
+            .filter { (_, eval) -> eval.isVerifiedCompatible }
+            .maxByOrNull { (_, eval) -> eval.score }
+            ?.first
     }
 
     fun scoreSubjectCandidate(media: MediaItem, candidate: MovieBoxSubject): Int {
-        var score = 0
-        val normMediaTitle = normalizeTitle(media.title)
-        val normCandTitle = normalizeTitle(candidate.title)
-        val normCandStripped = normalizeTitle(stripTitleLanguageAndSeason(candidate.title))
-        when {
-            normMediaTitle == normCandTitle -> score += 105
-            normMediaTitle == normCandStripped -> score += 95
-            normCandTitle.startsWith(normMediaTitle) || normMediaTitle.startsWith(normCandTitle) -> score += 65
-            normCandTitle.contains(normMediaTitle) || normMediaTitle.contains(normCandTitle) -> score += 40
+        return evaluateSubjectCandidate(
+            media = media,
+            candidate = candidate,
+            canonical = null,
+            targetSeason = 1
+        ).score
+    }
+
+    fun evaluateSubjectCandidate(
+        media: MediaItem,
+        candidate: MovieBoxSubject,
+        canonical: TmdbCanonicalMetadata? = null,
+        targetSeason: Int = 1
+    ): CandidateVerificationResult {
+        val isTv = media.mediaType.equals("tv", ignoreCase = true)
+        val expectedType = if (isTv) 2 else 1
+        val targetTmdbId = canonical?.tmdbId ?: media.resolvedTmdbId()
+        val targetImdbId = canonical?.imdbId.orEmpty()
+
+        // 1. Media Type Gate (TMDB movie IDs and TV IDs are separate namespaces)
+        if (candidate.subjectType != expectedType) {
+            return CandidateVerificationResult(
+                isVerifiedCompatible = false,
+                isIdVerified = false,
+                score = -10_000,
+                rejectionReason = "Media type mismatch (expected $expectedType, got ${candidate.subjectType})"
+            )
         }
 
-        val expectedType = if (media.mediaType.equals("tv", ignoreCase = true)) 2 else 1
-        if (candidate.subjectType == expectedType) score += 30
+        // 2. Explicit TMDB ID Verification
+        var score = 0
+        var isIdVerified = false
+        if (targetTmdbId != null && candidate.tmdbId != null) {
+            if (candidate.tmdbId != targetTmdbId) {
+                return CandidateVerificationResult(
+                    isVerifiedCompatible = false,
+                    isIdVerified = false,
+                    score = -10_000,
+                    rejectionReason = "TMDB ID mismatch (expected $targetTmdbId, got ${candidate.tmdbId})"
+                )
+            }
+            score += 10_000
+            isIdVerified = true
+        }
 
-        val mediaYear = media.releaseDate.take(4)
-        if (mediaYear.length == 4 && candidate.releaseYear.length == 4) {
-            if (mediaYear == candidate.releaseYear) {
-                score += 25
-            } else {
-                val diff = abs((mediaYear.toIntOrNull() ?: 0) - (candidate.releaseYear.toIntOrNull() ?: 0))
-                if (diff <= 1) score += 10
+        // 3. Explicit IMDb ID Verification (derived from TMDB external_ids)
+        if (targetImdbId.isNotBlank() && candidate.imdbId.isNotBlank()) {
+            if (!candidate.imdbId.equals(targetImdbId, ignoreCase = true)) {
+                return CandidateVerificationResult(
+                    isVerifiedCompatible = false,
+                    isIdVerified = false,
+                    score = -10_000,
+                    rejectionReason = "IMDb ID mismatch (expected $targetImdbId, got ${candidate.imdbId})"
+                )
+            }
+            score += 8_000
+            isIdVerified = true
+        }
+
+        // 4. Title Verification across canonical English title, media title, and original title
+        val targetTitleVariants = buildList {
+            media.title.trim().takeIf { it.isNotBlank() }?.let { add(it) }
+            canonical?.title?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            canonical?.originalTitle?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }.distinct()
+
+        val candTitles = listOf(candidate.title, candidate.originalTitle)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        var bestTitleScore = 0
+        for (rawTarget in targetTitleVariants) {
+            val normTarget = normalizeTitle(rawTarget)
+            val normTargetStripped = normalizeTitle(stripTitleLanguageAndSeason(rawTarget))
+            if (normTarget.isBlank() && normTargetStripped.isBlank()) continue
+            for (rawCand in candTitles) {
+                val normCand = normalizeTitle(rawCand)
+                val normCandStripped = normalizeTitle(stripTitleLanguageAndSeason(rawCand))
+                val s = when {
+                    normTarget == normCand -> 105
+                    normTarget == normCandStripped || normTargetStripped == normCandStripped -> 95
+                    normCandStripped.startsWith(normTargetStripped) || normTargetStripped.startsWith(normCandStripped) -> 65
+                    normCand.startsWith(normTarget) || normTarget.startsWith(normCand) -> 65
+                    normCandStripped.contains(normTargetStripped) || normTargetStripped.contains(normCandStripped) -> 40
+                    else -> 0
+                }
+                if (s > bestTitleScore) bestTitleScore = s
+            }
+        }
+        score += bestTitleScore
+
+        if (!isIdVerified) {
+            // Reject auxiliary spin-off / documentary / behind-the-scenes clips unless target itself asks for them
+            val combinedTargetLower = targetTitleVariants.joinToString(" ").lowercase(Locale.ROOT)
+            val candLower = candidate.title.lowercase(Locale.ROOT)
+            val noiseKeywords = listOf("making of", "behind the scenes", "documentary", "trailer", "recap", "explained")
+            if (noiseKeywords.any { kw -> kw in candLower && kw !in combinedTargetLower }) {
+                return CandidateVerificationResult(
+                    isVerifiedCompatible = false,
+                    isIdVerified = false,
+                    score = -5_000,
+                    rejectionReason = "Auxiliary video title rejected: ${candidate.title}"
+                )
+            }
+            if (bestTitleScore < 65) {
+                return CandidateVerificationResult(
+                    isVerifiedCompatible = false,
+                    isIdVerified = false,
+                    score = score,
+                    rejectionReason = "Title mismatch for \"${candidate.title}\""
+                )
+            }
+        }
+
+        // 5. Media Type Bonus
+        score += 30
+
+        // 6. Release Year Verification
+        val yearScore = computeReleaseYearScore(media, candidate, canonical, targetSeason, isTv)
+        if (!isIdVerified && yearScore < 0) {
+            return CandidateVerificationResult(
+                isVerifiedCompatible = false,
+                isIdVerified = false,
+                score = score + yearScore,
+                rejectionReason = "Release year mismatch (${candidate.releaseYear})"
+            )
+        }
+        score += yearScore.coerceAtLeast(0)
+
+        // 7. TV Season Verification
+        if (isTv) {
+            val safeSeason = targetSeason.coerceAtLeast(1)
+            if (candidate.availableSeasons.isNotEmpty() && safeSeason !in candidate.availableSeasons) {
+                return CandidateVerificationResult(
+                    isVerifiedCompatible = false,
+                    isIdVerified = isIdVerified,
+                    score = score - 500,
+                    rejectionReason = "Season $safeSeason unavailable on subject ${candidate.subjectId}"
+                )
+            }
+            val explicitSeason = extractSeasonNumberFromTitle(candidate.title)
+            val seasonRange = extractSeasonRangeFromTitle(candidate.title)
+            when {
+                explicitSeason == safeSeason -> score += 160
+                seasonRange != null && safeSeason in seasonRange -> score += 120
+                safeSeason in candidate.availableSeasons -> score += 100
+                explicitSeason != null && explicitSeason != safeSeason -> {
+                    // Explicitly represents a DIFFERENT single season (e.g. S1 when user wants S2)
+                    if (candidate.availableSeasons.isEmpty()) {
+                        return CandidateVerificationResult(
+                            isVerifiedCompatible = false,
+                            isIdVerified = isIdVerified,
+                            score = score - 500,
+                            rejectionReason = "Candidate is Season $explicitSeason, requested Season $safeSeason"
+                        )
+                    } else {
+                        score -= 100
+                    }
+                }
+                seasonRange != null && safeSeason !in seasonRange -> {
+                    return CandidateVerificationResult(
+                        isVerifiedCompatible = false,
+                        isIdVerified = isIdVerified,
+                        score = score - 500,
+                        rejectionReason = "Candidate covers $seasonRange, requested Season $safeSeason"
+                    )
+                }
             }
         }
 
         if (candidate.hasResource) score += 20
         if (candidate.detailPath.isNotBlank()) score += 5
-        return score
+
+        return CandidateVerificationResult(
+            isVerifiedCompatible = true,
+            isIdVerified = isIdVerified,
+            score = score
+        )
+    }
+
+    private fun computeReleaseYearScore(
+        media: MediaItem,
+        candidate: MovieBoxSubject,
+        canonical: TmdbCanonicalMetadata?,
+        targetSeason: Int,
+        isTv: Boolean
+    ): Int {
+        val candYearInt = candidate.releaseYear.toIntOrNull() ?: return 0
+        val targetYears = buildSet {
+            media.releaseDate.take(4).toIntOrNull()?.let { add(it) }
+            canonical?.releaseYear?.toIntOrNull()?.let { add(it) }
+            if (isTv) {
+                canonical?.seasonAirYear(targetSeason)?.toIntOrNull()?.let { add(it) }
+            }
+        }
+        if (targetYears.isEmpty()) return 0
+
+        val minDiff = targetYears.minOf { abs(it - candYearInt) }
+        return when {
+            minDiff == 0 -> 25
+            minDiff == 1 -> 10
+            isTv -> {
+                val firstAirYear = listOfNotNull(
+                    canonical?.releaseYear?.toIntOrNull(),
+                    media.releaseDate.take(4).toIntOrNull()
+                ).minOrNull()
+                val explicitSeason = extractSeasonNumberFromTitle(candidate.title)
+                if (firstAirYear != null && candYearInt >= firstAirYear - 1 &&
+                    (explicitSeason == null || explicitSeason == targetSeason || targetSeason > 1)
+                ) {
+                    5
+                } else {
+                    -100
+                }
+            }
+            else -> -100
+        }
+    }
+
+    private fun isReleaseYearCompatible(
+        media: MediaItem,
+        candidate: MovieBoxSubject,
+        canonical: TmdbCanonicalMetadata?,
+        targetSeason: Int,
+        isTv: Boolean
+    ): Boolean = computeReleaseYearScore(media, candidate, canonical, targetSeason, isTv) >= 0
+
+    private fun buildTargetTitleSet(
+        media: MediaItem,
+        canonical: TmdbCanonicalMetadata?,
+        primarySubject: MovieBoxSubject? = null
+    ): Set<String> {
+        return buildSet {
+            listOfNotNull(
+                media.title,
+                canonical?.title,
+                canonical?.originalTitle,
+                primarySubject?.title,
+                primarySubject?.originalTitle
+            ).forEach { raw ->
+                val norm = normalizeTitle(stripTitleLanguageAndSeason(raw))
+                if (norm.isNotBlank()) add(norm)
+            }
+        }
+    }
+
+    private fun mergeSubjectMetadata(base: MovieBoxSubject, incoming: MovieBoxSubject): MovieBoxSubject {
+        return base.copy(
+            title = base.title.ifBlank { incoming.title },
+            description = base.description.ifBlank { incoming.description },
+            releaseDate = base.releaseDate.ifBlank { incoming.releaseDate },
+            imdbRating = base.imdbRating.ifBlank { incoming.imdbRating },
+            detailPath = incoming.detailPath.ifBlank { base.detailPath },
+            coverUrl = base.coverUrl.ifBlank { incoming.coverUrl },
+            sourceHost = incoming.sourceHost.ifBlank { base.sourceHost },
+            language = base.language.ifBlank { incoming.language },
+            tmdbId = incoming.tmdbId ?: base.tmdbId,
+            imdbId = incoming.imdbId.ifBlank { base.imdbId },
+            originalTitle = incoming.originalTitle.ifBlank { base.originalTitle },
+            availableSeasons = incoming.availableSeasons.ifEmpty { base.availableSeasons }
+        )
+    }
+
+    private fun extractTmdbIdFromMap(map: Map<String, Any?>): Long? {
+        val direct = listOf("tmdbId", "tmdb_id", "tmdb", "externalTmdbId", "tmdbMovieId", "tmdbTvId")
+            .firstNotNullOfOrNull { key -> map[key].asLongOrNull()?.takeIf { it > 0L } }
+        if (direct != null) return direct
+        val nestedMaps = listOfNotNull(
+            map["externalIds"].asMapOrNull(),
+            map["external_ids"].asMapOrNull(),
+            map["ids"].asMapOrNull()
+        )
+        for (nested in nestedMaps) {
+            val found = listOf("tmdbId", "tmdb_id", "tmdb")
+                .firstNotNullOfOrNull { key -> nested[key].asLongOrNull()?.takeIf { it > 0L } }
+            if (found != null) return found
+        }
+        return null
+    }
+
+    private fun extractImdbIdFromMap(map: Map<String, Any?>): String {
+        val direct = listOf("imdbId", "imdb_id", "imdb", "externalImdbId")
+            .map { map[it].asCleanString() }
+            .firstOrNull { it.startsWith("tt", ignoreCase = true) }
+        if (!direct.isNullOrBlank()) return direct.lowercase(Locale.ROOT)
+        val nestedMaps = listOfNotNull(
+            map["externalIds"].asMapOrNull(),
+            map["external_ids"].asMapOrNull(),
+            map["ids"].asMapOrNull()
+        )
+        for (nested in nestedMaps) {
+            val found = listOf("imdbId", "imdb_id", "imdb")
+                .map { nested[it].asCleanString() }
+                .firstOrNull { it.startsWith("tt", ignoreCase = true) }
+            if (!found.isNullOrBlank()) return found.lowercase(Locale.ROOT)
+        }
+        return ""
+    }
+
+    private fun extractOriginalTitleFromMap(map: Map<String, Any?>): String {
+        return listOf("originalTitle", "original_title", "oriTitle", "originTitle", "originalName", "original_name")
+            .map { map[it].asCleanString() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun extractReleaseDateFromMap(map: Map<String, Any?>): String {
+        return listOf("releaseDate", "release_date", "firstAirDate", "first_air_date", "year")
+            .map { map[it].asCleanString() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun extractAvailableSeasonsFromDetail(
+        data: Map<String, Any?>,
+        subj: Map<String, Any?>
+    ): List<Int> {
+        val resourceMap = data["resource"].asMapOrNull()
+        val rawLists = buildList {
+            addAll(resourceMap?.get("seasons").asMapListOrEmpty())
+            addAll(subj["seasons"].asMapListOrEmpty())
+            addAll(data["seasons"].asMapListOrEmpty())
+            addAll(data["seasonList"].asMapListOrEmpty())
+        }
+        return rawLists.mapNotNull { entry ->
+            entry["se"].asIntOrNull()
+                ?: entry["season"].asIntOrNull()
+                ?: entry["seasonNumber"].asIntOrNull()
+                ?: entry["season_number"].asIntOrNull()
+        }.filter { it > 0 }.distinct().sorted()
+    }
+
+    fun extractSeasonRangeFromTitle(title: String): IntRange? {
+        val sRange = Regex("\\bS(\\d+)\\s*-\\s*S?(\\d+)\\b", RegexOption.IGNORE_CASE).find(title)
+            ?: Regex("\\bSeason\\s*(\\d+)\\s*-\\s*(\\d+)\\b", RegexOption.IGNORE_CASE).find(title)
+            ?: return null
+        val start = sRange.groupValues[1].toIntOrNull() ?: return null
+        val end = sRange.groupValues[2].toIntOrNull() ?: return null
+        return if (start in 1..end) start..end else null
+    }
+
+    fun extractSeasonNumberFromTitle(title: String): Int? {
+        if (extractSeasonRangeFromTitle(title) != null) return null
+        val match = Regex("\\bS(\\d+)\\b", RegexOption.IGNORE_CASE).find(title)
+            ?: Regex("\\bSeason\\s*(\\d+)\\b", RegexOption.IGNORE_CASE).find(title)
+            ?: return null
+        return match.groupValues[1].toIntOrNull()?.takeIf { it > 0 }
+    }
+
+    fun subjectMatchesSingleSeasonOnly(subject: MovieBoxSubject, targetSeason: Int): Boolean {
+        val explicitSeason = extractSeasonNumberFromTitle(subject.title)
+        return explicitSeason != null && explicitSeason == targetSeason
     }
 
     fun pickOptionForPreferredQuality(
