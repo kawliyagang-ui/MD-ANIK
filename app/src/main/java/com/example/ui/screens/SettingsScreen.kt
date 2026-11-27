@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,13 +59,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -104,11 +101,13 @@ import com.example.data.model.AppLanguageOption
 import com.example.data.model.PlayerServer
 import com.example.data.model.PreferredDownloadQuality
 import com.example.data.notifications.EpisodeNotificationHelper
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineDialogEntryBox
 import com.example.ui.components.CineEase
+import com.example.ui.components.RedButton
 import com.example.ui.components.cinePressScale
 import com.example.ui.theme.AccentColorOption
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 import com.example.ui.theme.DarkThemePalette
 import com.example.ui.theme.ThemeMode
 import com.example.ui.theme.paletteColorsFor
@@ -149,8 +148,8 @@ fun SettingsScreen(
     onTestMovieBoxHost: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val bottomClearance = CinetraTheme.bottomBarClearance
 
     var hasNotifPermission by remember {
         mutableStateOf(EpisodeNotificationHelper.hasNotificationPermission(context))
@@ -170,28 +169,36 @@ fun SettingsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .testTag("settings_screen"),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 28.dp,
+            bottom = bottomClearance + 24.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Screen Header
         item(key = "settings_header", contentType = "header") {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(gradients.softBadge),
+                        .size(44.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(colors.surface)
+                        .border(1.dp, colors.border, MaterialTheme.shapes.small),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = colors.primary,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -205,7 +212,7 @@ fun SettingsScreen(
                     Text(
                         text = stringResource(id = R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.textSecondary
+                        color = colors.textMuted
                     )
                 }
             }
@@ -217,17 +224,16 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(MaterialTheme.shapes.small)
                         .background(colors.success.copy(alpha = 0.14f))
-                        .border(1.dp, colors.success.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .border(1.dp, colors.success.copy(alpha = 0.45f), MaterialTheme.shapes.small)
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = feedbackMessage.orEmpty(),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                         color = colors.textPrimary,
                         modifier = Modifier.weight(1f)
                     )
@@ -247,10 +253,10 @@ fun SettingsScreen(
         item(key = "settings_appearance_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -261,79 +267,58 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Palette,
                             contentDescription = null,
-                            tint = colors.gold,
+                            tint = colors.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource(id = R.string.settings_appearance_heading),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.textPrimary
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Theme Mode",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.textSecondary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            val selected = themeMode == mode
-                            val modeIcon = when (mode) {
-                                ThemeMode.DARK -> Icons.Default.DarkMode
-                                ThemeMode.LIGHT -> Icons.Default.LightMode
-                                ThemeMode.SYSTEM -> Icons.Default.PhoneAndroid
-                            }
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSelectThemeMode(mode) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = modeIcon,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = when (mode) {
-                                            ThemeMode.DARK -> "Dark"
-                                            ThemeMode.LIGHT -> "Light"
-                                            ThemeMode.SYSTEM -> "System"
-                                        },
-                                        fontSize = 12.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.primary,
-                                    selectedLabelColor = Color.White,
-                                    selectedLeadingIconColor = Color.White,
-                                    containerColor = colors.surfaceElevated,
-                                    labelColor = colors.textPrimary
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_theme_mode_${mode.storageKey}")
-                            )
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
+                        text = "Theme Mode",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            val modeIcon = when (mode) {
+                                ThemeMode.DARK -> Icons.Default.DarkMode
+                                ThemeMode.LIGHT -> Icons.Default.LightMode
+                                ThemeMode.SYSTEM -> Icons.Default.PhoneAndroid
+                            }
+                            val label = when (mode) {
+                                ThemeMode.DARK -> "Dark"
+                                ThemeMode.LIGHT -> "Light"
+                                ThemeMode.SYSTEM -> "System"
+                            }
+                            CategoryPill(
+                                label = label,
+                                selected = themeMode == mode,
+                                leadingIcon = modeIcon,
+                                onClick = { onSelectThemeMode(mode) },
+                                modifier = Modifier.testTag("settings_theme_mode_${mode.storageKey}")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
                         text = "Accent Color (${accentColor.displayName})",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.textSecondary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -348,6 +333,7 @@ fun SettingsScreen(
                             Box(
                                 modifier = Modifier
                                     .size(40.dp)
+                                    .minimumInteractiveComponentSize()
                                     .clip(CircleShape)
                                     .background(option.primaryColor)
                                     .border(
@@ -363,7 +349,7 @@ fun SettingsScreen(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = option.displayName,
-                                        tint = Color.White,
+                                        tint = colors.onPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -371,15 +357,15 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     // Quick User-Facing High-Readability Palette Toggle
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MaterialTheme.shapes.small)
                             .background(colors.surfaceElevated)
-                            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+                            .border(1.dp, colors.border, MaterialTheme.shapes.small)
                             .clickable(role = Role.Switch) { onToggleHighReadability() }
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                             .testTag("settings_readability_toggle_row"),
@@ -400,7 +386,7 @@ fun SettingsScreen(
                                 Icon(
                                     imageVector = Icons.Default.Contrast,
                                     contentDescription = null,
-                                    tint = colors.softRose,
+                                    tint = colors.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -417,8 +403,8 @@ fun SettingsScreen(
                                         id = R.string.settings_readability_toggle_desc,
                                         selectedPalette.displayName
                                     ),
-                                    fontSize = 11.sp,
-                                    color = colors.textSecondary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textMuted,
                                     lineHeight = 15.sp
                                 )
                             }
@@ -430,7 +416,7 @@ fun SettingsScreen(
                             checked = selectedPalette.isHighReadability,
                             onCheckedChange = { onToggleHighReadability() },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
+                                checkedThumbColor = colors.onPrimary,
                                 checkedTrackColor = colors.primary,
                                 uncheckedThumbColor = colors.textSecondary,
                                 uncheckedTrackColor = colors.surfaceHover
@@ -443,8 +429,7 @@ fun SettingsScreen(
 
                     Text(
                         text = stringResource(id = R.string.settings_palette_picker_label),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.textSecondary
                     )
 
@@ -470,10 +455,10 @@ fun SettingsScreen(
         item(key = "settings_language_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -484,21 +469,21 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Language,
                             contentDescription = null,
-                            tint = colors.info,
+                            tint = colors.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Catalog & Metadata Language",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.textPrimary
                         )
                     }
                     Text(
                         text = "Titles, descriptions & episode names refresh in your selected language.",
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textMuted,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                     )
 
                     FlowRow(
@@ -506,23 +491,10 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         AppLanguageOption.entries.forEach { lang ->
-                            val selected = appLanguage == lang
-                            FilterChip(
-                                selected = selected,
+                            CategoryPill(
+                                label = lang.nativeLabel,
+                                selected = appLanguage == lang,
                                 onClick = { onSelectAppLanguage(lang) },
-                                label = {
-                                    Text(
-                                        text = lang.nativeLabel,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.accentMid,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = colors.surfaceElevated,
-                                    labelColor = colors.textPrimary
-                                ),
                                 modifier = Modifier.testTag("settings_lang_${lang.tmdbCode}")
                             )
                         }
@@ -535,10 +507,10 @@ fun SettingsScreen(
         item(key = "settings_notifications_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -549,21 +521,21 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.NotificationsActive,
                             contentDescription = null,
-                            tint = colors.softRose,
+                            tint = colors.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "New Episode & Movie Notifications",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.textPrimary
                         )
                     }
                     Text(
                         text = "Get notified when followed Watchlist series air new episodes or new movies arrive.",
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textMuted,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                     )
 
                     NotificationToggleRow(
@@ -620,19 +592,19 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission) {
-                        Button(
+                        RedButton(
                             onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = colors.primary,
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp),
+                            fillWidth = true,
+                            minHeight = 48.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp)
                                 .testTag("settings_request_notif_permission")
                         ) {
-                            Text("Grant Notification Permission", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Grant Notification Permission",
+                                fontWeight = FontWeight.Bold,
+                                color = colors.onPrimary
+                            )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -645,7 +617,12 @@ fun SettingsScreen(
                                 onCheckReleasesNow()
                             }
                         },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -654,7 +631,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.NotificationsActive,
                             contentDescription = null,
-                            tint = colors.gold,
+                            tint = colors.primary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -673,10 +650,10 @@ fun SettingsScreen(
         item(key = "settings_server_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -687,21 +664,21 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Dns,
                             contentDescription = null,
-                            tint = colors.softRose,
+                            tint = colors.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource(id = R.string.settings_playback_heading),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.textPrimary
                         )
                     }
                     Text(
                         text = stringResource(id = R.string.settings_playback_subtitle),
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textMuted,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
                     )
 
                     val visibleServers = remember {
@@ -715,7 +692,7 @@ fun SettingsScreen(
                                 .minimumInteractiveComponentSize()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (isSelected) colors.primaryContainer.copy(alpha = 0.65f)
+                                    if (isSelected) colors.surfaceElevated
                                     else Color.Transparent
                                 )
                                 .clickable(role = Role.RadioButton) { onSelectDefaultServer(server) }
@@ -741,14 +718,14 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = server.speed,
-                                    fontSize = 11.sp,
-                                    color = colors.textSecondary
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textMuted
                                 )
                             }
                         }
                         if (index < visibleServers.lastIndex) {
                             HorizontalDivider(
-                                color = colors.border.copy(alpha = 0.45f),
+                                color = colors.border,
                                 modifier = Modifier.padding(vertical = 2.dp)
                             )
                         }
@@ -768,10 +745,10 @@ fun SettingsScreen(
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -783,29 +760,28 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.CloudDownload,
                             contentDescription = null,
-                            tint = colors.softRose,
+                            tint = colors.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Offline Downloads",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleMedium,
                                 color = colors.textPrimary
                             )
                             Text(
                                 text = "$downloadsCount saved items • Manage download quality & network rules",
-                                fontSize = 12.sp,
-                                color = colors.textSecondary
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textMuted
                             )
                         }
                     }
 
                     Text(
                         text = "Preferred Video Quality",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.textPrimary
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textSecondary
                     )
                     Row(
                         modifier = Modifier
@@ -814,7 +790,8 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         PreferredDownloadQuality.entries.forEach { q ->
-                            FilterChip(
+                            CategoryPill(
+                                label = q.displayName,
                                 selected = qualitySelection == q,
                                 onClick = {
                                     qualitySelection = q
@@ -823,8 +800,7 @@ fun SettingsScreen(
                                         q,
                                         wifiOnlySelection
                                     )
-                                },
-                                label = { Text(q.displayName, fontSize = 11.sp) }
+                                }
                             )
                         }
                     }
@@ -846,7 +822,12 @@ fun SettingsScreen(
 
                     OutlinedButton(
                         onClick = onOpenDownloads,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -855,7 +836,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Download,
                             contentDescription = null,
-                            tint = colors.softRose,
+                            tint = colors.primary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -874,10 +855,10 @@ fun SettingsScreen(
         item(key = "settings_library_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(
                     modifier = Modifier
@@ -886,7 +867,7 @@ fun SettingsScreen(
                 ) {
                     Text(
                         text = stringResource(id = R.string.settings_library_heading),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium,
                         color = colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(10.dp))
@@ -920,7 +901,14 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = onClearSearchHistory,
                         enabled = searchHistoryCount > 0,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary,
+                            disabledContainerColor = colors.surfaceElevated.copy(alpha = 0.5f),
+                            disabledContentColor = colors.textMuted
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -929,7 +917,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.DeleteSweep,
                             contentDescription = null,
-                            tint = if (searchHistoryCount > 0) colors.softRose else colors.textMuted,
+                            tint = if (searchHistoryCount > 0) colors.primary else colors.textMuted,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -949,7 +937,12 @@ fun SettingsScreen(
 
                     OutlinedButton(
                         onClick = onClearCache,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -958,7 +951,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.CleaningServices,
                             contentDescription = null,
-                            tint = colors.gold,
+                            tint = colors.textSecondary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -977,46 +970,46 @@ fun SettingsScreen(
         item(key = "settings_support_card", contentType = "settings_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = colors.surface),
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(
                         text = "Support & Legal",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium,
                         color = colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
                     SettingsActionRow(
                         icon = Icons.Default.BugReport,
-                        iconTint = colors.softRose,
+                        iconTint = colors.primary,
                         title = "Report a Problem",
                         subtitle = "Broken stream, wrong info, subtitles, or app bug",
                         onClick = onReportProblemClick,
                         testTag = "settings_report_problem"
                     )
-                    HorizontalDivider(color = colors.border.copy(alpha = 0.45f), modifier = Modifier.padding(vertical = 6.dp))
+                    HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 6.dp))
                     SettingsActionRow(
                         icon = Icons.Default.PrivacyTip,
-                        iconTint = colors.info,
+                        iconTint = colors.textSecondary,
                         title = "Privacy Policy",
                         subtitle = "How watch history, watchlist & reports are stored",
                         onClick = { showPrivacyDialog = true },
                         testTag = "settings_privacy_policy"
                     )
-                    HorizontalDivider(color = colors.border.copy(alpha = 0.45f), modifier = Modifier.padding(vertical = 6.dp))
+                    HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 6.dp))
                     SettingsActionRow(
                         icon = Icons.Default.Description,
-                        iconTint = colors.gold,
+                        iconTint = colors.textSecondary,
                         title = "Terms & Conditions",
                         subtitle = "Service terms, third-party embeds & metadata notice",
                         onClick = { showTermsDialog = true },
                         testTag = "settings_terms_conditions"
                     )
-                    HorizontalDivider(color = colors.border.copy(alpha = 0.45f), modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(color = colors.border, modifier = Modifier.padding(vertical = 8.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1025,7 +1018,7 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = null,
-                            tint = colors.gold,
+                            tint = colors.textSecondary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -1038,14 +1031,13 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = stringResource(id = R.string.settings_about_source),
-                                fontSize = 12.sp,
-                                color = colors.textSecondary
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textMuted
                             )
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
@@ -1053,11 +1045,11 @@ fun SettingsScreen(
         Dialog(onDismissRequest = { showPrivacyDialog = false }) {
             CineDialogEntryBox {
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     color = colors.surface,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(24.dp))
+                        .border(1.dp, colors.border, MaterialTheme.shapes.extraLarge)
                 ) {
                     Column(modifier = Modifier.padding(24.dp)) {
                         Text(
@@ -1091,11 +1083,11 @@ fun SettingsScreen(
         Dialog(onDismissRequest = { showTermsDialog = false }) {
             CineDialogEntryBox {
                 Surface(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     color = colors.surface,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(24.dp))
+                        .border(1.dp, colors.border, MaterialTheme.shapes.extraLarge)
                 ) {
                     Column(modifier = Modifier.padding(24.dp)) {
                         Text(
@@ -1135,13 +1127,14 @@ private fun NotificationToggleRow(
     testTag: String,
     enabled: Boolean = true
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(colors.surfaceElevated)
+            .border(1.dp, colors.border, MaterialTheme.shapes.small)
             .clickable(enabled = enabled, role = Role.Switch) { onToggle(!checked) }
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag(testTag),
@@ -1157,8 +1150,8 @@ private fun NotificationToggleRow(
             )
             Text(
                 text = subtitle,
-                fontSize = 11.sp,
-                color = if (enabled) colors.textSecondary else colors.textMuted
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) colors.textMuted else colors.textMuted.copy(alpha = 0.6f)
             )
         }
         Spacer(modifier = Modifier.width(8.dp))
@@ -1167,7 +1160,7 @@ private fun NotificationToggleRow(
             enabled = enabled,
             onCheckedChange = onToggle,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
+                checkedThumbColor = colors.onPrimary,
                 checkedTrackColor = colors.primary,
                 uncheckedThumbColor = colors.textSecondary,
                 uncheckedTrackColor = colors.surfaceHover
@@ -1185,7 +1178,7 @@ private fun SettingsActionRow(
     onClick: () -> Unit,
     testTag: String
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val rowInteraction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
@@ -1218,8 +1211,8 @@ private fun SettingsActionRow(
             )
             Text(
                 text = subtitle,
-                fontSize = 11.sp,
-                color = colors.textSecondary
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textMuted
             )
         }
         Icon(
@@ -1236,7 +1229,7 @@ private fun PaletteOptionCard(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val activeColors = CineTheme.colors
+    val activeColors = CinetraTheme.colors
     val previewColors = paletteColorsFor(palette)
     val cardInteraction = remember { MutableInteractionSource() }
     val borderColor by animateColorAsState(
@@ -1255,9 +1248,9 @@ private fun PaletteOptionCard(
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
             .cinePressScale(cardInteraction)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(containerColor)
-            .border(width = if (isSelected) 1.5.dp else 1.dp, color = borderColor, shape = RoundedCornerShape(12.dp))
+            .border(width = if (isSelected) 1.5.dp else 1.dp, color = borderColor, shape = MaterialTheme.shapes.small)
             .clickable(
                 interactionSource = cardInteraction,
                 indication = ripple(bounded = true),
@@ -1314,7 +1307,7 @@ private fun PaletteOptionCard(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(previewColors.primaryContainer)
-                        .border(0.75.dp, previewColors.primary.copy(alpha = 0.55f), RoundedCornerShape(50))
+                        .border(1.dp, previewColors.primary.copy(alpha = 0.55f), RoundedCornerShape(50))
                         .padding(horizontal = 7.dp, vertical = 2.dp)
                 ) {
                     Text(
@@ -1328,7 +1321,7 @@ private fun PaletteOptionCard(
             Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = palette.subtitle,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 color = activeColors.textSecondary,
                 lineHeight = 15.sp
             )
@@ -1348,13 +1341,13 @@ private fun PaletteOptionCard(
 
 @Composable
 private fun ReadabilityPreviewCard() {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(colors.background)
-            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+            .border(1.dp, colors.border, MaterialTheme.shapes.small)
             .padding(12.dp)
             .testTag("settings_readability_preview")
     ) {
@@ -1367,7 +1360,7 @@ private fun ReadabilityPreviewCard() {
                 Icon(
                     imageVector = Icons.Default.Visibility,
                     contentDescription = null,
-                    tint = colors.softRose,
+                    tint = colors.primary,
                     modifier = Modifier.size(15.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
@@ -1375,14 +1368,14 @@ private fun ReadabilityPreviewCard() {
                     text = stringResource(id = R.string.settings_preview_label),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = colors.softRose
+                    color = colors.primary
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.Star,
                     contentDescription = null,
-                    tint = colors.gold,
+                    tint = colors.primary,
                     modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
@@ -1390,7 +1383,7 @@ private fun ReadabilityPreviewCard() {
                     text = "AA+",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = colors.gold
+                    color = colors.textPrimary
                 )
             }
         }
@@ -1417,12 +1410,13 @@ private fun LibraryStatRow(
     label: String,
     value: String
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(colors.surfaceElevated)
+            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -1431,7 +1425,7 @@ private fun LibraryStatRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = colors.gold,
+                tint = colors.primary,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))

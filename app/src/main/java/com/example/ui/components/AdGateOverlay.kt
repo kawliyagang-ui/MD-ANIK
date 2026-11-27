@@ -97,7 +97,7 @@ import com.example.R
 import com.example.data.model.AdConfigEntity
 import com.example.data.model.AdGatePolicy
 import androidx.compose.foundation.layout.PaddingValues
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -164,7 +164,7 @@ fun AdGateOverlay(
         }
     }
 
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
 
     AnimatedContent(
         targetState = stage,
@@ -210,8 +210,8 @@ private fun AdPopupPromptScreen(
     totalStaySeconds: Int,
     onClickAd: () -> Unit
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val gradients = CinetraTheme.gradients
 
     Box(
         modifier = Modifier
@@ -222,12 +222,12 @@ private fun AdPopupPromptScreen(
         contentAlignment = Alignment.Center
     ) {
         Card(
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
+            shape = MaterialTheme.shapes.large, // 20.dp
+            colors = CardDefaults.cardColors(containerColor = colors.surface),
             modifier = Modifier
                 .widthIn(max = 460.dp)
                 .fillMaxWidth()
-                .border(1.dp, colors.border, RoundedCornerShape(22.dp))
+                .border(1.dp, colors.border, MaterialTheme.shapes.large)
                 .testTag("ad_gate_popup_card")
         ) {
             Column(
@@ -245,13 +245,13 @@ private fun AdPopupPromptScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(gradients.softBadge)
-                            .border(1.dp, colors.softRose.copy(alpha = 0.55f), RoundedCornerShape(50))
+                            .background(colors.primaryContainer)
+                            .border(1.dp, colors.primary.copy(alpha = 0.5f), RoundedCornerShape(50))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = stringResource(id = R.string.ad_gate_sponsored_badge),
-                            color = colors.gold,
+                            color = colors.onPrimary,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 0.8.sp
@@ -326,9 +326,9 @@ private fun AdPopupPromptScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(gradients.adBannerSurface)
-                        .border(1.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                        .clip(MaterialTheme.shapes.medium) // 14.dp
+                        .background(colors.surfaceElevated)
+                        .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                         .clickable(onClick = onClickAd)
                         .padding(16.dp)
                         .testTag("ad_gate_banner_preview")
@@ -341,13 +341,13 @@ private fun AdPopupPromptScreen(
                             modifier = Modifier
                                 .size(46.dp)
                                 .clip(CircleShape)
-                                .background(colors.accentEnd.copy(alpha = 0.28f)),
+                                .background(colors.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AdsClick,
                                 contentDescription = null,
-                                tint = colors.gold,
+                                tint = colors.primary,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -357,7 +357,7 @@ private fun AdPopupPromptScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "${config.adNetwork} • ${config.adFormat}",
-                                color = colors.gold,
+                                color = colors.primary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -370,7 +370,7 @@ private fun AdPopupPromptScreen(
                             )
                             Text(
                                 text = stringResource(id = R.string.ad_gate_stay_requirement, totalStaySeconds),
-                                color = colors.textSecondary,
+                                color = colors.textMuted,
                                 fontSize = 11.sp
                             )
                         }
@@ -387,9 +387,8 @@ private fun AdPopupPromptScreen(
                 Spacer(modifier = Modifier.height(18.dp))
 
                 // Primary CTA Button
-                CineGradientButton(
+                RedButton(
                     onClick = onClickAd,
-                    shape = RoundedCornerShape(12.dp),
                     fillWidth = true,
                     minHeight = 52.dp,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -444,8 +443,8 @@ private fun AdsterraAdPageScreen(
     totalStaySeconds: Int,
     onBackToPrompt: () -> Unit
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val gradients = CinetraTheme.gradients
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var pendingChildWebView by remember { mutableStateOf<WebView?>(null) }
     var lastChildWindowCreatedAtMs by remember { mutableStateOf(0L) }
@@ -562,14 +561,14 @@ private fun AdsterraAdPageScreen(
                             .clip(RoundedCornerShape(50))
                             .then(
                                 if (remainingSeconds > 0) {
-                                    Modifier.background(gradients.softBadge)
+                                    Modifier.background(colors.primaryContainer)
                                 } else {
                                     Modifier.background(colors.success.copy(alpha = 0.2f))
                                 }
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (remainingSeconds > 0) colors.softRose.copy(alpha = 0.7f) else colors.success,
+                                color = if (remainingSeconds > 0) colors.primary.copy(alpha = 0.7f) else colors.success,
                                 shape = RoundedCornerShape(50)
                             )
                             .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -578,13 +577,13 @@ private fun AdsterraAdPageScreen(
                         Icon(
                             imageVector = if (remainingSeconds > 0) Icons.Default.Timer else Icons.Default.CheckCircle,
                             contentDescription = stringResource(id = R.string.ad_page_timer_desc),
-                            tint = if (remainingSeconds > 0) colors.gold else colors.success,
+                            tint = if (remainingSeconds > 0) colors.primary else colors.success,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = formattedTimer,
-                            color = Color.White,
+                            color = colors.onPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
@@ -612,7 +611,7 @@ private fun AdsterraAdPageScreen(
 
                 LinearProgressIndicator(
                     progress = { progressFraction },
-                    color = if (remainingSeconds > 0) colors.gold else colors.success,
+                    color = if (remainingSeconds > 0) colors.primary else colors.success,
                     trackColor = colors.surfaceElevated,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -854,15 +853,14 @@ private fun AdsterraAdPageScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(10.dp))
-                        Button(
+                        RedButton(
                             onClick = {
                                 rendererCrashed = false
                                 isPageLoading = true
                                 webViewSlotKey += 1
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                            }
                         ) {
-                            Text("Reload Page", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Reload Page", color = colors.onPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -877,7 +875,7 @@ private fun AdsterraAdPageScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(
-                            color = colors.softRose,
+                            color = colors.primary,
                             modifier = Modifier.size(34.dp)
                         )
                         Spacer(modifier = Modifier.height(10.dp))

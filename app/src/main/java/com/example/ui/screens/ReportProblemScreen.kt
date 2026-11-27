@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,11 +39,11 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,7 +61,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -70,8 +72,9 @@ import com.example.data.model.IssueReportCategory
 import com.example.data.model.IssueReportEntity
 import com.example.data.model.IssueReportStatus
 import com.example.data.model.MediaItem
-import com.example.ui.components.CineGradientButton
-import com.example.ui.theme.CineTheme
+import com.example.ui.components.CategoryPill
+import com.example.ui.components.RedButton
+import com.example.ui.theme.CinetraTheme
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -100,8 +103,7 @@ fun ReportProblemScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
 
     var selectedCategory by remember(prefilledMedia?.id, serverName) {
         mutableStateOf(
@@ -130,81 +132,85 @@ fun ReportProblemScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .testTag("report_problem_screen")
     ) {
         // Top Header Bar
         Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(gradients.topBarBackdrop)
+            color = colors.background,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag("report_back_button")
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("report_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = colors.textPrimary
+                        )
+                    }
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = colors.textPrimary
+                        imageVector = Icons.Default.BugReport,
+                        contentDescription = null,
+                        tint = colors.primary,
+                        modifier = Modifier.size(22.dp)
                     )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Report a Problem",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.textPrimary
+                        )
+                        Text(
+                            text = "Synced directly to Cinetra Admin team",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textMuted
+                        )
+                    }
                 }
-                Icon(
-                    imageVector = Icons.Default.BugReport,
-                    contentDescription = null,
-                    tint = colors.softRose,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Report a Problem",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Text(
-                        text = "Synced directly to Cinetra Admin team",
-                        fontSize = 11.sp,
-                        color = colors.textSecondary
-                    )
-                }
+                HorizontalDivider(thickness = 1.dp, color = colors.border)
             }
         }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Context card if opened from a specific movie/episode/server
             if (prefilledMedia != null) {
                 item(key = "report_context_card", contentType = "context_card") {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 text = "Reported Title Context",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.gold
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.primary
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = prefilledMedia.title,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
                                 color = colors.textPrimary
                             )
                             val contextParts = listOfNotNull(
@@ -213,9 +219,10 @@ fun ReportProblemScreen(
                                 serverName.takeIf { it.isNotBlank() }?.let { "Server: $it" }
                             )
                             if (contextParts.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = contextParts.joinToString(" • "),
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = colors.textSecondary
                                 )
                             }
@@ -224,14 +231,14 @@ fun ReportProblemScreen(
                 }
             }
 
-            // Issue Category Selector (All 8 Requested Categories)
+            // Issue Category Selector & Form Card
             item(key = "report_form_card", contentType = "form_card") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = colors.surface),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                        .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -245,39 +252,26 @@ fun ReportProblemScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IssueReportCategory.entries.forEach { category ->
-                                val isSelected = selectedCategory == category
-                                FilterChip(
-                                    selected = isSelected,
+                                CategoryPill(
+                                    label = category.displayName,
+                                    selected = selectedCategory == category,
                                     onClick = {
                                         selectedCategory = category
                                         onClearFeedback()
                                     },
-                                    label = {
-                                        Text(
-                                            text = category.displayName,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = colors.accentMid,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = colors.surfaceElevated,
-                                        labelColor = colors.textPrimary
-                                    ),
                                     modifier = Modifier.testTag("report_category_${category.storageKey}")
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
 
                         Text(
                             text = "Describe What Happened",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = colors.textPrimary
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
                             value = description,
                             onValueChange = {
@@ -293,14 +287,15 @@ fun ReportProblemScreen(
                             },
                             minLines = 3,
                             maxLines = 6,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = MaterialTheme.shapes.small,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = colors.primary,
                                 unfocusedBorderColor = colors.border,
                                 focusedContainerColor = colors.surfaceElevated,
                                 unfocusedContainerColor = colors.surfaceElevated,
                                 focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary
+                                unfocusedTextColor = colors.textPrimary,
+                                cursorColor = colors.primary
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -327,19 +322,27 @@ fun ReportProblemScreen(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                     )
                                 },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.testTag("report_attach_screenshot_button")
+                                shape = MaterialTheme.shapes.small,
+                                border = BorderStroke(1.dp, colors.border),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = colors.surfaceElevated,
+                                    contentColor = colors.textPrimary
+                                ),
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("report_attach_screenshot_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AddPhotoAlternate,
                                     contentDescription = null,
-                                    tint = colors.gold,
+                                    tint = colors.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = if (screenshotBitmap == null) "Attach Image" else "Replace Image",
                                     fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = colors.textPrimary
                                 )
                             }
@@ -351,8 +354,8 @@ fun ReportProblemScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(150.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+                                    .clip(MaterialTheme.shapes.small)
+                                    .border(1.dp, colors.border, MaterialTheme.shapes.small)
                             ) {
                                 Image(
                                     bitmap = screenshotBitmap!!.asImageBitmap(),
@@ -368,13 +371,14 @@ fun ReportProblemScreen(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .padding(6.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(Color.Black.copy(alpha = 0.7f))
+                                        .minimumInteractiveComponentSize()
+                                        .clip(CircleShape)
+                                        .background(colors.background.copy(alpha = 0.78f))
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "Remove screenshot",
-                                        tint = Color.White,
+                                        tint = colors.textPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -382,14 +386,14 @@ fun ReportProblemScreen(
                         }
 
                         AnimatedVisibility(visible = submitMessage != null) {
-                            val bannerColor = if (isError) Color(0xFFEF4444) else colors.success
+                            val bannerColor = if (isError) colors.primary else colors.success
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 12.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(MaterialTheme.shapes.small)
                                     .background(bannerColor.copy(alpha = 0.14f))
-                                    .border(1.dp, bannerColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, bannerColor.copy(alpha = 0.4f), MaterialTheme.shapes.small)
                                     .padding(12.dp)
                                     .testTag("report_feedback_banner"),
                                 verticalAlignment = Alignment.CenterVertically
@@ -412,7 +416,7 @@ fun ReportProblemScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        CineGradientButton(
+                        RedButton(
                             onClick = {
                                 onSubmitReport(
                                     selectedCategory,
@@ -429,18 +433,16 @@ fun ReportProblemScreen(
                                 }
                             },
                             enabled = !isSubmitting,
-                            shape = RoundedCornerShape(12.dp),
                             fillWidth = true,
                             minHeight = 48.dp,
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp)
                                 .testTag("report_submit_button")
                         ) {
                             if (isSubmitting) {
                                 CircularProgressIndicator(
-                                    color = Color.White,
+                                    color = colors.onPrimary,
                                     strokeWidth = 2.dp,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -448,7 +450,7 @@ fun ReportProblemScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = colors.onPrimary,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -456,7 +458,7 @@ fun ReportProblemScreen(
                             Text(
                                 text = if (isSubmitting) "Submitting..." else "Submit Report",
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = colors.onPrimary
                             )
                         }
                     }
@@ -467,7 +469,7 @@ fun ReportProblemScreen(
             item(key = "report_history_header", contentType = "section_header") {
                 Text(
                     text = "Submitted Reports (${reportHistory.size})",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
                     modifier = Modifier.padding(top = 6.dp)
                 )
@@ -477,15 +479,15 @@ fun ReportProblemScreen(
                 item(key = "report_history_empty", contentType = "empty_card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surface),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                     ) {
                         Text(
                             text = "No problem reports submitted yet. Any issue you submit will appear here with real-time admin review status.",
-                            fontSize = 12.sp,
-                            color = colors.textSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textMuted,
                             modifier = Modifier.padding(16.dp)
                         )
                     }
@@ -510,10 +512,10 @@ fun ReportProblemScreen(
 
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surface),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                             .testTag("report_history_item_${report.id}")
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
@@ -532,7 +534,7 @@ fun ReportProblemScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
                                         .background(statusColor.copy(alpha = 0.16f))
-                                        .border(0.75.dp, statusColor.copy(alpha = 0.6f), RoundedCornerShape(50))
+                                        .border(1.dp, statusColor.copy(alpha = 0.55f), RoundedCornerShape(50))
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
@@ -544,22 +546,21 @@ fun ReportProblemScreen(
                                 }
                             }
                             if (report.mediaTitle.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(3.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = listOfNotNull(
                                         report.mediaTitle,
                                         report.episodeLabel.takeIf { it.isNotBlank() },
                                         report.serverName.takeIf { it.isNotBlank() }
                                     ).joinToString(" • "),
-                                    fontSize = 11.sp,
-                                    color = colors.gold,
-                                    fontWeight = FontWeight.SemiBold
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.primary
                                 )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = report.description,
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary
                             )
                             if (report.adminNotes.isNotBlank()) {
@@ -567,13 +568,14 @@ fun ReportProblemScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(MaterialTheme.shapes.extraSmall)
                                         .background(colors.surfaceElevated)
+                                        .border(1.dp, colors.border, MaterialTheme.shapes.extraSmall)
                                         .padding(10.dp)
                                 ) {
                                     Text(
                                         text = "Admin Note: ${report.adminNotes}",
-                                        fontSize = 11.sp,
+                                        style = MaterialTheme.typography.labelSmall,
                                         color = colors.textPrimary
                                     )
                                 }
@@ -581,7 +583,7 @@ fun ReportProblemScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = "Submitted $dateLabel",
-                                fontSize = 10.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.textMuted
                             )
                         }
@@ -589,7 +591,9 @@ fun ReportProblemScreen(
                 }
             }
 
-            item(key = "report_bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(24.dp)) }
+            item(key = "report_bottom_spacer", contentType = "spacer") {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 }

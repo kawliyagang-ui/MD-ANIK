@@ -62,6 +62,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -469,9 +472,21 @@ fun DirectPlayerErrorCard(
     onRetry: () -> Unit,
     onFallbackToWebEmbed: (() -> Unit)?,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTvDevice: Boolean = false
 ) {
     val colors = CineTheme.colors
+    val retryFocusRequester = remember { FocusRequester() }
+    var retryFocused by remember { mutableStateOf(false) }
+    var embedFocused by remember { mutableStateOf(false) }
+    var backFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isTvDevice) {
+        if (isTvDevice) {
+            runCatching { retryFocusRequester.requestFocus() }
+        }
+    }
+
     Surface(
         color = Color(0xF015151B),
         shape = RoundedCornerShape(18.dp),
@@ -520,6 +535,12 @@ fun DirectPlayerErrorCard(
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
+                        .focusRequester(retryFocusRequester)
+                        .onFocusChanged { retryFocused = it.isFocused }
+                        .then(
+                            if (retryFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                            else Modifier
+                        )
                         .testTag("direct_player_retry_button")
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -533,6 +554,11 @@ fun DirectPlayerErrorCard(
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
+                            .onFocusChanged { embedFocused = it.isFocused }
+                            .then(
+                                if (embedFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                                else Modifier
+                            )
                     ) {
                         Text("Web Embed", color = colors.gold, fontWeight = FontWeight.SemiBold)
                     }
@@ -544,6 +570,11 @@ fun DirectPlayerErrorCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .onFocusChanged { backFocused = it.isFocused }
+                    .then(
+                        if (backFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                        else Modifier
+                    )
             ) {
                 Text("Go Back", color = Color.White.copy(alpha = 0.9f))
             }
@@ -566,6 +597,7 @@ fun SeriesUpNextCard(
     val colors = CineTheme.colors
     val thumbUrl = nextEpisode.fullStillUrl.ifBlank { fallbackThumbUrl }
     val darkPainter = rememberDarkImagePainter()
+    var playNowFocused by remember { mutableStateOf(false) }
 
     Surface(
         color = Color(0xE614141A),
@@ -628,6 +660,11 @@ fun SeriesUpNextCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(40.dp)
+                    .onFocusChanged { playNowFocused = it.isFocused }
+                    .then(
+                        if (playNowFocused) Modifier.border(2.dp, Color.White, RoundedCornerShape(9.dp))
+                        else Modifier
+                    )
                     .testTag("direct_player_up_next_play_button")
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))

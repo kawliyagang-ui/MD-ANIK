@@ -12,19 +12,24 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -32,9 +37,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -42,19 +46,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,6 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -102,16 +102,18 @@ import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineEase
-import com.example.ui.components.CineGradientButton
+import com.example.ui.components.CinetraEmptyState
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
+import com.example.ui.components.RatingInlineLabel
+import com.example.ui.components.RedButton
 import com.example.ui.components.SearchResultsSkeletonGrid
 import com.example.ui.components.cinePressScale
 import com.example.ui.components.rememberCineImageRequest
 import com.example.ui.components.rememberDarkImagePainter
-import com.example.ui.theme.CineTheme
-import java.util.Locale
+import com.example.ui.theme.CinetraTheme
 
 private sealed interface SearchViewMode {
     data object Idle : SearchViewMode
@@ -150,8 +152,7 @@ fun SearchScreen(
     onSearchFieldFocusWithQuery: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -176,20 +177,18 @@ fun SearchScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .testTag("dedicated_search_screen")
     ) {
-        // Top Bar Header with Back and Search Input
+        // Top Search Input Bar
         Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(gradients.topBarBackdrop)
+            color = colors.background,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(start = 12.dp, end = 12.dp, top = 22.dp, bottom = 14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -208,68 +207,78 @@ fun SearchScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        placeholder = {
-                            Text(
-                                "Search movies, TV shows, anime...",
-                                color = colors.textMuted,
-                                fontSize = 14.sp
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                tint = colors.softRose
-                            )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { onSearchQueryChange("") },
-                                    modifier = Modifier.testTag("search_screen_clear_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Clear",
-                                        tint = colors.textSecondary
-                                    )
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                                onSubmitSearch(searchQuery)
-                            }
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = colors.softRose,
-                            unfocusedBorderColor = colors.border,
-                            focusedContainerColor = colors.surfaceElevated,
-                            unfocusedContainerColor = colors.surfaceElevated,
-                            focusedTextColor = colors.textPrimary,
-                            unfocusedTextColor = colors.textPrimary
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused && searchQuery.isNotBlank()) {
-                                    onSearchFieldFocusWithQuery()
-                                }
-                            }
-                            .testTag("search_screen_input_field")
+                    Text(
+                        text = "Search",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = colors.textPrimary
                     )
                 }
 
-                // Type Filter + Advanced Filters Pills when querying or results exist
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    placeholder = {
+                        Text(
+                            "Search movies, TV shows, anime...",
+                            color = colors.textMuted,
+                            fontSize = 14.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = colors.textMuted
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onSearchQueryChange("") },
+                                modifier = Modifier.testTag("search_screen_clear_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    tint = colors.textSecondary
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                            onSubmitSearch(searchQuery)
+                        }
+                    ),
+                    shape = RoundedCornerShape(50),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = colors.primary,
+                        unfocusedBorderColor = colors.border,
+                        focusedContainerColor = colors.surfaceElevated,
+                        unfocusedContainerColor = colors.surfaceElevated,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary,
+                        cursorColor = colors.primary
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused && searchQuery.isNotBlank()) {
+                                onSearchFieldFocusWithQuery()
+                            }
+                        }
+                        .testTag("search_screen_input_field")
+                )
+
+                // Type Filter + Advanced Filters Pills when querying
                 AnimatedVisibility(
                     visible = searchQuery.isNotBlank(),
                     enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(200, easing = CineEase)),
@@ -279,56 +288,25 @@ fun SearchScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(start = 8.dp, end = 8.dp, top = 8.dp),
+                            .padding(start = 4.dp, end = 4.dp, top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         listOf("All" to "All", "movie" to "Movies", "tv" to "TV Series").forEach { (key, label) ->
                             val isSelected = searchFilters.mediaType == key
-                            FilterChip(
+                            CategoryPill(
+                                label = label,
                                 selected = isSelected,
                                 onClick = { searchFilters = searchFilters.copy(mediaType = key) },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.accentMid,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = colors.surfaceElevated,
-                                    labelColor = colors.textPrimary
-                                ),
                                 modifier = Modifier.testTag("search_type_filter_$key")
                             )
                         }
                         val advCount = searchFilters.activeFilterCount()
-                        FilterChip(
+                        CategoryPill(
+                            label = if (advCount > 0) "Filters ($advCount)" else "Filters",
                             selected = advCount > 0,
+                            leadingIcon = Icons.Default.Tune,
                             onClick = { showFilterSheet = true },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = "Filters",
-                                    tint = if (advCount > 0) Color.White else colors.gold,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = if (advCount > 0) "Filters ($advCount)" else "Filters",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.accentMid,
-                                selectedLabelColor = Color.White,
-                                containerColor = colors.surfaceElevated,
-                                labelColor = colors.textPrimary
-                            ),
                             modifier = Modifier.testTag("search_advanced_filters_button")
                         )
                         BatchSizeChip(
@@ -346,11 +324,11 @@ fun SearchScreen(
                     exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(160, easing = CineEase))
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -358,32 +336,32 @@ fun SearchScreen(
                                 Icon(
                                     imageVector = Icons.Default.History,
                                     contentDescription = null,
-                                    tint = colors.gold,
-                                    modifier = Modifier.size(13.dp)
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Recent Searches:",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.gold
+                                    text = "Recent Searches",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colors.textSecondary
                                 )
                             }
                             Text(
                                 text = "Clear All",
-                                fontSize = 11.sp,
-                                color = colors.textSecondary,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.primary,
                                 modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
                                     .clickable { onClearSearchHistory() }
-                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                                     .testTag("search_clear_history_button")
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             items(
@@ -393,16 +371,16 @@ fun SearchScreen(
                             ) { item ->
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(colors.surface)
-                                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.surfaceElevated)
+                                        .border(1.dp, colors.border, RoundedCornerShape(50))
                                         .clickable { onSearchQueryChange(item.query) }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
                                         .testTag("search_history_chip_${item.query}")
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Text(
                                             text = item.query,
@@ -419,8 +397,8 @@ fun SearchScreen(
                                             Icon(
                                                 imageVector = Icons.Default.Close,
                                                 contentDescription = "Remove",
-                                                tint = colors.textSecondary,
-                                                modifier = Modifier.size(11.dp)
+                                                tint = colors.textMuted,
+                                                modifier = Modifier.size(12.dp)
                                             )
                                         }
                                     }
@@ -490,23 +468,23 @@ fun SearchScreen(
                         plural = "results"
                     ) + " for \"$searchQuery\""
                 },
-                fontSize = 12.sp,
-                color = colors.textSecondary,
-                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                color = colors.textMuted,
                 modifier = Modifier.weight(1f)
             )
 
             if (isSearching || isLoadingMore) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
-                        color = colors.softRose,
-                        modifier = Modifier.size(14.dp)
+                        color = colors.primary,
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (isLoadingMore) "Loading batch" else "Searching",
                         fontSize = 11.sp,
-                        color = colors.gold
+                        color = colors.textSecondary
                     )
                 }
             }
@@ -558,35 +536,16 @@ fun SearchScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(32.dp),
+                            .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.WifiOff,
-                                contentDescription = null,
-                                tint = colors.softRose,
-                                modifier = Modifier.size(48.dp)
+                            CinetraEmptyState(
+                                icon = Icons.Default.WifiOff,
+                                title = "Search Unavailable",
+                                subtitle = mode.message
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Search Unavailable",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.textPrimary
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = mode.message,
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            CineGradientButton(
-                                onClick = onRetrySearch,
-                                shape = RoundedCornerShape(50),
-                                minHeight = 48.dp
-                            ) {
+                            RedButton(onClick = onRetrySearch) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Retry Search", fontWeight = FontWeight.Bold)
@@ -596,64 +555,26 @@ fun SearchScreen(
                 }
                 SearchViewMode.Idle -> {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                tint = colors.textMuted.copy(alpha = 0.5f),
-                                modifier = Modifier.size(56.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Discover Anything",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.textPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Search across thousands of movies, TV series, anime, and Cinetra specials instantly.",
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        CinetraEmptyState(
+                            icon = Icons.Default.Search,
+                            title = "Discover Anything",
+                            subtitle = "Search across thousands of movies, TV series, anime, and Cinetra specials instantly."
+                        )
                     }
                 }
                 is SearchViewMode.Empty -> {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "No results found for \"${mode.query}\"",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.textPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Check your spelling, switch type filter, or try another title.",
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        CinetraEmptyState(
+                            icon = Icons.Default.Search,
+                            title = "No results found for \"${mode.query}\"",
+                            subtitle = "Check your spelling, switch type filter, or try another title."
+                        )
                     }
                 }
                 is SearchViewMode.Results -> {
@@ -671,44 +592,71 @@ fun SearchScreen(
                         }
                     }
 
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Adaptive(minSize = 135.dp),
-                        contentPadding = PaddingValues(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("search_results_grid")
-                    ) {
-                        items(
-                            items = mode.items,
-                            key = { it.id },
-                            contentType = { "movie_card" }
-                        ) { item ->
-                            MovieCard(
-                                media = item,
-                                onClick = { onMediaClick(item) },
-                                cardWidth = 140.dp,
-                                cardHeight = 205.dp,
-                                modifier = Modifier.animateItem()
-                            )
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val columnCount = if (maxWidth >= 600.dp) 4 else 3
+                        val horizontalSpacing = 10.dp
+                        val totalGap = 32.dp + horizontalSpacing * (columnCount - 1)
+                        val colWidth = ((maxWidth - totalGap) / columnCount).coerceAtLeast(96.dp)
+                        val colHeight = colWidth * 1.5f
+                        val topResult = mode.items.firstOrNull()
+                        val remainingItems = remember(mode.items) {
+                            if (mode.items.size > 1) mode.items.drop(1) else emptyList()
                         }
 
-                        item(
-                            span = { GridItemSpan(maxLineSpan) },
-                            key = "search_load_more_footer",
-                            contentType = "load_more_footer"
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Fixed(columnCount),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("search_results_grid")
                         ) {
-                            LoadMoreBatchFooter(
-                                shownCount = mode.items.size,
-                                totalAvailable = effectiveSearchTotal,
-                                batchSize = batchSize,
-                                hasMore = hasMore,
-                                isLoadingMore = isLoadingMore,
-                                onLoadMore = onLoadMore,
-                                testTag = "search_load_more_button"
-                            )
+                            if (topResult != null) {
+                                item(
+                                    span = { GridItemSpan(maxLineSpan) },
+                                    key = "top_result_${topResult.id}",
+                                    contentType = "top_result_card"
+                                ) {
+                                    SearchTopResultCard(
+                                        item = topResult,
+                                        onClick = { onMediaClick(topResult) },
+                                        modifier = Modifier.animateItem()
+                                    )
+                                }
+                            }
+
+                            items(
+                                items = remainingItems,
+                                key = { it.id },
+                                contentType = { "movie_card" }
+                            ) { item ->
+                                MovieCard(
+                                    media = item,
+                                    onClick = { onMediaClick(item) },
+                                    cardWidth = colWidth,
+                                    cardHeight = colHeight,
+                                    showTypePill = true,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+
+                            item(
+                                span = { GridItemSpan(maxLineSpan) },
+                                key = "search_load_more_footer",
+                                contentType = "load_more_footer"
+                            ) {
+                                LoadMoreBatchFooter(
+                                    shownCount = mode.items.size,
+                                    totalAvailable = effectiveSearchTotal,
+                                    batchSize = batchSize,
+                                    hasMore = hasMore,
+                                    isLoadingMore = isLoadingMore,
+                                    onLoadMore = onLoadMore,
+                                    testTag = "search_load_more_button"
+                                )
+                            }
                         }
                     }
                 }
@@ -726,6 +674,159 @@ fun SearchScreen(
 }
 
 @Composable
+private fun SearchTopResultCard(
+    item: MediaItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = CinetraTheme.colors
+    val cardShape = RoundedCornerShape(14.dp)
+    val interactionSource = remember { MutableInteractionSource() }
+    val darkPlaceholder = rememberDarkImagePainter(colors.surface)
+    val imageUrl = remember(item.fullBackdropUrl, item.fullPosterUrl) {
+        item.fullBackdropUrl.ifBlank { item.fullPosterUrl }
+    }
+    val yearText = remember(item.releaseDate) { item.releaseDate.take(4) }
+    val typeLabel = remember(item.mediaType) {
+        if (item.mediaType.equals("tv", ignoreCase = true)) "TV SERIES" else "MOVIE"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(16f / 9f)
+            .cinePressScale(interactionSource)
+            .clip(cardShape)
+            .background(colors.surface)
+            .border(1.dp, colors.border, cardShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(),
+                onClick = onClick
+            )
+            .testTag("movie_card_${item.id}")
+    ) {
+        if (imageUrl.isNotBlank()) {
+            val req = rememberCineImageRequest(
+                url = imageUrl,
+                widthDp = 360.dp,
+                heightDp = 202.dp
+            )
+            AsyncImage(
+                model = req,
+                contentDescription = item.title,
+                placeholder = darkPlaceholder,
+                error = darkPlaceholder,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Movie,
+                    contentDescription = null,
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        0.45f to Color.Black.copy(alpha = 0.28f),
+                        1.0f to colors.background.copy(alpha = 0.94f)
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.primary)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "TOP RESULT",
+                        color = colors.onPrimary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+                Text(
+                    text = typeLabel,
+                    color = colors.textSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (yearText.isNotBlank() || item.voteAverage > 0.0) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (yearText.isNotBlank()) {
+                        Text(
+                            text = yearText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textSecondary
+                        )
+                    }
+                    if (yearText.isNotBlank() && item.voteAverage > 0.0) {
+                        Text(
+                            text = "•",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textMuted
+                        )
+                    }
+                    if (item.voteAverage > 0.0) {
+                        RatingInlineLabel(
+                            rating = item.voteAverage,
+                            fontSize = 12.sp,
+                            textColor = colors.textPrimary,
+                            iconSize = 12.dp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RealTimeSuggestionsPanel(
     query: String,
     suggestions: List<MediaItem>,
@@ -735,16 +836,15 @@ private fun RealTimeSuggestionsPanel(
     onSeeAllResults: () -> Unit,
     onHideSuggestions: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
 
     Surface(
-        color = colors.surfaceElevated,
-        tonalElevation = 6.dp,
-        shape = RoundedCornerShape(16.dp),
+        color = colors.surface,
+        shape = MaterialTheme.shapes.medium, // 14.dp
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .border(1.dp, colors.border.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
+            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             .testTag("search_suggestions_panel")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -760,7 +860,7 @@ private fun RealTimeSuggestionsPanel(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = colors.softRose,
+                        tint = colors.primary,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -772,12 +872,12 @@ private fun RealTimeSuggestionsPanel(
                         },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = colors.gold
+                        color = colors.textSecondary
                     )
                     if (isLoading) {
                         Spacer(modifier = Modifier.width(8.dp))
                         CircularProgressIndicator(
-                            color = colors.softRose,
+                            color = colors.primary,
                             strokeWidth = 1.8.dp,
                             modifier = Modifier.size(12.dp)
                         )
@@ -788,7 +888,7 @@ private fun RealTimeSuggestionsPanel(
                     text = "Hide",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = colors.textSecondary,
+                    color = colors.textMuted,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .clickable(onClick = onHideSuggestions)
@@ -797,7 +897,7 @@ private fun RealTimeSuggestionsPanel(
                 )
             }
 
-            HorizontalDivider(color = colors.border.copy(alpha = 0.45f))
+            HorizontalDivider(color = colors.border)
 
             if (suggestions.isNotEmpty()) {
                 LazyColumn(
@@ -818,7 +918,7 @@ private fun RealTimeSuggestionsPanel(
                             onFillClick = { onFillQueryClick(item.title) }
                         )
                         HorizontalDivider(
-                            color = colors.border.copy(alpha = 0.25f),
+                            color = colors.border.copy(alpha = 0.5f),
                             modifier = Modifier.padding(horizontal = 14.dp)
                         )
                     }
@@ -832,7 +932,7 @@ private fun RealTimeSuggestionsPanel(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
-                        color = colors.softRose,
+                        color = colors.primary,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(18.dp)
                     )
@@ -840,7 +940,7 @@ private fun RealTimeSuggestionsPanel(
                     Text(
                         text = "Finding matches on TMDb...",
                         fontSize = 12.sp,
-                        color = colors.textSecondary
+                        color = colors.textMuted
                     )
                 }
             }
@@ -851,7 +951,7 @@ private fun RealTimeSuggestionsPanel(
                     .fillMaxWidth()
                     .minimumInteractiveComponentSize()
                     .clickable(onClick = onSeeAllResults)
-                    .background(colors.surface.copy(alpha = 0.7f))
+                    .background(colors.surfaceElevated)
                     .padding(horizontal = 14.dp, vertical = 10.dp)
                     .testTag("search_suggestions_see_all_button"),
                 verticalAlignment = Alignment.CenterVertically,
@@ -861,7 +961,7 @@ private fun RealTimeSuggestionsPanel(
                     text = "See all results for \"$query\"",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = colors.softRose,
+                    color = colors.primary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -869,7 +969,7 @@ private fun RealTimeSuggestionsPanel(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "See all results",
-                    tint = colors.softRose,
+                    tint = colors.primary,
                     modifier = Modifier.size(15.dp)
                 )
             }
@@ -884,14 +984,11 @@ private fun SuggestionRowItem(
     onClick: () -> Unit,
     onFillClick: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val year = remember(item.releaseDate) { item.releaseDate.take(4) }
     val typeLabel = if (item.mediaType.equals("tv", ignoreCase = true)) "TV Series" else "Movie"
-    val ratingText = remember(item.voteAverage) {
-        if (item.voteAverage > 0.0) String.format(Locale.US, "%.1f", item.voteAverage) else ""
-    }
     val rowInteraction = remember { MutableInteractionSource() }
-    val posterDarkPlaceholder = rememberDarkImagePainter(colors.surface)
+    val posterDarkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
 
     Row(
         modifier = Modifier
@@ -912,8 +1009,8 @@ private fun SuggestionRowItem(
             modifier = Modifier
                 .size(width = 36.dp, height = 52.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(colors.surface)
-                .border(1.dp, colors.border.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+                .background(colors.surfaceElevated)
+                .border(1.dp, colors.border, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (item.fullPosterUrl.isNotBlank()) {
@@ -948,7 +1045,7 @@ private fun SuggestionRowItem(
                 text = buildHighlightedSuggestionTitle(
                     title = item.title,
                     query = query,
-                    highlightColor = colors.softRose
+                    highlightColor = colors.primary
                 ),
                 color = colors.textPrimary,
                 fontSize = 14.sp,
@@ -963,50 +1060,27 @@ private fun SuggestionRowItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(
-                            if (item.mediaType.equals("tv", ignoreCase = true)) {
-                                colors.gold.copy(alpha = 0.16f)
-                            } else {
-                                colors.softRose.copy(alpha = 0.16f)
-                            }
-                        )
-                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                ) {
-                    Text(
-                        text = typeLabel,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (item.mediaType.equals("tv", ignoreCase = true)) colors.gold else colors.softRose
-                    )
-                }
+                Text(
+                    text = typeLabel,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textSecondary
+                )
 
                 if (year.isNotBlank()) {
                     Text(
-                        text = year,
+                        text = "• $year",
                         fontSize = 11.sp,
-                        color = colors.textSecondary
+                        color = colors.textMuted
                     )
                 }
 
-                if (ratingText.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = colors.gold,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = ratingText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.gold
-                        )
-                    }
+                if (item.voteAverage > 0.0) {
+                    Text(text = "•", fontSize = 11.sp, color = colors.textMuted)
+                    RatingInlineLabel(
+                        rating = item.voteAverage,
+                        textColor = colors.textMuted
+                    )
                 }
             }
         }
@@ -1020,7 +1094,7 @@ private fun SuggestionRowItem(
             Icon(
                 imageVector = Icons.Default.NorthWest,
                 contentDescription = "Fill ${item.title}",
-                tint = colors.textSecondary,
+                tint = colors.textMuted,
                 modifier = Modifier.size(16.dp)
             )
         }
@@ -1047,4 +1121,3 @@ private fun buildHighlightedSuggestionTitle(
         }
     }
 }
-

@@ -17,11 +17,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -56,9 +61,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
@@ -67,6 +69,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -80,11 +84,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -98,6 +106,7 @@ import com.example.data.model.MediaItem
 import com.example.data.repository.MovieRepository
 import com.example.ui.components.AdGateOverlay
 import com.example.ui.components.CineEase
+import com.example.ui.components.FloatingGlassBar
 import com.example.ui.components.LocalDownloadedMediaIds
 import com.example.ui.components.MovieBoxDownloadSheet
 import com.example.ui.components.StreamPlayerView
@@ -115,8 +124,11 @@ import com.example.ui.screens.ReportProblemScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.WatchlistScreen
-import com.example.ui.theme.CineTheme
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.CinetraTheme
+import com.example.ui.theme.CinetraTokens
+import com.example.ui.theme.LocalBottomBarClearance
+import com.example.ui.tv.CinetraTvShell
+import com.example.ui.tv.TvDevicePolicy
 import com.example.ui.viewmodel.AdGateState
 import com.example.ui.viewmodel.MovieViewModel
 import com.example.ui.viewmodel.MovieViewModelFactory
@@ -136,6 +148,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CinetraApp() {
     val context = LocalContext.current
+    val isTvDevice = remember(context) { TvDevicePolicy.isTvDevice(context) }
     val repository = remember(context) {
         val database = AppDatabase.getDatabase(context.applicationContext)
         MovieRepository(database.mediaDao(), context.applicationContext)
@@ -188,34 +201,42 @@ fun CinetraApp() {
         }
     }
 
-    MyApplicationTheme(
+    CinetraTheme(
         palette = userState.selectedPalette,
         themeMode = userState.themeMode,
         accentColor = userState.accentColor
     ) {
-        val colors = CineTheme.colors
-        val gradients = CineTheme.gradients
+        val colors = CinetraTheme.colors
+        val gradients = CinetraTheme.gradients
 
         when (val gate = adGateState) {
             is AdGateState.Loading -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(gradients.appBackdrop),
+                        .background(colors.background),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = colors.softRose)
+                    CircularProgressIndicator(color = colors.primary)
                 }
-                return@MyApplicationTheme
+                return@CinetraTheme
             }
             is AdGateState.GateRequired -> {
                 AdGateOverlay(
                     config = gate.config,
                     onAdCompleted = { movieViewModel.completeAdGate() }
                 )
-                return@MyApplicationTheme
+                return@CinetraTheme
             }
             is AdGateState.Unlocked -> Unit
+        }
+
+        if (isTvDevice) {
+            CinetraTvShell(
+                movieViewModel = movieViewModel,
+                snackbarHostState = snackbarHostState
+            )
+            return@CinetraTheme
         }
 
         val watchlistIds = remember(watchlist) { watchlist.map { it.id }.toSet() }
@@ -271,30 +292,31 @@ fun CinetraApp() {
             movieViewModel.navigateBack()
         }
 
-        val navItemColors = NavigationBarItemDefaults.colors(
-            selectedIconColor = colors.textPrimary,
-            selectedTextColor = colors.softRose,
-            indicatorColor = colors.navIndicator,
-            unselectedIconColor = colors.textMuted,
-            unselectedTextColor = colors.textMuted
-        )
         val railItemColors = NavigationRailItemDefaults.colors(
-            selectedIconColor = colors.textPrimary,
-            selectedTextColor = colors.softRose,
-            indicatorColor = colors.navIndicator,
+            selectedIconColor = colors.primary,
+            selectedTextColor = colors.primary,
+            indicatorColor = colors.primaryContainer,
             unselectedIconColor = colors.textMuted,
             unselectedTextColor = colors.textMuted
         )
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useNavigationRail = maxWidth >= 600.dp
+            val bottomBarClearance = if (!isDedicatedSubPage && !useNavigationRail) 96.dp else 0.dp
 
+            CompositionLocalProvider(LocalBottomBarClearance provides bottomBarClearance) {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = colors.background,
-                snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+                snackbarHost = {
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier.padding(bottom = bottomBarClearance)
+                    )
+                },
                 contentWindowInsets = when {
                     isPlayerScreen -> WindowInsets(0, 0, 0, 0)
+                    userState.currentScreen is Screen.Details -> WindowInsets.navigationBars
                     isDedicatedSubPage -> WindowInsets.systemBars
                     else -> WindowInsets.statusBars
                 },
@@ -305,272 +327,116 @@ fun CinetraApp() {
                     exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
                 ) {
                     Surface(
-                        color = Color.Transparent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .background(gradients.topBarBackdrop)
+                        color = colors.background,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Cinetra Brand Logo & Title
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Image(
-                                        painter = painterResource(id = R.drawable.ic_cinetra_logo),
-                                        contentDescription = "Cinetra Logo",
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "CINETRA",
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Black,
-                                            letterSpacing = 1.2.sp,
-                                            brush = gradients.wordmark
-                                        )
-                                    )
-                                }
-
-                                // Search shortcut
-                                IconButton(
-                                    onClick = { movieViewModel.openSearch() },
-                                    modifier = Modifier.testTag("topbar_search_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = "Search",
-                                        tint = colors.textPrimary
-                                    )
-                                }
-
-                                // Downloads shortcut (with active / offline badge)
-                                IconButton(
-                                    onClick = { movieViewModel.openDownloadsScreen() },
-                                    modifier = Modifier.testTag("topbar_downloads_button")
-                                ) {
-                                    BadgedBox(
-                                        modifier = Modifier.graphicsLayer {
-                                            val s = downloadBadgeScale.value
-                                            scaleX = s
-                                            scaleY = s
-                                        },
-                                        badge = {
-                                            if (runningDownloadsCount > 0) {
-                                                Badge(containerColor = colors.softRose) {
-                                                    Text(
-                                                        text = "$runningDownloadsCount",
-                                                        color = Color.White,
-                                                        fontSize = 10.sp
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = if (userState.currentScreen is Screen.Downloads) Icons.Filled.Download else Icons.Outlined.Download,
-                                            contentDescription = "Downloads",
-                                            tint = if (runningDownloadsCount > 0) colors.softRose else if (completedDownloadsCount > 0) colors.gold else colors.textPrimary
-                                        )
-                                    }
-                                }
-
-                                // Watchlist shortcut
-                                IconButton(
-                                    onClick = { movieViewModel.navigateTo(Screen.Watchlist) },
-                                    modifier = Modifier.testTag("topbar_watchlist_button")
-                                ) {
-                                    BadgedBox(
-                                        badge = {
-                                            if (watchlist.isNotEmpty()) {
-                                                Badge(containerColor = colors.accentMid) {
-                                                    Text("${watchlist.size}", color = Color.White, fontSize = 10.sp)
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Bookmark,
-                                            contentDescription = "Watchlist",
-                                            tint = if (watchlist.isNotEmpty()) colors.gold else colors.textPrimary
-                                        )
-                                    }
-                                }
-
-                                // Settings shortcut
-                                IconButton(
-                                    onClick = { movieViewModel.navigateTo(Screen.Settings) },
-                                    modifier = Modifier.testTag("topbar_settings_button")
-                                ) {
-                                    Icon(
-                                        imageVector = if (userState.currentScreen is Screen.Settings) Icons.Filled.Settings else Icons.Outlined.Settings,
-                                        contentDescription = "Settings",
-                                        tint = if (userState.currentScreen is Screen.Settings) colors.softRose else colors.textPrimary
-                                    )
-                                }
-                            }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 12.dp, bottom = 4.dp)
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.BottomCenter)
                                     .fillMaxWidth()
-                                    .height(1.dp)
-                                    .background(colors.border.copy(alpha = 0.55f))
-                            )
-                        }
-                    }
-                }
-            },
-            bottomBar = {
-                AnimatedVisibility(
-                    visible = !isDedicatedSubPage && !useNavigationRail,
-                    enter = fadeIn(tween(180)) + expandVertically(tween(200)),
-                    exit = fadeOut(tween(140)) + shrinkVertically(tween(180))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(gradients.bottomBarBackdrop)
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(colors.border.copy(alpha = 0.45f))
-                        )
-                        NavigationBar(
-                            containerColor = Color.Transparent,
-                            contentColor = colors.textPrimary,
-                            windowInsets = WindowInsets(0, 0, 0, 0)
-                        ) {
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.Home,
-                                onClick = { movieViewModel.navigateTo(Screen.Home) },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (userState.currentScreen is Screen.Home) Icons.Filled.Home else Icons.Outlined.Home,
-                                        contentDescription = "Home"
-                                    )
-                                },
-                                label = { Text("Home", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_home")
-                            )
+                                    .height(56.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Clean bold white CINETRA Wordmark
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "CINETRA",
+                                            color = colors.textPrimary,
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontSize = 21.sp,
+                                                fontWeight = FontWeight.Black,
+                                                letterSpacing = 1.4.sp
+                                            )
+                                        )
+                                    }
 
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.Explore,
-                                onClick = { movieViewModel.navigateTo(Screen.Explore) },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (userState.currentScreen is Screen.Explore) Icons.Filled.Search else Icons.Outlined.Search,
-                                        contentDescription = "Explore"
-                                    )
-                                },
-                                label = { Text("Explore", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_explore")
-                            )
+                                    // Search shortcut
+                                    IconButton(
+                                        onClick = { movieViewModel.openSearch() },
+                                        modifier = Modifier.testTag("topbar_search_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Search",
+                                            tint = colors.textPrimary
+                                        )
+                                    }
 
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.Watchlist,
-                                onClick = { movieViewModel.navigateTo(Screen.Watchlist) },
-                                icon = {
-                                    BadgedBox(
-                                        badge = {
-                                            if (watchlist.isNotEmpty()) {
-                                                Badge(containerColor = colors.accentMid) {
-                                                    Text("${watchlist.size}", color = Color.White)
+                                    // Downloads shortcut (badge only when active)
+                                    IconButton(
+                                        onClick = { movieViewModel.openDownloadsScreen() },
+                                        modifier = Modifier.testTag("topbar_downloads_button")
+                                    ) {
+                                        BadgedBox(
+                                            modifier = Modifier.graphicsLayer {
+                                                val s = downloadBadgeScale.value
+                                                scaleX = s
+                                                scaleY = s
+                                            },
+                                            badge = {
+                                                if (runningDownloadsCount > 0) {
+                                                    Badge(
+                                                        containerColor = colors.primary,
+                                                        contentColor = colors.onPrimary
+                                                    ) {
+                                                        Text(
+                                                            text = "$runningDownloadsCount",
+                                                            fontSize = 10.sp
+                                                        )
+                                                    }
                                                 }
                                             }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (userState.currentScreen is Screen.Downloads) Icons.Filled.Download else Icons.Outlined.Download,
+                                                contentDescription = "Downloads",
+                                                tint = if (userState.currentScreen is Screen.Downloads) colors.primary else colors.textPrimary
+                                            )
                                         }
+                                    }
+
+                                    // Watchlist shortcut
+                                    IconButton(
+                                        onClick = { movieViewModel.navigateTo(Screen.Watchlist) },
+                                        modifier = Modifier.testTag("topbar_watchlist_button")
                                     ) {
                                         Icon(
                                             imageVector = if (userState.currentScreen is Screen.Watchlist) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                            contentDescription = "Watchlist"
+                                            contentDescription = "Watchlist",
+                                            tint = if (userState.currentScreen is Screen.Watchlist) colors.primary else colors.textPrimary
                                         )
                                     }
-                                },
-                                label = { Text("Saved", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_watchlist")
-                            )
 
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.Downloads,
-                                onClick = { movieViewModel.openDownloadsScreen() },
-                                icon = {
-                                    BadgedBox(
-                                        modifier = Modifier.graphicsLayer {
-                                            val s = downloadBadgeScale.value
-                                            scaleX = s
-                                            scaleY = s
-                                        },
-                                        badge = {
-                                            if (runningDownloadsCount > 0) {
-                                                Badge(containerColor = colors.softRose) {
-                                                    Text("$runningDownloadsCount", color = Color.White)
-                                                }
-                                            }
-                                        }
+                                    // Settings shortcut
+                                    IconButton(
+                                        onClick = { movieViewModel.navigateTo(Screen.Settings) },
+                                        modifier = Modifier.testTag("topbar_settings_button")
                                     ) {
                                         Icon(
-                                            imageVector = if (userState.currentScreen is Screen.Downloads) Icons.Filled.Download else Icons.Outlined.Download,
-                                            contentDescription = "Downloads"
+                                            imageVector = if (userState.currentScreen is Screen.Settings) Icons.Filled.Settings else Icons.Outlined.Settings,
+                                            contentDescription = "Settings",
+                                            tint = if (userState.currentScreen is Screen.Settings) colors.primary else colors.textPrimary
                                         )
                                     }
-                                },
-                                label = { Text("Downloads", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_downloads")
-                            )
-
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.ContinueWatching,
-                                onClick = { movieViewModel.navigateTo(Screen.ContinueWatching) },
-                                icon = {
-                                    BadgedBox(
-                                        badge = {
-                                            if (continueWatching.isNotEmpty()) {
-                                                Badge(containerColor = colors.gold) {
-                                                    Text("${continueWatching.size}", color = Color.Black)
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = if (userState.currentScreen is Screen.ContinueWatching) Icons.Filled.History else Icons.Outlined.History,
-                                            contentDescription = "History"
-                                        )
-                                    }
-                                },
-                                label = { Text("History", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_history")
-                            )
-
-                            NavigationBarItem(
-                                selected = userState.currentScreen is Screen.Settings,
-                                onClick = { movieViewModel.navigateTo(Screen.Settings) },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (userState.currentScreen is Screen.Settings) Icons.Filled.Settings else Icons.Outlined.Settings,
-                                        contentDescription = "Settings"
-                                    )
-                                },
-                                label = { Text("Settings", fontSize = 9.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                                colors = navItemColors,
-                                modifier = Modifier.testTag("nav_settings")
-                            )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(colors.border.copy(alpha = 0.5f))
+                                )
+                            }
                         }
                     }
                 }
@@ -621,8 +487,8 @@ fun CinetraApp() {
                                 BadgedBox(
                                     badge = {
                                         if (watchlist.isNotEmpty()) {
-                                            Badge(containerColor = colors.accentMid) {
-                                                Text("${watchlist.size}", color = Color.White)
+                                            Badge(containerColor = colors.primary, contentColor = colors.onPrimary) {
+                                                Text("${watchlist.size}")
                                             }
                                         }
                                     }
@@ -644,8 +510,8 @@ fun CinetraApp() {
                                 BadgedBox(
                                     badge = {
                                         if (continueWatching.isNotEmpty()) {
-                                            Badge(containerColor = colors.gold) {
-                                                Text("${continueWatching.size}", color = Color.Black)
+                                            Badge(containerColor = colors.surfaceHover, contentColor = colors.textPrimary) {
+                                                Text("${continueWatching.size}")
                                             }
                                         }
                                     }
@@ -672,8 +538,8 @@ fun CinetraApp() {
                                     },
                                     badge = {
                                         if (runningDownloadsCount > 0) {
-                                            Badge(containerColor = colors.softRose) {
-                                                Text("$runningDownloadsCount", color = Color.White)
+                                            Badge(containerColor = colors.primary, contentColor = colors.onPrimary) {
+                                                Text("$runningDownloadsCount")
                                             }
                                         }
                                     }
@@ -843,10 +709,28 @@ fun CinetraApp() {
                                     becauseYouWatchedItems = userState.becauseYouWatchedItems,
                                     popularInGenreName = userState.popularInGenreName,
                                     popularInGenreItems = userState.popularInGenreItems,
+                                    homeLatestReleased = userState.homeLatestReleased,
+                                    homeBollywoodMovies = userState.homeBollywoodMovies,
+                                    homeSouthIndianMovies = userState.homeSouthIndianMovies,
+                                    homeBanglaMixed = userState.homeBanglaMixed,
+                                    homeHollywoodMovies = userState.homeHollywoodMovies,
+                                    homeKDramaSeries = userState.homeKDramaSeries,
+                                    homeCDramaSeries = userState.homeCDramaSeries,
+                                    homeUpcomingSoonest = userState.homeUpcomingSoonest,
                                     onLanguageClick = { code, name -> movieViewModel.openLanguageCatalog(code, name) },
                                     onSeeAllClick = { section ->
                                         when (section) {
+                                            "Latest" -> movieViewModel.openCategoryList("Latest Releases", "Latest")
                                             "Continue Watching" -> movieViewModel.navigateTo(Screen.ContinueWatching)
+                                            "HotMovies" -> movieViewModel.openCategoryList("Hot Movies", "HotMovies")
+                                            "HotSeries" -> movieViewModel.openCategoryList("Hot Series", "HotSeries")
+                                            "Bollywood" -> movieViewModel.openLanguageCatalog("hi", "Bollywood")
+                                            "SouthIndian" -> movieViewModel.openCategoryList("South Indian", "SouthIndian")
+                                            "Bangla" -> movieViewModel.openLanguageCatalog("bn", "Bangla")
+                                            "Hollywood" -> movieViewModel.openLanguageCatalog("en", "Hollywood")
+                                            "KDrama" -> movieViewModel.openLanguageCatalog("ko", "Original K-Drama")
+                                            "CDrama" -> movieViewModel.openLanguageCatalog("zh", "Original C-Drama")
+                                            "UpcomingSoonest" -> movieViewModel.openCategoryList("Upcoming", "UpcomingSoonest")
                                             "NewReleases" -> movieViewModel.openCategoryList("New Releases • Daily", "NewReleases")
                                             "Trending" -> {
                                                 val activeGenre = userState.selectedHomeGenre
@@ -1003,9 +887,17 @@ fun CinetraApp() {
                                     userState.upcomingMovies,
                                     userState.topRatedMovies,
                                     userState.topRatedTv,
-                                    userState.customMedia
+                                    userState.customMedia,
+                                    userState.homeLatestReleased,
+                                    userState.homeSouthIndianMovies,
+                                    userState.homeUpcomingSoonest
                                 ) {
                                     val rawList = when (screen.categoryKey) {
+                                        "Latest" -> userState.homeLatestReleased
+                                        "HotMovies" -> userState.trendingMovies.ifEmpty { userState.popularMovies }.take(10)
+                                        "HotSeries" -> userState.trendingTv.ifEmpty { userState.topRatedTv }
+                                        "SouthIndian" -> userState.homeSouthIndianMovies
+                                        "UpcomingSoonest" -> userState.homeUpcomingSoonest
                                         "Trending" -> userState.trending
                                         "TrendingMovies" -> userState.trendingMovies
                                         "TrendingTv" -> userState.trendingTv
@@ -1038,9 +930,9 @@ fun CinetraApp() {
                                         categoryItems.size
                                     }
                                     "TrendingMovies" -> maxOf(userState.trendingMoviesTotalResults, categoryItems.size)
-                                    "TrendingTv" -> maxOf(userState.trendingTvTotalResults, categoryItems.size)
+                                    "TrendingTv", "HotSeries" -> maxOf(userState.trendingTvTotalResults, categoryItems.size)
                                     "NewReleases" -> maxOf(userState.newReleasesTotalResults, categoryItems.size)
-                                    "Top10Movies", "Top10Tv", "Specials" -> categoryItems.size
+                                    "Latest", "HotMovies", "SouthIndian", "UpcomingSoonest", "Top10Movies", "Top10Tv", "Specials" -> categoryItems.size
                                     "Movies" -> maxOf(userState.popularMoviesTotalResults, categoryItems.size)
                                     "UpcomingMovies" -> maxOf(userState.upcomingMoviesTotalResults, categoryItems.size)
                                     "TopRatedMovies" -> maxOf(userState.topRatedMoviesTotalResults, categoryItems.size)
@@ -1055,7 +947,7 @@ fun CinetraApp() {
                                     "TrendingMovies" -> userState.hasMoreTrendingMovies
                                     "TrendingTv" -> userState.hasMoreTrendingTv
                                     "NewReleases" -> userState.hasMoreNewReleases
-                                    "Top10Movies", "Top10Tv", "Specials" -> false
+                                    "Latest", "HotMovies", "HotSeries", "SouthIndian", "UpcomingSoonest", "Top10Movies", "Top10Tv", "Specials" -> false
                                     "Movies" -> userState.hasMorePopularMovies
                                     "UpcomingMovies" -> userState.hasMoreUpcomingMovies
                                     "TopRatedMovies" -> userState.hasMoreTopRatedMovies
@@ -1067,7 +959,7 @@ fun CinetraApp() {
                                     "TrendingMovies" -> userState.isLoadingMoreTrendingMovies
                                     "TrendingTv" -> userState.isLoadingMoreTrendingTv
                                     "NewReleases" -> userState.isLoadingMoreNewReleases
-                                    "Top10Movies", "Top10Tv", "Specials" -> false
+                                    "Latest", "HotMovies", "HotSeries", "SouthIndian", "UpcomingSoonest", "Top10Movies", "Top10Tv", "Specials" -> false
                                     "Movies" -> userState.isLoadingMoreMovies
                                     "UpcomingMovies" -> userState.isLoadingMoreUpcomingMovies
                                     "TopRatedMovies" -> userState.isLoadingMoreTopRatedMovies
@@ -1405,10 +1297,171 @@ fun CinetraApp() {
                             }
                         }
                     )
+
+                    // Floating Translucent Glass Bottom Navigation Pill (content scrolls behind it)
+                    FloatingBottomNavOverlay(
+                        visible = !isDedicatedSubPage && !useNavigationRail,
+                        currentScreen = userState.currentScreen,
+                        runningDownloadsCount = runningDownloadsCount,
+                        downloadBadgeScale = downloadBadgeScale.value,
+                        onNavigate = { movieViewModel.navigateTo(it) },
+                        onOpenDownloads = { movieViewModel.openDownloadsScreen() },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
                 }
             }
         }
         }
+        }
+        }
+    }
+}
+
+@Composable
+private fun FloatingBottomNavOverlay(
+    visible: Boolean,
+    currentScreen: Screen,
+    runningDownloadsCount: Int,
+    downloadBadgeScale: Float,
+    onNavigate: (Screen) -> Unit,
+    onOpenDownloads: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(180)) + slideInVertically(tween(220, easing = CineEase)) { it / 2 },
+        exit = fadeOut(tween(140)) + slideOutVertically(tween(180, easing = CineEase)) { it / 2 },
+        modifier = modifier
+    ) {
+        FloatingGlassBar {
+            FloatingGlassNavTab(
+                label = "Home",
+                selected = currentScreen is Screen.Home,
+                selectedIcon = Icons.Filled.Home,
+                unselectedIcon = Icons.Outlined.Home,
+                onClick = { onNavigate(Screen.Home) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_home")
+            )
+            FloatingGlassNavTab(
+                label = "Explore",
+                selected = currentScreen is Screen.Explore,
+                selectedIcon = Icons.Filled.Search,
+                unselectedIcon = Icons.Outlined.Search,
+                onClick = { onNavigate(Screen.Explore) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_explore")
+            )
+            FloatingGlassNavTab(
+                label = "Saved",
+                selected = currentScreen is Screen.Watchlist,
+                selectedIcon = Icons.Filled.Bookmark,
+                unselectedIcon = Icons.Outlined.BookmarkBorder,
+                onClick = { onNavigate(Screen.Watchlist) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_watchlist")
+            )
+            FloatingGlassNavTab(
+                label = "Downloads",
+                selected = currentScreen is Screen.Downloads,
+                selectedIcon = Icons.Filled.Download,
+                unselectedIcon = Icons.Outlined.Download,
+                badgeCount = runningDownloadsCount,
+                badgeScale = downloadBadgeScale,
+                onClick = onOpenDownloads,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_downloads")
+            )
+            FloatingGlassNavTab(
+                label = "History",
+                selected = currentScreen is Screen.ContinueWatching,
+                selectedIcon = Icons.Filled.History,
+                unselectedIcon = Icons.Outlined.History,
+                onClick = { onNavigate(Screen.ContinueWatching) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_history")
+            )
+            FloatingGlassNavTab(
+                label = "Settings",
+                selected = currentScreen is Screen.Settings,
+                selectedIcon = Icons.Filled.Settings,
+                unselectedIcon = Icons.Outlined.Settings,
+                onClick = { onNavigate(Screen.Settings) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("nav_settings")
+            )
+        }
+    }
+}
+
+@Composable
+private fun FloatingGlassNavTab(
+    label: String,
+    selected: Boolean,
+    selectedIcon: ImageVector,
+    unselectedIcon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    badgeCount: Int = 0,
+    badgeScale: Float = 1f
+) {
+    val colors = CinetraTheme.colors
+    val iconTint = if (selected) colors.onPrimary else CinetraTokens.NavInactiveIcon
+    val pillBg = if (selected) colors.primary else Color.Transparent
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .height(50.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true),
+                role = Role.Tab,
+                onClick = onClick
+            )
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(width = 44.dp, height = 32.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(pillBg)
+        ) {
+            BadgedBox(
+                modifier = Modifier.graphicsLayer {
+                    scaleX = badgeScale
+                    scaleY = badgeScale
+                },
+                badge = {
+                    if (badgeCount > 0) {
+                        Badge(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary
+                        ) {
+                            Text(
+                                text = "$badgeCount",
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = if (selected) selectedIcon else unselectedIcon,
+                    contentDescription = label,
+                    tint = iconTint,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
         }
     }
 }

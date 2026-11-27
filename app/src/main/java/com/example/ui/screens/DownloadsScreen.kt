@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,11 +53,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,8 +65,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,7 +80,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -97,13 +97,16 @@ import com.example.data.model.DownloadStatus
 import com.example.data.model.MovieBoxSubject
 import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineDialogEntryBox
 import com.example.ui.components.CineEase
-import com.example.ui.components.CineGradientButton
+import com.example.ui.components.CinetraEmptyState
+import com.example.ui.components.RedButton
+import com.example.ui.components.StylishProgressBar
 import com.example.ui.components.cinePressScale
 import com.example.ui.components.rememberCineImageRequest
 import com.example.ui.components.rememberDarkImagePainter
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 import kotlinx.coroutines.delay
 
 @Composable
@@ -128,8 +131,8 @@ fun DownloadsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val bottomClearance = CinetraTheme.bottomBarClearance
 
     var selectedFilter by remember { mutableStateOf("All") }
     var searchDraft by remember(movieBoxSearchQuery) { mutableStateOf(movieBoxSearchQuery) }
@@ -173,63 +176,70 @@ fun DownloadsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .testTag("downloads_screen")
     ) {
         // Header Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Surface(
+            color = colors.background,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("downloads_back_button")
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = colors.textPrimary
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Downloads",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = colors.textPrimary
-                )
-                val summary = remember(completedCount, runningCount, queuedOrPausedCount, totalOfflineBytes) {
-                    buildString {
-                        append("$completedCount completed")
-                        if (runningCount > 0) append(" • $runningCount downloading")
-                        if (queuedOrPausedCount > 0) append(" • $queuedOrPausedCount queued/paused")
-                        if (totalOfflineBytes > 0L) append(" • ${formatDownloadBytes(totalOfflineBytes)}")
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, top = 22.dp, bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("downloads_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = colors.textPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Downloads",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = colors.textPrimary
+                        )
+                        val summary = remember(completedCount, runningCount, queuedOrPausedCount, totalOfflineBytes) {
+                            buildString {
+                                append("$completedCount completed")
+                                if (runningCount > 0) append(" • $runningCount downloading")
+                                if (queuedOrPausedCount > 0) append(" • $queuedOrPausedCount queued/paused")
+                                if (totalOfflineBytes > 0L) append(" • ${formatDownloadBytes(totalOfflineBytes)}")
+                            }
+                        }
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = onRefreshStatus,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("downloads_refresh_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Sync download queue",
+                            tint = colors.textPrimary
+                        )
                     }
                 }
-                Text(
-                    text = summary,
-                    fontSize = 11.sp,
-                    color = colors.gold,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            IconButton(
-                onClick = onRefreshStatus,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("downloads_refresh_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Sync download queue",
-                    tint = colors.textPrimary
-                )
+                HorizontalDivider(thickness = 1.dp, color = colors.border.copy(alpha = 0.6f))
             }
         }
 
@@ -241,16 +251,16 @@ fun DownloadsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clip(MaterialTheme.shapes.small)
                     .background(colors.success.copy(alpha = 0.14f))
-                    .border(1.dp, colors.success.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                    .border(1.dp, colors.success.copy(alpha = 0.45f), MaterialTheme.shapes.small)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = feedbackMessage.orEmpty(),
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
@@ -267,10 +277,10 @@ fun DownloadsScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Filter Chips
+            // Filter Pills
             item(key = "downloads_filter_row", contentType = "filter_row") {
                 Row(
                     modifier = Modifier
@@ -280,27 +290,15 @@ fun DownloadsScreen(
                 ) {
                     val activeTotal = runningCount + queuedOrPausedCount
                     listOf("All", "Active", "Completed", "Failed").forEach { tab ->
-                        val selected = selectedFilter == tab
-                        FilterChip(
-                            selected = selected,
+                        val label = when (tab) {
+                            "Active" -> "Active ($activeTotal)"
+                            "Completed" -> "Completed ($completedCount)"
+                            else -> tab
+                        }
+                        CategoryPill(
+                            label = label,
+                            selected = selectedFilter == tab,
                             onClick = { selectedFilter = tab },
-                            label = {
-                                Text(
-                                    text = when (tab) {
-                                        "Active" -> "Active ($activeTotal)"
-                                        "Completed" -> "Completed ($completedCount)"
-                                        else -> tab
-                                    },
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.accentMid,
-                                selectedLabelColor = Color.White,
-                                containerColor = colors.surfaceElevated,
-                                labelColor = colors.textPrimary
-                            ),
                             modifier = Modifier.testTag("downloads_filter_$tab")
                         )
                     }
@@ -309,36 +307,21 @@ fun DownloadsScreen(
 
             if (filteredDownloads.isEmpty()) {
                 item(key = "downloads_empty_state", contentType = "empty_state") {
-                    Column(
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.surface)
-                            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                            .padding(28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = null,
-                            tint = colors.gold,
-                            modifier = Modifier.size(44.dp)
-                        )
-                        Text(
-                            text = if (selectedFilter == "All") {
+                        CinetraEmptyState(
+                            icon = Icons.Default.Download,
+                            title = if (selectedFilter == "All") {
                                 "No Downloads Yet"
                             } else {
                                 "No $selectedFilter Downloads"
                             },
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = colors.textPrimary
-                        )
-                        Text(
-                            text = "Tap Download on any movie, full TV season, or episode to watch offline inside Cinetra.",
-                            fontSize = 12.sp,
-                            color = colors.textSecondary,
-                            lineHeight = 18.sp
+                            subtitle = "Tap Download on any movie, full TV season, or episode to watch offline inside Cinetra."
                         )
                     }
                 }
@@ -401,22 +384,22 @@ fun DownloadsScreen(
             item(key = "catalog_download_search_card", contentType = "catalog_search") {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = colors.surface),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                        .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.CloudDownload,
                                 contentDescription = null,
-                                tint = colors.softRose,
+                                tint = colors.primary,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -424,13 +407,13 @@ fun DownloadsScreen(
                                 Text(
                                     text = "Catalog Download Search",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
+                                    fontSize = 15.sp,
                                     color = colors.textPrimary
                                 )
                                 Text(
                                     text = "Search movies & series for offline HD downloads",
-                                    fontSize = 11.sp,
-                                    color = colors.textSecondary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textMuted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -442,7 +425,11 @@ fun DownloadsScreen(
                             onValueChange = { searchDraft = it },
                             singleLine = true,
                             placeholder = {
-                                Text("Search title (e.g. Inception, Breaking Bad)...", fontSize = 12.sp, color = colors.textMuted)
+                                Text(
+                                    text = "Search title (e.g. Inception, Breaking Bad)...",
+                                    fontSize = 12.sp,
+                                    color = colors.textMuted
+                                )
                             },
                             trailingIcon = {
                                 IconButton(
@@ -452,7 +439,7 @@ fun DownloadsScreen(
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = "Search catalog downloads",
-                                        tint = colors.softRose
+                                        tint = colors.primary
                                     )
                                 }
                             },
@@ -461,10 +448,13 @@ fun DownloadsScreen(
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = colors.primary,
                                 unfocusedBorderColor = colors.border,
+                                focusedContainerColor = colors.surfaceElevated,
+                                unfocusedContainerColor = colors.surfaceElevated,
                                 focusedTextColor = colors.textPrimary,
-                                unfocusedTextColor = colors.textPrimary
+                                unfocusedTextColor = colors.textPrimary,
+                                cursorColor = colors.primary
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(50),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("catalog_download_search_input")
@@ -476,21 +466,21 @@ fun DownloadsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 CircularProgressIndicator(
-                                    color = colors.softRose,
+                                    color = colors.primary,
                                     strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
                                     text = "Searching available downloads...",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = colors.textSecondary
                                 )
                             }
                         } else if (!movieBoxSearchError.isNullOrBlank()) {
                             Text(
                                 text = movieBoxSearchError,
-                                fontSize = 12.sp,
-                                color = colors.softRose
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.primary
                             )
                         } else if (movieBoxSearchResults.isNotEmpty()) {
                             LazyRow(
@@ -519,7 +509,7 @@ fun DownloadsScreen(
             }
 
             item(key = "downloads_bottom_spacer", contentType = "spacer") {
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(bottomClearance + 24.dp))
             }
         }
     }
@@ -542,7 +532,7 @@ fun DownloadsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             text = "Choose Season & Episode to fetch download links:",
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -573,7 +563,7 @@ fun DownloadsScreen(
                         onOpenMovieBoxSubject(subject, s, e)
                     }
                 ) {
-                    Text("Fetch Links", color = colors.softRose, fontWeight = FontWeight.Bold)
+                    Text("Fetch Links", color = colors.primary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -597,7 +587,6 @@ private fun SeriesDownloadGroupCard(
     onRetryDownload: (DownloadEntity) -> Unit,
     onCancelOrDelete: (String) -> Unit
 ) {
-    val colors = CineTheme.colors
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         seriesGroup.seasons.forEach { seasonGroup ->
             SeasonDownloadGroupCard(
@@ -627,13 +616,13 @@ private fun SeasonDownloadGroupCard(
     onRetryDownload: (DownloadEntity) -> Unit,
     onCancelOrDelete: (String) -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     Card(
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        shape = RoundedCornerShape(14.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             .testTag("download_season_group_${seasonGroup.seriesKey}")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -648,16 +637,17 @@ private fun SeasonDownloadGroupCard(
                 Box(
                     modifier = Modifier
                         .width(52.dp)
-                        .height(72.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.surfaceElevated),
+                        .height(74.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.surfaceElevated)
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (seasonGroup.posterUrl.isNotBlank()) {
                         val seasonPosterRequest = rememberCineImageRequest(
                             url = seasonGroup.posterUrl,
                             widthDp = 52.dp,
-                            heightDp = 72.dp
+                            heightDp = 74.dp
                         )
                         val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
                         AsyncImage(
@@ -672,7 +662,7 @@ private fun SeasonDownloadGroupCard(
                         Icon(
                             imageVector = Icons.Default.CloudDownload,
                             contentDescription = null,
-                            tint = colors.softRose
+                            tint = colors.primary
                         )
                     }
                 }
@@ -705,38 +695,28 @@ private fun SeasonDownloadGroupCard(
                     Text(
                         text = "Season ${seasonGroup.seasonNumber} • ${seasonGroup.completedCount}/${seasonGroup.episodes.size} Completed",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.gold
+                        fontWeight = FontWeight.Medium,
+                        color = colors.textSecondary
                     )
-                    LinearProgressIndicator(
-                        progress = { animatedSeasonProgress },
-                        color = if (seasonGroup.completedCount == seasonGroup.episodes.size) colors.success else colors.primary,
-                        trackColor = colors.surfaceElevated,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(50))
+                    val isGroupComplete = seasonGroup.completedCount == seasonGroup.episodes.size && seasonGroup.episodes.isNotEmpty()
+                    StylishProgressBar(
+                        progress = animatedSeasonProgress,
+                        label = "$animatedSeasonPercent%",
+                        fillStartColor = if (isGroupComplete) colors.success else colors.accentEnd,
+                        fillEndColor = if (isGroupComplete) colors.success else colors.accentStart,
+                        dotColor = if (isGroupComplete) colors.success else com.example.ui.theme.CinetraTokens.ProgressGlowDot,
+                        labelColor = if (isGroupComplete) colors.success else colors.accentStart,
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = if (seasonGroup.totalExpectedBytes > 0L) {
-                                "${formatDownloadBytes(seasonGroup.totalDownloadedBytes)} / ${formatDownloadBytes(seasonGroup.totalExpectedBytes)}"
-                            } else {
-                                "${seasonGroup.episodes.size} episode(s)"
-                            },
-                            fontSize = 11.sp,
-                            color = colors.textSecondary
-                        )
-                        Text(
-                            text = "$animatedSeasonPercent%",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary
-                        )
-                    }
+                    Text(
+                        text = if (seasonGroup.totalExpectedBytes > 0L) {
+                            "${formatDownloadBytes(seasonGroup.totalDownloadedBytes)} / ${formatDownloadBytes(seasonGroup.totalExpectedBytes)}"
+                        } else {
+                            "${seasonGroup.episodes.size} episode(s)"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textMuted
+                    )
                 }
 
                 IconButton(onClick = onToggleExpand, modifier = Modifier.size(48.dp)) {
@@ -767,7 +747,7 @@ private fun SeasonDownloadGroupCard(
                         )
                         if (idx < seasonGroup.episodes.lastIndex) {
                             HorizontalDivider(
-                                color = colors.border.copy(alpha = 0.55f),
+                                color = colors.border,
                                 modifier = Modifier.padding(horizontal = 12.dp)
                             )
                         }
@@ -788,14 +768,8 @@ private fun EpisodeDownloadRow(
     onRetry: () -> Unit,
     onCancelOrDelete: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val status = download.parsedStatus
-    val statusColor = when (status) {
-        DownloadStatus.COMPLETED -> colors.success
-        DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
-        DownloadStatus.PAUSED -> colors.gold
-        DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
-    }
 
     Column(
         modifier = Modifier
@@ -825,8 +799,8 @@ private fun EpisodeDownloadRow(
                 }
                 Text(
                     text = "${download.format} • $sizeText",
-                    fontSize = 11.sp,
-                    color = colors.textSecondary
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textMuted
                 )
             }
 
@@ -842,9 +816,10 @@ private fun EpisodeDownloadRow(
             ) { animatedStatus ->
                 val pillColor = when (animatedStatus) {
                     DownloadStatus.COMPLETED -> colors.success
-                    DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
-                    DownloadStatus.PAUSED -> colors.gold
-                    DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
+                    DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.primary
+                    DownloadStatus.PAUSED -> colors.warning
+                    DownloadStatus.RUNNING -> colors.primary
+                    DownloadStatus.QUEUED -> colors.textSecondary
                 }
                 Text(
                     text = animatedStatus.displayLabel,
@@ -852,9 +827,9 @@ private fun EpisodeDownloadRow(
                     fontWeight = FontWeight.Bold,
                     color = pillColor,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(50))
                         .background(pillColor.copy(alpha = 0.14f))
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 )
             }
         }
@@ -870,43 +845,46 @@ private fun EpisodeDownloadRow(
                 animationSpec = tween(durationMillis = 200, easing = CineEase),
                 label = "epDownloadPercent"
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (download.progressPercent > 0) {
+            if (download.progressPercent > 0) {
+                val isPaused = status == DownloadStatus.PAUSED
+                StylishProgressBar(
+                    progress = animatedProgress,
+                    label = "$animatedPercent%",
+                    fillStartColor = if (isPaused) colors.warning else colors.accentEnd,
+                    fillEndColor = if (isPaused) colors.warning else colors.accentStart,
+                    dotColor = if (isPaused) colors.warning else com.example.ui.theme.CinetraTokens.ProgressGlowDot,
+                    labelColor = if (isPaused) colors.warning else colors.accentStart,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     LinearProgressIndicator(
-                        progress = { animatedProgress },
-                        color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
-                        trackColor = colors.surfaceElevated,
+                        color = if (status == DownloadStatus.PAUSED) colors.warning else colors.primary,
+                        trackColor = colors.surfaceHover,
                         modifier = Modifier
                             .weight(1f)
                             .height(5.dp)
                             .clip(RoundedCornerShape(50))
                     )
-                } else {
-                    LinearProgressIndicator(
-                        color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
-                        trackColor = colors.surfaceElevated,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(50))
+                    Text(
+                        text = "$animatedPercent%",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = if (status == DownloadStatus.PAUSED) colors.warning else colors.accentStart
                     )
                 }
-                Text(
-                    text = "$animatedPercent%",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.textPrimary
-                )
             }
         } else if (status == DownloadStatus.FAILED && download.errorReason.isNotBlank()) {
             Text(
                 text = download.errorReason,
-                fontSize = 11.sp,
-                color = colors.softRose,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.primary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -929,19 +907,19 @@ private fun MovieBoxResultCard(
     subject: MovieBoxSubject,
     onDownloadClick: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val interactionSource = remember { MutableInteractionSource() }
     val darkPlaceholder = rememberDarkImagePainter(colors.background)
     Column(
         modifier = Modifier
             .width(136.dp)
             .cinePressScale(interactionSource = interactionSource)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.medium)
             .background(colors.surfaceElevated)
-            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(),
+                indication = ripple(),
                 onClick = onDownloadClick
             )
             .padding(8.dp),
@@ -951,7 +929,7 @@ private fun MovieBoxResultCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(148.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(colors.background)
         ) {
             if (subject.coverUrl.isNotBlank()) {
@@ -969,39 +947,28 @@ private fun MovieBoxResultCard(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            Text(
-                text = subject.mediaTypeLabel,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            )
         }
         Text(
             text = subject.title,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = listOfNotNull(
+                subject.mediaTypeLabel.takeIf { it.isNotBlank() },
                 subject.releaseYear.takeIf { it.isNotBlank() },
                 subject.imdbRating.takeIf { it.isNotBlank() }?.let { "★ $it" }
             ).joinToString(" • ").ifBlank { "HD Ready" },
-            fontSize = 10.sp,
-            color = colors.textSecondary,
-            maxLines = 1
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
-        CineGradientButton(
+        RedButton(
             onClick = onDownloadClick,
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(10.dp),
             fillWidth = true,
             minHeight = 36.dp,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -1010,11 +977,11 @@ private fun MovieBoxResultCard(
             Icon(
                 imageVector = Icons.Default.Download,
                 contentDescription = "Download ${subject.title}",
-                tint = Color.White,
+                tint = colors.onPrimary,
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Get Links", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Get Links", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
         }
     }
 }
@@ -1029,21 +996,15 @@ private fun DownloadItemCard(
     onRetry: () -> Unit,
     onCancelOrDelete: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val status = download.parsedStatus
-    val statusColor = when (status) {
-        DownloadStatus.COMPLETED -> colors.success
-        DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
-        DownloadStatus.PAUSED -> colors.gold
-        DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
-    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        shape = RoundedCornerShape(14.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             .testTag("download_card_${download.id}")
     ) {
         Column(
@@ -1061,7 +1022,8 @@ private fun DownloadItemCard(
                         .width(64.dp)
                         .height(90.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(colors.surfaceElevated),
+                        .background(colors.surfaceElevated)
+                        .border(1.dp, colors.border, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (download.fullPosterUrl.isNotBlank()) {
@@ -1083,7 +1045,7 @@ private fun DownloadItemCard(
                         Icon(
                             imageVector = Icons.Default.CloudDownload,
                             contentDescription = null,
-                            tint = colors.softRose,
+                            tint = colors.primary,
                             modifier = Modifier.size(26.dp)
                         )
                     }
@@ -1099,7 +1061,7 @@ private fun DownloadItemCard(
                             Icon(
                                 imageVector = Icons.Default.DownloadDone,
                                 contentDescription = "Downloaded",
-                                tint = Color.White,
+                                tint = colors.onPrimary,
                                 modifier = Modifier.size(12.dp)
                             )
                         }
@@ -1122,7 +1084,7 @@ private fun DownloadItemCard(
                     )
                     Text(
                         text = "${download.episodeSubtitle} • ${download.format}",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1141,9 +1103,10 @@ private fun DownloadItemCard(
                         ) { animatedStatus ->
                             val pillColor = when (animatedStatus) {
                                 DownloadStatus.COMPLETED -> colors.success
-                                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.softRose
-                                DownloadStatus.PAUSED -> colors.gold
-                                DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.info
+                                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> colors.primary
+                                DownloadStatus.PAUSED -> colors.warning
+                                DownloadStatus.RUNNING -> colors.primary
+                                DownloadStatus.QUEUED -> colors.textSecondary
                             }
                             Text(
                                 text = animatedStatus.displayLabel,
@@ -1151,16 +1114,15 @@ private fun DownloadItemCard(
                                 fontWeight = FontWeight.Bold,
                                 color = pillColor,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
+                                    .clip(RoundedCornerShape(50))
                                     .background(pillColor.copy(alpha = 0.14f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
                         Text(
                             text = download.qualityLabel,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.gold
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
                         )
                         if (download.totalBytes > 0L) {
                             val totalBytesLabel = remember(download.totalBytes) {
@@ -1168,7 +1130,7 @@ private fun DownloadItemCard(
                             }
                             Text(
                                 text = "• $totalBytesLabel",
-                                fontSize = 10.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = colors.textMuted
                             )
                         }
@@ -1185,7 +1147,7 @@ private fun DownloadItemCard(
                     }
                     Text(
                         text = cleanProvider + if (download.subtitleLabel.isNotBlank()) " • Sub: ${download.subtitleLabel}" else "",
-                        fontSize = 10.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = colors.textMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1206,60 +1168,64 @@ private fun DownloadItemCard(
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (download.progressPercent > 0) {
-                        LinearProgressIndicator(
-                            progress = { animatedProgress },
-                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
-                            trackColor = colors.surfaceElevated,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(50))
+                        val isPaused = status == DownloadStatus.PAUSED
+                        StylishProgressBar(
+                            progress = animatedProgress,
+                            label = "$animatedPercent%",
+                            fillStartColor = if (isPaused) colors.warning else colors.accentEnd,
+                            fillEndColor = if (isPaused) colors.warning else colors.accentStart,
+                            dotColor = if (isPaused) colors.warning else com.example.ui.theme.CinetraTokens.ProgressGlowDot,
+                            labelColor = if (isPaused) colors.warning else colors.accentStart,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     } else {
-                        LinearProgressIndicator(
-                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose,
-                            trackColor = colors.surfaceElevated,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(50))
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        val sizeProg = if (download.totalBytes > 0L) {
-                            "${formatDownloadBytes(download.bytesDownloaded)} / ${formatDownloadBytes(download.totalBytes)}"
-                        } else if (download.bytesDownloaded > 0L) {
-                            formatDownloadBytes(download.bytesDownloaded)
-                        } else {
-                            download.errorReason.ifBlank {
-                                if (status == DownloadStatus.QUEUED) "Waiting in queue..." else "Downloading..."
-                            }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            LinearProgressIndicator(
+                                color = if (status == DownloadStatus.PAUSED) colors.warning else colors.primary,
+                                trackColor = colors.surfaceHover,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(50))
+                            )
+                            Text(
+                                text = "$animatedPercent%",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = if (status == DownloadStatus.PAUSED) colors.warning else colors.accentStart
+                            )
                         }
-                        Text(text = sizeProg, fontSize = 11.sp, color = colors.textSecondary)
-                        Text(
-                            text = "$animatedPercent%",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (status == DownloadStatus.PAUSED) colors.gold else colors.softRose
-                        )
                     }
+                    val sizeProg = if (download.totalBytes > 0L) {
+                        "${formatDownloadBytes(download.bytesDownloaded)} / ${formatDownloadBytes(download.totalBytes)}"
+                    } else if (download.bytesDownloaded > 0L) {
+                        formatDownloadBytes(download.bytesDownloaded)
+                    } else {
+                        download.errorReason.ifBlank {
+                            if (status == DownloadStatus.QUEUED) "Waiting in queue..." else "Downloading..."
+                        }
+                    }
+                    Text(text = sizeProg, style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                 }
             } else if (status == DownloadStatus.FAILED && download.errorReason.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.ErrorOutline,
                         contentDescription = null,
-                        tint = colors.softRose,
+                        tint = colors.primary,
                         modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = download.errorReason,
-                        fontSize = 11.sp,
-                        color = colors.softRose
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary
                     )
                 }
             }
@@ -1317,7 +1283,7 @@ private fun DownloadActionButtonsRow(
     onRetry: () -> Unit,
     onCancelOrDelete: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     AnimatedContent(
         targetState = status,
         transitionSpec = {
@@ -1326,166 +1292,193 @@ private fun DownloadActionButtonsRow(
         },
         label = "downloadActionRowTransition"
     ) { animatedStatus ->
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        when (animatedStatus) {
-            DownloadStatus.COMPLETED -> {
-                CineGradientButton(
-                    onClick = onPlayOffline,
-                    shape = RoundedCornerShape(8.dp),
-                    minHeight = 44.dp,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Play", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when (animatedStatus) {
+                DownloadStatus.COMPLETED -> {
+                    RedButton(
+                        onClick = onPlayOffline,
+                        shape = MaterialTheme.shapes.small,
+                        minHeight = 44.dp,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = colors.onPrimary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Play", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
+                    }
+                    OutlinedButton(
+                        onClick = onExportToDevice,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderCopy,
+                            contentDescription = "Save to Downloads folder",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Save to Downloads folder",
+                            fontSize = 11.sp,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = onCancelOrDelete,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .minimumInteractiveComponentSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete download",
+                            tint = colors.textSecondary
+                        )
+                    }
                 }
-                OutlinedButton(
-                    onClick = onExportToDevice,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderCopy,
-                        contentDescription = "Save to Downloads folder",
-                        tint = colors.gold,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Save to Downloads folder",
-                        fontSize = 11.sp,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                IconButton(
-                    onClick = onCancelOrDelete,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete download",
-                        tint = colors.softRose
-                    )
-                }
-            }
 
-            DownloadStatus.RUNNING, DownloadStatus.QUEUED -> {
-                OutlinedButton(
-                    onClick = onPause,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Pause,
-                        contentDescription = "Pause",
-                        tint = colors.gold,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Pause", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                DownloadStatus.RUNNING, DownloadStatus.QUEUED -> {
+                    OutlinedButton(
+                        onClick = onPause,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Pause,
+                            contentDescription = "Pause",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Pause", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    }
+                    OutlinedButton(
+                        onClick = onCancelOrDelete,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.primary
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.primary)
+                    }
                 }
-                OutlinedButton(
-                    onClick = onCancelOrDelete,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Cancel",
-                        tint = colors.softRose,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.softRose)
-                }
-            }
 
-            DownloadStatus.PAUSED -> {
-                CineGradientButton(
-                    onClick = onResume,
-                    shape = RoundedCornerShape(8.dp),
-                    minHeight = 44.dp,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Resume",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Resume", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                DownloadStatus.PAUSED -> {
+                    RedButton(
+                        onClick = onResume,
+                        shape = MaterialTheme.shapes.small,
+                        minHeight = 44.dp,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Resume",
+                            tint = colors.onPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Resume", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
+                    }
+                    OutlinedButton(
+                        onClick = onCancelOrDelete,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.primary
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.primary)
+                    }
                 }
-                OutlinedButton(
-                    onClick = onCancelOrDelete,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Cancel",
-                        tint = colors.softRose,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.softRose)
-                }
-            }
 
-            DownloadStatus.FAILED, DownloadStatus.CANCELLED -> {
-                OutlinedButton(
-                    onClick = onRetry,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Retry",
-                        tint = colors.gold,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                }
-                IconButton(
-                    onClick = onCancelOrDelete,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = colors.softRose
-                    )
+                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> {
+                    OutlinedButton(
+                        onClick = onRetry,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, colors.border),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = colors.surfaceElevated,
+                            contentColor = colors.textPrimary
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Retry",
+                            tint = colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    }
+                    IconButton(
+                        onClick = onCancelOrDelete,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .minimumInteractiveComponentSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = colors.textSecondary
+                        )
+                    }
                 }
             }
         }
-    }
     }
 }

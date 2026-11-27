@@ -1,11 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -46,12 +49,12 @@ import com.example.data.model.ContinueWatchingPolicy
 import com.example.data.model.MediaItem
 import com.example.data.model.mergeWithCatalog
 import com.example.data.model.toMediaItem
-import com.example.ui.components.CineGradientButton
-import com.example.ui.components.CineGradientProgressBar
+import com.example.ui.components.CinetraEmptyState
+import com.example.ui.components.StylishProgressBar
 import com.example.ui.components.cinePressScale
 import com.example.ui.components.rememberCineImageRequest
 import com.example.ui.components.rememberDarkImagePainter
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 
 @Composable
 fun ContinueWatchingScreen(
@@ -63,8 +66,8 @@ fun ContinueWatchingScreen(
     allCatalogItems: List<MediaItem> = emptyList(),
     onMediaClick: (MediaItem) -> Unit = { media -> onResumeWatching(media, 1, 1) }
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val bottomClearance = CinetraTheme.bottomBarClearance
     val catalogById = remember(allCatalogItems) {
         allCatalogItems.associateBy { it.id }
     }
@@ -72,7 +75,7 @@ fun ContinueWatchingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
     ) {
         // Header
         Row(
@@ -84,20 +87,20 @@ fun ContinueWatchingScreen(
             Icon(
                 imageVector = Icons.Default.History,
                 contentDescription = null,
-                tint = colors.gold,
-                modifier = Modifier.size(24.dp)
+                tint = colors.primary,
+                modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
                     text = "Continue Watching",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleLarge,
                     color = colors.textPrimary
                 )
                 Text(
-                    text = "${items.size} in-progress streams • Automatic progress tracker",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary
+                    text = "${items.size} in-progress streams",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textMuted
                 )
             }
         }
@@ -106,43 +109,27 @@ fun ContinueWatchingScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
+                    .padding(bottom = bottomClearance),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "No Streams In Progress",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Start playing any movie or TV series and Cinetra will automatically remember your place.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    CineGradientButton(
-                        onClick = onBrowseClick,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("browse_catalog_from_continue_watching")
-                    ) {
-                        Text("Browse Catalog", fontWeight = FontWeight.Bold)
-                    }
-                }
+                CinetraEmptyState(
+                    icon = Icons.Default.History,
+                    title = "No Streams In Progress",
+                    subtitle = "Start playing any movie or TV series and Cinetra will automatically remember your place.",
+                    ctaLabel = "Browse Catalog",
+                    ctaTestTag = "browse_catalog_from_continue_watching",
+                    onCtaClick = onBrowseClick
+                )
             }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = bottomClearance + 24.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(
@@ -167,13 +154,20 @@ fun ContinueWatchingScreen(
                         ContinueWatchingPolicy.formatRelativeTime(item.lastWatchedAt)
                     }
                     val releaseYear = remember(media.releaseDate) { media.releaseDate.take(4) }
-                    val subtitleText = remember(item.mediaType, safeSeason, safeEpisode, releaseYear) {
-                        if (item.mediaType == "tv") {
-                            val seasonPrefix = if (safeSeason == 0) "Specials" else "Season $safeSeason"
-                            "$seasonPrefix • Episode $safeEpisode"
+                    val remainingMin = remember(item.durationSeconds, item.watchedSeconds) {
+                        if (item.durationSeconds > item.watchedSeconds && item.durationSeconds > 0L) {
+                            ((item.durationSeconds - item.watchedSeconds) / 60L).coerceAtLeast(1L)
                         } else {
-                            if (releaseYear.isNotBlank()) "Feature Movie • $releaseYear" else "Feature Movie"
+                            null
                         }
+                    }
+                    val subtitleText = remember(item.mediaType, safeSeason, safeEpisode, releaseYear, remainingMin) {
+                        val prefix = if (item.mediaType == "tv") {
+                            "S$safeSeason:E$safeEpisode"
+                        } else {
+                            releaseYear.ifBlank { "Movie" }
+                        }
+                        if (remainingMin != null) "$prefix • ${remainingMin}m left" else prefix
                     }
                     val statusText = remember(watchedLabel, relativeTime) {
                         if (watchedLabel.isNotBlank()) {
@@ -183,16 +177,20 @@ fun ContinueWatchingScreen(
                         }
                     }
                     val cardInteraction = remember { MutableInteractionSource() }
-                    val posterDarkPlaceholder = rememberDarkImagePainter(colors.surface)
+                    val thumbUrl = remember(media.fullBackdropUrl, media.fullPosterUrl) {
+                        media.fullBackdropUrl.ifBlank { media.fullPosterUrl }
+                    }
+                    val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
 
                     Surface(
-                        color = colors.surfaceElevated,
-                        shape = RoundedCornerShape(12.dp),
+                        color = colors.surface,
+                        shape = MaterialTheme.shapes.medium, // 14.dp
+                        border = BorderStroke(1.dp, colors.border),
                         modifier = Modifier
                             .fillMaxWidth()
                             .animateItem()
                             .cinePressScale(cardInteraction)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MaterialTheme.shapes.medium)
                             .clickable(
                                 interactionSource = cardInteraction,
                                 indication = ripple(bounded = true)
@@ -205,25 +203,25 @@ fun ContinueWatchingScreen(
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Poster thumbnail (tap play badge to resume immediately)
+                            // 16:9 landscape thumbnail
                             Box(
                                 modifier = Modifier
-                                    .size(width = 65.dp, height = 95.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(colors.surface)
+                                    .size(width = 128.dp, height = 72.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.surfaceElevated)
                                     .clickable { onResumeWatching(media, safeSeason, safeEpisode) },
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (media.fullPosterUrl.isNotBlank()) {
-                                    val posterRequest = rememberCineImageRequest(
-                                        url = media.fullPosterUrl,
-                                        widthDp = 65.dp,
-                                        heightDp = 95.dp
+                                if (thumbUrl.isNotBlank()) {
+                                    val thumbReq = rememberCineImageRequest(
+                                        url = thumbUrl,
+                                        widthDp = 128.dp,
+                                        heightDp = 72.dp
                                     )
                                     AsyncImage(
-                                        model = posterRequest,
-                                        placeholder = posterDarkPlaceholder,
-                                        error = posterDarkPlaceholder,
+                                        model = thumbReq,
+                                        placeholder = darkPlaceholder,
+                                        error = darkPlaceholder,
                                         contentDescription = item.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
@@ -233,20 +231,21 @@ fun ContinueWatchingScreen(
                                         imageVector = Icons.Default.Movie,
                                         contentDescription = item.title,
                                         tint = colors.textMuted,
-                                        modifier = Modifier.size(28.dp)
+                                        modifier = Modifier.size(26.dp)
                                     )
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .size(28.dp)
+                                        .size(30.dp)
                                         .align(Alignment.Center)
-                                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(14.dp)),
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.65f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = "Resume",
-                                        tint = Color.White,
+                                        tint = colors.onPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -254,11 +253,14 @@ fun ContinueWatchingScreen(
 
                             Spacer(modifier = Modifier.width(12.dp))
 
-                            // Details & Progress
+                            // Details & Meta
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = item.title,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    ),
                                     color = colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -268,42 +270,33 @@ fun ContinueWatchingScreen(
 
                                 Text(
                                     text = subtitleText,
-                                    fontSize = 12.sp,
-                                    color = colors.gold,
-                                    fontWeight = FontWeight.Medium
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
-
                                 if (item.progressPercent > 0) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
+                                    Spacer(modifier = Modifier.height(5.dp))
+                                    StylishProgressBar(
+                                        progress = (item.progressPercent / 100f).coerceIn(0f, 1f),
+                                        label = "${item.progressPercent}%",
                                         modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        CineGradientProgressBar(
-                                            progress = (item.progressPercent / 100f).coerceIn(0f, 1f),
-                                            height = 4.dp,
-                                            cornerRadius = 2.dp,
-                                            trackColor = colors.border,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "${item.progressPercent}% • $relativeTime",
-                                            fontSize = 11.sp,
-                                            color = colors.textSecondary
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        text = statusText,
-                                        fontSize = 11.sp,
-                                        color = colors.textSecondary
                                     )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                } else {
+                                    Spacer(modifier = Modifier.height(4.dp))
                                 }
+
+                                Text(
+                                    text = if (item.progressPercent > 0) relativeTime else statusText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
 
-                            // Delete button
                             IconButton(
                                 onClick = { onRemoveItem(item.id) },
                                 modifier = Modifier.testTag("delete_continue_${item.id}")
@@ -311,7 +304,7 @@ fun ContinueWatchingScreen(
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Remove from history",
-                                    tint = colors.textSecondary
+                                    tint = colors.textMuted
                                 )
                             }
                         }

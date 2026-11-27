@@ -54,7 +54,14 @@ object EpisodeNotificationHelper {
     }
 
     fun postReleaseNotification(context: Context, alert: ReleaseAlertItem): Boolean {
-        if (!hasNotificationPermission(context)) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
         ensureChannel(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -77,9 +84,11 @@ object EpisodeNotificationHelper {
             .setAutoCancel(true)
             .build()
 
-        return runCatching {
+        return try {
             NotificationManagerCompat.from(context).notify(alert.releaseKey.hashCode(), notification)
             true
-        }.getOrDefault(false)
+        } catch (_: SecurityException) {
+            false
+        }
     }
 }

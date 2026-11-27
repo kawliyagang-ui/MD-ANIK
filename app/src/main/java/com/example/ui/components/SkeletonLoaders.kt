@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -37,11 +38,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 
 @Composable
 fun rememberShimmerBrush(): Brush {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val transition = rememberInfiniteTransition(label = "skeleton_shimmer")
     val translateAnim by transition.animateFloat(
         initialValue = 0f,
@@ -54,11 +55,11 @@ fun rememberShimmerBrush(): Brush {
     )
 
     val shimmerColors = listOf(
+        colors.surface,
         colors.surfaceElevated,
-        colors.surfaceHover,
-        colors.softRose.copy(alpha = 0.14f),
-        colors.surfaceHover,
-        colors.surfaceElevated
+        colors.primary.copy(alpha = 0.08f),
+        colors.surfaceElevated,
+        colors.surface
     )
 
     return Brush.linearGradient(
@@ -71,45 +72,23 @@ fun rememberShimmerBrush(): Brush {
 @Composable
 fun MovieCardSkeleton(
     modifier: Modifier = Modifier,
-    cardWidth: Dp = 140.dp,
-    cardHeight: Dp = 210.dp,
+    cardWidth: Dp = 136.dp,
+    cardHeight: Dp = 204.dp,
     shimmerBrush: Brush = rememberShimmerBrush()
 ) {
-    val colors = CineTheme.colors
-    Column(
-        modifier = modifier.width(cardWidth)
-    ) {
+    val colors = CinetraTheme.colors
+    val cardShape = MaterialTheme.shapes.medium // 14.dp
+    Column(modifier = modifier.width(cardWidth)) {
         Box(
             modifier = Modifier
                 .width(cardWidth)
                 .height(cardHeight)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(cardShape)
                 .background(shimmerBrush)
-                .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                .padding(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(38.dp)
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(colors.background.copy(alpha = 0.35f))
-                )
-                Box(
-                    modifier = Modifier
-                        .width(34.dp)
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(colors.background.copy(alpha = 0.35f))
-                )
-            }
-        }
+                .border(1.dp, colors.border, cardShape)
+        )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         Box(
             modifier = Modifier
@@ -119,11 +98,11 @@ fun MovieCardSkeleton(
                 .background(shimmerBrush)
         )
 
-        Spacer(modifier = Modifier.height(5.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.52f)
+                .fillMaxWidth(0.50f)
                 .height(10.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(shimmerBrush)
@@ -136,86 +115,59 @@ fun HeroBannerSkeleton(
     modifier: Modifier = Modifier,
     shimmerBrush: Brush = rememberShimmerBrush()
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
+    val heroShape = RoundedCornerShape(20.dp)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(350.dp)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
-            .border(1.dp, colors.border.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(shimmerBrush)
-        )
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(18.dp)
+                .height(410.dp)
+                .clip(heroShape)
+                .background(colors.surface)
+                .border(1.dp, colors.border, heroShape)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .width(74.dp)
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.background.copy(alpha = 0.45f))
-                )
-                Box(
-                    modifier = Modifier
-                        .width(58.dp)
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.background.copy(alpha = 0.45f))
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.75f)
-                    .height(24.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(colors.background.copy(alpha = 0.5f))
+                    .fillMaxSize()
+                    .background(shimmerBrush)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Box(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .height(13.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(colors.background.copy(alpha = 0.4f))
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.background.copy(alpha = 0.55f))
-                )
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(18.dp)
+            ) {
                 Box(
                     modifier = Modifier
                         .width(96.dp)
-                        .height(44.dp)
+                        .height(22.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(colors.background.copy(alpha = 0.45f))
+                        .background(colors.background.copy(alpha = 0.65f))
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
+                        .fillMaxWidth(0.72f)
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(colors.background.copy(alpha = 0.55f))
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.45f)
+                        .height(13.dp)
+                        .clip(RoundedCornerShape(4.dp))
                         .background(colors.background.copy(alpha = 0.45f))
                 )
             }
@@ -228,52 +180,18 @@ fun HorizontalMovieListSkeleton(
     modifier: Modifier = Modifier,
     titleWidth: Dp = 150.dp,
     itemCount: Int = 5,
-    cardWidth: Dp = 140.dp,
-    cardHeight: Dp = 210.dp,
+    cardWidth: Dp = 136.dp,
+    cardHeight: Dp = 204.dp,
     showFilterChips: Boolean = false,
     shimmerBrush: Brush = rememberShimmerBrush()
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 10.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(shimmerBrush)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .width(titleWidth)
-                        .height(18.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(shimmerBrush)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(54.dp)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(shimmerBrush)
-            )
-        }
-
         if (showFilterChips) {
-            Spacer(modifier = Modifier.height(6.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -284,13 +202,38 @@ fun HorizontalMovieListSkeleton(
                     Box(
                         modifier = Modifier
                             .width(chipWidth)
-                            .height(32.dp)
+                            .height(34.dp)
                             .clip(RoundedCornerShape(50))
                             .background(shimmerBrush)
-                            .border(1.dp, colors.border.copy(alpha = 0.4f), RoundedCornerShape(50))
+                            .border(1.dp, colors.border, RoundedCornerShape(50))
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(titleWidth)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(shimmerBrush)
+            )
+
+            Box(
+                modifier = Modifier
+                    .width(48.dp)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(shimmerBrush)
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -319,35 +262,32 @@ fun HorizontalMovieListSkeleton(
 fun HomeCatalogSkeleton(
     modifier: Modifier = Modifier
 ) {
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
     val shimmerBrush = rememberShimmerBrush()
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .verticalScroll(rememberScrollState())
             .testTag("home_skeleton_loader")
     ) {
+        Spacer(modifier = Modifier.height(10.dp))
         HeroBannerSkeleton(shimmerBrush = shimmerBrush)
-
+        Spacer(modifier = Modifier.height(16.dp))
         HorizontalMovieListSkeleton(
-            titleWidth = 148.dp,
-            showFilterChips = true,
+            titleWidth = 128.dp,
             shimmerBrush = shimmerBrush
         )
-
+        HorizontalMovieListSkeleton(
+            titleWidth = 148.dp,
+            shimmerBrush = shimmerBrush
+        )
         HorizontalMovieListSkeleton(
             titleWidth = 136.dp,
             shimmerBrush = shimmerBrush
         )
-
-        HorizontalMovieListSkeleton(
-            titleWidth = 162.dp,
-            shimmerBrush = shimmerBrush
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(104.dp))
     }
 }
 
@@ -373,8 +313,8 @@ fun SearchResultsSkeletonGrid(
             contentType = { "skeleton_grid_card" }
         ) {
             MovieCardSkeleton(
-                cardWidth = 140.dp,
-                cardHeight = 205.dp,
+                cardWidth = 136.dp,
+                cardHeight = 204.dp,
                 shimmerBrush = shimmerBrush
             )
         }
@@ -386,7 +326,7 @@ fun TmdbSearchRowSkeleton(
     modifier: Modifier = Modifier,
     itemCount: Int = 3
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val shimmerBrush = rememberShimmerBrush()
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -405,7 +345,7 @@ fun TmdbSearchRowSkeleton(
                     .width(140.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(colors.surface)
-                    .border(1.dp, colors.border.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                    .border(1.dp, colors.border, RoundedCornerShape(8.dp))
                     .padding(6.dp)
             ) {
                 Box(
@@ -441,22 +381,22 @@ fun DetailsEpisodesSkeleton(
     modifier: Modifier = Modifier,
     rowCount: Int = 4
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val shimmerBrush = rememberShimmerBrush()
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .testTag("details_episodes_skeleton"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         repeat(rowCount) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.surfaceElevated)
-                    .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(colors.surface)
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

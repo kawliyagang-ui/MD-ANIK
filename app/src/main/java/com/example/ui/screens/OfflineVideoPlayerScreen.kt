@@ -11,7 +11,8 @@ fun OfflineVideoPlayerScreen(
     initialPositionMs: Long = 0L,
     onSavePosition: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTvDevice: Boolean? = null
 ) {
     val media = MediaItem(
         id = download.mediaId,
@@ -32,6 +33,7 @@ fun OfflineVideoPlayerScreen(
         initialPositionMs = initialPositionMs,
         onSavePosition = onSavePosition,
         onBack = onBack,
-        modifier = modifier
+        modifier = modifier,
+        isTvDevice = isTvDevice
     )
 }

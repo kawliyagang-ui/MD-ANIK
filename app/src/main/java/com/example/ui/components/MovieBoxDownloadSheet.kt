@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,8 +35,6 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +43,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,7 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,8 +67,10 @@ import com.example.data.model.MovieBoxSubject
 import com.example.data.model.MovieBoxSubtitleOption
 import com.example.data.model.PreferredDownloadQuality
 import com.example.data.remote.MovieBoxApiClient
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
+import com.example.ui.tv.TvDevicePolicy
 import com.example.ui.viewmodel.DownloadSheetUiState
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +84,11 @@ fun MovieBoxDownloadSheet(
     onRetry: () -> Unit
 ) {
     if (!sheetState.isOpen) return
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
+    val context = LocalContext.current
+    val isTvDevice = remember(context) { TvDevicePolicy.isTvDevice(context) }
+    val retryFocusRequester = remember { FocusRequester() }
+    val firstOptionFocusRequester = remember { FocusRequester() }
     val modalState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedSubtitle by remember(sheetState.bundle?.subject?.subjectId, sheetState.season, sheetState.episode) {
         mutableStateOf(sheetState.bundle?.subtitles?.firstOrNull { it.languageCode.startsWith("en", ignoreCase = true) })
@@ -92,6 +102,7 @@ fun MovieBoxDownloadSheet(
         sheetState = modalState,
         containerColor = colors.surface,
         contentColor = colors.textPrimary,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         modifier = Modifier.testTag("download_options_sheet")
     ) {
         Column(
@@ -111,22 +122,23 @@ fun MovieBoxDownloadSheet(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(colors.primaryContainer),
+                        .clip(MaterialTheme.shapes.small)
+                        .background(colors.primaryContainer)
+                        .border(1.dp, colors.primary.copy(alpha = 0.35f), MaterialTheme.shapes.small),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudDownload,
                         contentDescription = null,
-                        tint = colors.softRose,
-                        modifier = Modifier.size(22.dp)
+                        tint = colors.primary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = sheetState.targetMedia?.title ?: "Download Options",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.titleMedium,
                         color = colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -139,22 +151,32 @@ fun MovieBoxDownloadSheet(
                     }
                     Text(
                         text = epLabel,
-                        fontSize = 12.sp,
-                        color = colors.gold,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            HorizontalDivider(color = colors.border.copy(alpha = 0.5f))
+            HorizontalDivider(color = colors.border)
 
             val bodyStage = when {
                 sheetState.isLoading -> 0
                 sheetState.errorMessage != null && sheetState.bundle == null -> 1
                 sheetState.bundle != null -> 2
                 else -> 3
+            }
+
+            LaunchedEffect(isTvDevice, bodyStage, sheetState.bundle?.subject?.subjectId) {
+                if (isTvDevice) {
+                    delay(80L)
+                    when (bodyStage) {
+                        1 -> runCatching { retryFocusRequester.requestFocus() }
+                        2 -> runCatching { firstOptionFocusRequester.requestFocus() }
+                        else -> Unit
+                    }
+                }
             }
 
             AnimatedContent(
@@ -168,244 +190,229 @@ fun MovieBoxDownloadSheet(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     when (stage) {
                         0 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 28.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        CircularProgressIndicator(color = colors.softRose)
-                        Text(
-                            text = "Fetching HD download links...",
-                            fontSize = 13.sp,
-                            color = colors.textSecondary
-                        )
-                    }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(color = colors.primary)
+                                Text(
+                                    text = "Fetching HD download links...",
+                                    fontSize = 13.sp,
+                                    color = colors.textSecondary
+                                )
+                            }
                         }
                         1 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(colors.surfaceElevated)
-                            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = null,
-                                tint = colors.softRose,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Download Unavailable",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = colors.textPrimary
-                            )
-                        }
-                        Text(
-                            text = sheetState.errorMessage.orEmpty(),
-                            fontSize = 12.sp,
-                            color = colors.textSecondary,
-                            lineHeight = 18.sp
-                        )
-                        OutlinedButton(
-                            onClick = onRetry,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("download_sheet_retry_button")
-                        ) {
-                            Text("Retry", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(colors.surfaceElevated)
+                                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Download Unavailable",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = colors.textPrimary
+                                    )
+                                }
+                                Text(
+                                    text = sheetState.errorMessage.orEmpty(),
+                                    fontSize = 12.sp,
+                                    color = colors.textSecondary,
+                                    lineHeight = 18.sp
+                                )
+                                var retryFocused by remember { mutableStateOf(false) }
+                                OutlinedButton(
+                                    onClick = onRetry,
+                                    shape = MaterialTheme.shapes.small,
+                                    border = BorderStroke(
+                                        width = if (retryFocused) 2.dp else 1.dp,
+                                        color = if (retryFocused) colors.textPrimary else colors.border
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .focusRequester(retryFocusRequester)
+                                        .onFocusChanged { retryFocused = it.isFocused }
+                                        .testTag("download_sheet_retry_button")
+                                ) {
+                                    Text("Retry", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                                }
+                            }
                         }
 
                         2 -> {
-                    val bundle = sheetState.bundle ?: return@Column
-                    val languageGroups = bundle.languageGroups
-                    val hasMultipleLanguages = languageGroups.size > 1
+                            val bundle = sheetState.bundle ?: return@Column
+                            val languageGroups = bundle.languageGroups
+                            val hasMultipleLanguages = languageGroups.size > 1
 
-                    // Multi-language selector chips (only shown when multiple audio languages exist)
-                    if (hasMultipleLanguages) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = null,
-                                    tint = colors.softRose,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Available Languages (${languageGroups.size})",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.textPrimary
-                                )
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = selectedLanguage == "All",
-                                    onClick = { selectedLanguage = "All" },
-                                    label = { Text("All (${languageGroups.size})", fontSize = 11.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = colors.accentMid,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = colors.surfaceElevated,
-                                        labelColor = colors.textPrimary
-                                    ),
-                                    modifier = Modifier
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("download_lang_chip_all")
-                                )
-                                languageGroups.forEach { group ->
-                                    FilterChip(
-                                        selected = selectedLanguage.equals(group.language, ignoreCase = true),
-                                        onClick = { selectedLanguage = group.language },
-                                        label = {
-                                            Text(
-                                                text = "${group.language} (${group.options.size})",
-                                                fontSize = 11.sp
-                                            )
-                                        },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = colors.accentMid,
-                                            selectedLabelColor = Color.White,
-                                            containerColor = colors.surfaceElevated,
-                                            labelColor = colors.textPrimary
-                                        ),
+                            if (hasMultipleLanguages) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Language,
+                                            contentDescription = null,
+                                            tint = colors.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Available Languages (${languageGroups.size})",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.textPrimary
+                                        )
+                                    }
+                                    Row(
                                         modifier = Modifier
-                                            .minimumInteractiveComponentSize()
-                                            .testTag("download_lang_chip_${group.language.lowercase()}")
-                                    )
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CategoryPill(
+                                            label = "All (${languageGroups.size})",
+                                            selected = selectedLanguage == "All",
+                                            onClick = { selectedLanguage = "All" },
+                                            modifier = Modifier.testTag("download_lang_chip_all")
+                                        )
+                                        languageGroups.forEach { group ->
+                                            CategoryPill(
+                                                label = "${group.language} (${group.options.size})",
+                                                selected = selectedLanguage.equals(group.language, ignoreCase = true),
+                                                onClick = { selectedLanguage = group.language },
+                                                modifier = Modifier.testTag("download_lang_chip_${group.language.lowercase()}")
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    }
 
-                    // Subtitle Picker
-                    if (bundle.subtitles.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Subtitles,
-                                    contentDescription = null,
-                                    tint = colors.gold,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
+                            if (bundle.subtitles.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Subtitles,
+                                            contentDescription = null,
+                                            tint = colors.textSecondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Include Subtitles",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.textPrimary
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CategoryPill(
+                                            label = "No Subtitles",
+                                            selected = selectedSubtitle == null,
+                                            onClick = { selectedSubtitle = null }
+                                        )
+                                        bundle.subtitles.forEach { sub ->
+                                            CategoryPill(
+                                                label = sub.languageName,
+                                                selected = selectedSubtitle?.id == sub.id,
+                                                onClick = { selectedSubtitle = sub }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (hasMultipleLanguages) {
+                                val visibleGroups = if (selectedLanguage == "All") {
+                                    languageGroups
+                                } else {
+                                    languageGroups.filter { it.language.equals(selectedLanguage, ignoreCase = true) }
+                                }
+
+                                visibleGroups.forEachIndexed { groupIdx, group ->
+                                    val groupRecommended = remember(group.options, preferredQuality) {
+                                        MovieBoxApiClient.pickOptionForPreferredQuality(group.options, preferredQuality)
+                                    }
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = "${group.language} Audio",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.textPrimary
+                                            )
+                                            Text(
+                                                text = "${group.options.size} ${if (group.options.size == 1) "file" else "files"}",
+                                                fontSize = 11.sp,
+                                                color = colors.textMuted
+                                            )
+                                        }
+
+                                        group.options.forEachIndexed { optIdx, option ->
+                                            DownloadQualityOptionRow(
+                                                option = option,
+                                                languageLabel = group.language,
+                                                isRecommended = groupRecommended?.id == option.id,
+                                                testTag = "download_quality_option_${group.language.lowercase()}_${option.resolution}",
+                                                focusRequester = if (groupIdx == 0 && optIdx == 0) firstOptionFocusRequester else null,
+                                                onClick = { onDownloadOptionClick(option, selectedSubtitle) }
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                val recommendedOpt = remember(bundle.options, preferredQuality) {
+                                    MovieBoxApiClient.pickOptionForPreferredQuality(bundle.options, preferredQuality)
+                                }
                                 Text(
-                                    text = "Include Subtitles",
+                                    text = "Available Qualities (${bundle.options.size})",
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.textPrimary
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textSecondary
                                 )
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilterChip(
-                                    selected = selectedSubtitle == null,
-                                    onClick = { selectedSubtitle = null },
-                                    label = { Text("No Subtitles", fontSize = 11.sp) },
-                                    modifier = Modifier.minimumInteractiveComponentSize()
-                                )
-                                bundle.subtitles.forEach { sub ->
-                                    FilterChip(
-                                        selected = selectedSubtitle?.id == sub.id,
-                                        onClick = { selectedSubtitle = sub },
-                                        label = { Text(sub.languageName, fontSize = 11.sp) },
-                                        modifier = Modifier.minimumInteractiveComponentSize()
-                                    )
-                                }
-                            }
-                        }
-                    }
 
-                    if (hasMultipleLanguages) {
-                        val visibleGroups = if (selectedLanguage == "All") {
-                            languageGroups
-                        } else {
-                            languageGroups.filter { it.language.equals(selectedLanguage, ignoreCase = true) }
-                        }
-
-                        visibleGroups.forEach { group ->
-                            val groupRecommended = remember(group.options, preferredQuality) {
-                                MovieBoxApiClient.pickOptionForPreferredQuality(group.options, preferredQuality)
-                            }
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "${group.language} Audio",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.gold
-                                    )
-                                    Text(
-                                        text = "${group.options.size} ${if (group.options.size == 1) "file" else "files"}",
-                                        fontSize = 11.sp,
-                                        color = colors.textSecondary
-                                    )
-                                }
-
-                                group.options.forEach { option ->
+                                bundle.options.forEachIndexed { optIdx, option ->
                                     DownloadQualityOptionRow(
                                         option = option,
-                                        languageLabel = group.language,
-                                        isRecommended = groupRecommended?.id == option.id,
-                                        testTag = "download_quality_option_${group.language.lowercase()}_${option.resolution}",
+                                        languageLabel = null,
+                                        isRecommended = recommendedOpt?.id == option.id,
+                                        testTag = "download_quality_option_${option.resolution}",
+                                        focusRequester = if (optIdx == 0) firstOptionFocusRequester else null,
                                         onClick = { onDownloadOptionClick(option, selectedSubtitle) }
                                     )
                                 }
                             }
-                        }
-                    } else {
-                        val recommendedOpt = remember(bundle.options, preferredQuality) {
-                            MovieBoxApiClient.pickOptionForPreferredQuality(bundle.options, preferredQuality)
-                        }
-                        Text(
-                            text = "Available Qualities (${bundle.options.size})",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textSecondary
-                        )
 
-                        bundle.options.forEach { option ->
-                            DownloadQualityOptionRow(
-                                option = option,
-                                languageLabel = null,
-                                isRecommended = recommendedOpt?.id == option.id,
-                                testTag = "download_quality_option_${option.resolution}",
-                                onClick = { onDownloadOptionClick(option, selectedSubtitle) }
+                            Text(
+                                text = "Saved offline for direct in-app playback",
+                                fontSize = 11.sp,
+                                color = colors.textMuted
                             )
-                        }
-                    }
-
-                    Text(
-                        text = "Saved offline for direct in-app playback",
-                        fontSize = 11.sp,
-                        color = colors.textMuted
-                    )
                         }
                     }
                 }
@@ -420,25 +427,38 @@ private fun DownloadQualityOptionRow(
     languageLabel: String?,
     isRecommended: Boolean,
     testTag: String,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
+    val cardShape = MaterialTheme.shapes.medium // 14.dp
     val interactionSource = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .minimumInteractiveComponentSize()
             .cinePressScale(interactionSource = interactionSource)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.surfaceElevated)
+            .clip(cardShape)
+            .background(if (isFocused) colors.surfaceHover else colors.surfaceElevated)
             .border(
-                width = if (isRecommended) 1.5.dp else 1.dp,
-                color = if (isRecommended) colors.primary else colors.border,
-                shape = RoundedCornerShape(12.dp)
+                width = when {
+                    isFocused -> 2.dp
+                    isRecommended -> 1.5.dp
+                    else -> 1.dp
+                },
+                color = when {
+                    isFocused -> colors.textPrimary
+                    isRecommended -> colors.primary
+                    else -> colors.border
+                },
+                shape = cardShape
             )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(),
+                indication = ripple(),
                 onClick = onClick
             )
             .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -453,7 +473,7 @@ private fun DownloadQualityOptionRow(
             Icon(
                 imageVector = Icons.Default.HighQuality,
                 contentDescription = null,
-                tint = if (option.resolution >= 1080) colors.gold else colors.softRose,
+                tint = if (isRecommended) colors.primary else colors.textSecondary,
                 modifier = Modifier.size(22.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -471,23 +491,23 @@ private fun DownloadQualityOptionRow(
                             text = languageLabel,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = colors.gold,
+                            color = colors.textSecondary,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(colors.gold.copy(alpha = 0.14f))
+                                .background(colors.surface)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                     if (isRecommended) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "BEST PICK",
+                            text = "BEST",
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onPrimary,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(colors.accentMid)
+                                .background(colors.primary)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -495,26 +515,24 @@ private fun DownloadQualityOptionRow(
                 Text(
                     text = "${option.format} • ${option.formattedSize}",
                     fontSize = 11.sp,
-                    color = colors.textSecondary
+                    color = colors.textMuted
                 )
             }
         }
 
-        CineGradientButton(
+        RedButton(
             onClick = onClick,
-            shape = RoundedCornerShape(8.dp),
-            minHeight = 36.dp,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-            modifier = Modifier.height(36.dp)
+            minHeight = 38.dp,
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Download,
                 contentDescription = "Download ${option.resolutionLabel}",
-                tint = Color.White,
+                tint = colors.onPrimary,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Get", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Get", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
         }
     }
 }

@@ -53,8 +53,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,7 +70,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -88,13 +85,18 @@ import com.example.data.model.MediaItem
 import com.example.data.model.PlaybackSourcePolicy
 import com.example.data.model.formatDownloadBytes
 import com.example.data.model.matchesMedia
+import com.example.ui.components.ActionCard
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineEase
-import com.example.ui.components.CineGradientButton
 import com.example.ui.components.DetailedMovieView
 import com.example.ui.components.DetailsEpisodesSkeleton
-import com.example.ui.components.MovieCard
+import com.example.ui.components.PosterCard
+import com.example.ui.components.RedButton
+import com.example.ui.components.RedPlayButton
+import com.example.ui.components.SectionHeader
+import com.example.ui.components.StylishProgressBar
 import com.example.ui.components.formatReleaseDate
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 import java.io.File
 
 @Composable
@@ -124,8 +126,7 @@ fun DetailsScreen(
     onRetryDownload: (DownloadEntity) -> Unit = {},
     onPlayOffline: (DownloadEntity) -> Unit = {}
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
     val seasonList = remember(media.id, media.seasons, media.numberOfSeasons, media.episodesPerSeason) {
         media.resolvedSeasonList()
     }
@@ -195,7 +196,7 @@ fun DetailsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop),
+            .background(colors.background),
         contentPadding = PaddingValues(bottom = 40.dp)
     ) {
         item(
@@ -204,13 +205,13 @@ fun DetailsScreen(
         ) {
             DetailedMovieView(
                 media = media,
-                backdropHeight = 260.dp,
+                backdropHeight = 236.dp,
                 showBackButton = true,
                 onDismissOrBack = onBack,
                 actionsContent = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         val targetWatchPair = remember(media.mediaType, selectedSeason, continueWatchingItem) {
                             if (continueWatchingItem != null) {
@@ -239,10 +240,17 @@ fun DetailsScreen(
                             } ?: matching.maxByOrNull { it.updatedAt }
                         }
 
+                        val targetStatus = activeTargetDownload?.parsedStatus
+                        val hasCompletedTargetFile = targetStatus == DownloadStatus.COMPLETED &&
+                            !activeTargetDownload.localFilePath.isBlank() &&
+                            File(activeTargetDownload.localFilePath).exists()
+                        val showLiveDownloadCard = hasCompletedTargetFile ||
+                            (activeTargetDownload != null && targetStatus != null && (targetStatus.isActive || targetStatus == DownloadStatus.FAILED))
+
                         val watchCtaLabel = when {
-                            activeTargetDownload?.parsedStatus == DownloadStatus.COMPLETED && media.mediaType == "tv" ->
+                            hasCompletedTargetFile && media.mediaType == "tv" ->
                                 "Play Offline • S${targetWatchPair.first}:E${targetWatchPair.second}"
-                            activeTargetDownload?.parsedStatus == DownloadStatus.COMPLETED ->
+                            hasCompletedTargetFile ->
                                 "Play Offline"
                             continueWatchingItem != null && media.mediaType == "tv" ->
                                 "Watch Now • Resume S${targetWatchPair.first}:E${targetWatchPair.second}"
@@ -251,156 +259,124 @@ fun DetailsScreen(
                             else -> "Watch Now"
                         }
 
-                        // Primary CTA: Watch Now (uses resolvePlaybackSource priority)
-                        CineGradientButton(
+                        // Full-width solid #E50914 Play button (14dp corners)
+                        RedPlayButton(
+                            label = watchCtaLabel,
                             onClick = { onWatchClick(targetWatchPair.first, targetWatchPair.second) },
-                            shape = RoundedCornerShape(10.dp),
-                            fillWidth = true,
-                            minHeight = 48.dp,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("details_watch_now_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = watchCtaLabel,
-                                tint = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = watchCtaLabel,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Secondary CTAs: Favorite & Watch Trailer
-                        val favScale by animateFloatAsState(
-                            targetValue = if (isInWatchlist) 1.03f else 1f,
-                            animationSpec = tween(durationMillis = 180, easing = CineEase),
-                            label = "favorite_button_scale"
-                        )
-                        val favContainerColor by animateColorAsState(
-                            targetValue = if (isInWatchlist) colors.softRose.copy(alpha = 0.16f) else colors.surfaceElevated,
-                            animationSpec = tween(220),
-                            label = "favorite_container_color"
-                        )
-                        val favContentColor by animateColorAsState(
-                            targetValue = if (isInWatchlist) colors.softRose else colors.textPrimary,
-                            animationSpec = tween(220),
-                            label = "favorite_content_color"
+                            modifier = Modifier.testTag("details_watch_now_button")
                         )
 
+                        // 2-Column ActionCard Grid (#1E1E24, 16dp radius)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedButton(
+                            ActionCard(
+                                icon = if (isInWatchlist) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                label = if (isInWatchlist) "Favorited" else "Favorite",
+                                isActive = isInWatchlist,
                                 onClick = onWatchlistToggle,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = favContainerColor,
-                                    contentColor = favContentColor
-                                ),
-                                border = BorderStroke(
-                                    width = 1.dp,
-                                    color = if (isInWatchlist) colors.softRose.copy(alpha = 0.65f) else colors.border
-                                ),
+                                contentDescription = if (isInWatchlist) "Remove from Favorites" else "Add to Favorites",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(48.dp)
-                                    .graphicsLayer {
-                                        scaleX = favScale
-                                        scaleY = favScale
-                                    }
                                     .testTag("details_watchlist_toggle_button")
-                            ) {
-                                Icon(
-                                    imageVector = if (isInWatchlist) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = if (isInWatchlist) "Remove from Favorites" else "Add to Favorites",
-                                    tint = if (isInWatchlist) colors.softRose else colors.textPrimary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isInWatchlist) "Favorited" else "Favorite",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
+                            )
 
-                            OutlinedButton(
+                            ActionCard(
+                                icon = Icons.Default.Videocam,
+                                label = "Trailer",
                                 onClick = onTrailerClick,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = colors.surfaceElevated,
-                                    contentColor = colors.textPrimary
-                                ),
-                                border = BorderStroke(1.dp, colors.border),
+                                contentDescription = "Watch Trailer",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(48.dp)
                                     .testTag("details_trailer_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Videocam,
-                                    contentDescription = "Watch Trailer",
-                                    tint = colors.gold,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Trailer",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
+                            )
                         }
 
-                        // Live Download Control for Movie / Target Episode
-                        LiveDownloadControlCard(
-                            media = media,
-                            season = targetWatchPair.first,
-                            episode = targetWatchPair.second,
-                            download = activeTargetDownload,
-                            onStartDownload = {
-                                val epName = episodeEntries
-                                    .firstOrNull { it.episodeNumber == targetWatchPair.second }
-                                    ?.name
-                                    .orEmpty()
-                                onDownloadClick(targetWatchPair.first, targetWatchPair.second, epName)
-                            },
-                            onPause = { activeTargetDownload?.let { onPauseDownload(it.id) } },
-                            onResume = { activeTargetDownload?.let { onResumeDownload(it.id) } },
-                            onCancel = { activeTargetDownload?.let { onCancelDownload(it.id) } },
-                            onRetry = { activeTargetDownload?.let { onRetryDownload(it) } },
-                            onPlayOffline = { activeTargetDownload?.let { onPlayOffline(it) } }
-                        )
+                        if (!showLiveDownloadCard) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ActionCard(
+                                    icon = Icons.Default.CloudDownload,
+                                    label = if (media.mediaType == "tv") {
+                                        "Download S${targetWatchPair.first}:E${targetWatchPair.second}"
+                                    } else {
+                                        "Download Offline"
+                                    },
+                                    onClick = {
+                                        val epName = episodeEntries
+                                            .firstOrNull { it.episodeNumber == targetWatchPair.second }
+                                            ?.name
+                                            .orEmpty()
+                                        onDownloadClick(targetWatchPair.first, targetWatchPair.second, epName)
+                                    },
+                                    contentDescription = "Download Offline",
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("details_download_moviebox_button")
+                                )
+
+                                ActionCard(
+                                    icon = Icons.Default.BugReport,
+                                    label = "Report Issue",
+                                    iconTint = colors.textSecondary,
+                                    onClick = onReportProblemClick,
+                                    contentDescription = "Report a Problem",
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("details_report_problem_button")
+                                )
+                            }
+                        } else {
+                            LiveDownloadControlCard(
+                                media = media,
+                                season = targetWatchPair.first,
+                                episode = targetWatchPair.second,
+                                download = activeTargetDownload,
+                                onStartDownload = {
+                                    val epName = episodeEntries
+                                        .firstOrNull { it.episodeNumber == targetWatchPair.second }
+                                        ?.name
+                                        .orEmpty()
+                                    onDownloadClick(targetWatchPair.first, targetWatchPair.second, epName)
+                                },
+                                onPause = { activeTargetDownload?.let { onPauseDownload(it.id) } },
+                                onResume = { activeTargetDownload?.let { onResumeDownload(it.id) } },
+                                onCancel = { activeTargetDownload?.let { onCancelDownload(it.id) } },
+                                onRetry = { activeTargetDownload?.let { onRetryDownload(it) } },
+                                onPlayOffline = { activeTargetDownload?.let { onPlayOffline(it) } }
+                            )
+
+                            ActionCard(
+                                icon = Icons.Default.BugReport,
+                                label = "Report Video / Info Issue",
+                                iconTint = colors.textSecondary,
+                                onClick = onReportProblemClick,
+                                contentDescription = "Report a Problem",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("details_report_problem_button")
+                            )
+                        }
 
                         if (media.mediaType == "tv" && (media.latestEpisodeLabel.isNotBlank() || isInWatchlist)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(colors.primaryContainer.copy(alpha = 0.45f))
-                                    .border(0.75.dp, colors.primary.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(colors.surface)
+                                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.NotificationsActive,
                                     contentDescription = null,
-                                    tint = colors.gold,
+                                    tint = colors.primary,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -415,40 +391,13 @@ fun DetailsScreen(
                                 }
                                 Text(
                                     text = infoText,
-                                    fontSize = 11.sp,
-                                    color = colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    color = colors.textSecondary,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                        }
-
-                        OutlinedButton(
-                            onClick = onReportProblemClick,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = colors.surfaceElevated.copy(alpha = 0.7f),
-                                contentColor = colors.textSecondary
-                            ),
-                            border = BorderStroke(1.dp, colors.border.copy(alpha = 0.7f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("details_report_problem_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BugReport,
-                                contentDescription = "Report a Problem",
-                                tint = colors.softRose,
-                                modifier = Modifier.size(17.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Report Video / Info Issue",
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 12.sp
-                            )
                         }
                     }
                 }
@@ -476,16 +425,16 @@ fun DetailsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Seasons & Episodes",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                style = MaterialTheme.typography.titleMedium, // Bold 18.sp
                                 color = colors.textPrimary
                             )
                             val seasonLabel = if (media.numberOfSeasons == 1) "1 Season" else "${media.numberOfSeasons} Seasons"
                             val totalEpCount = media.totalEpisodeCount()
                             Text(
                                 text = "$seasonLabel • $totalEpCount Episodes",
-                                color = colors.gold,
+                                color = colors.textMuted,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Medium,
                                 modifier = Modifier.testTag("details_seasons_summary")
                             )
                         }
@@ -496,11 +445,11 @@ fun DetailsScreen(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(colors.surfaceElevated)
-                                    .border(0.75.dp, colors.border, RoundedCornerShape(50))
+                                    .border(1.dp, colors.border, RoundedCornerShape(50))
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 CircularProgressIndicator(
-                                    color = colors.softRose,
+                                    color = colors.primary,
                                     strokeWidth = 2.dp,
                                     modifier = Modifier.size(13.dp)
                                 )
@@ -514,9 +463,9 @@ fun DetailsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Seasons pills
+                    // Seasons CategoryPills
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -532,24 +481,13 @@ fun DetailsScreen(
                             } else {
                                 "Season $sNum (${seasonInfo.episodeCount})"
                             }
-                            FilterChip(
+                            CategoryPill(
+                                label = chipLabel,
                                 selected = isSel,
                                 onClick = {
                                     selectedSeason = sNum
                                     onSeasonSelected(sNum)
                                 },
-                                label = {
-                                    Text(
-                                        text = chipLabel,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.accentMid,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = colors.surfaceElevated,
-                                    labelColor = colors.textPrimary
-                                ),
                                 modifier = Modifier.testTag("details_season_chip_$sNum")
                             )
                         }
@@ -557,13 +495,13 @@ fun DetailsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Season Batch Download Controls (Download Season + Select all + Download selected (N))
+                    // Season Batch Download Controls
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        shape = MaterialTheme.shapes.medium, // 14.dp
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+                            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
                     ) {
                         Column(
                             modifier = Modifier
@@ -621,8 +559,8 @@ fun DetailsScreen(
                                         )
                                         Text(
                                             text = "${seasonEligibility.eligibleEpisodes.size} downloadable • ${seasonEligibility.downloadedEpisodes.size} downloaded",
-                                            fontSize = 10.sp,
-                                            color = colors.textSecondary
+                                            fontSize = 11.sp,
+                                            color = colors.textMuted
                                         )
                                     }
                                 }
@@ -630,12 +568,13 @@ fun DetailsScreen(
                                 OutlinedButton(
                                     onClick = { onDownloadSeason(selectedSeason) },
                                     enabled = seasonEligibility.eligibleEpisodes.isNotEmpty(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (seasonEligibility.eligibleEpisodes.isNotEmpty()) colors.softRose.copy(alpha = 0.7f) else colors.border
+                                    shape = MaterialTheme.shapes.small,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
                                     ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    border = BorderStroke(1.dp, colors.border),
                                     modifier = Modifier
                                         .height(48.dp)
                                         .testTag("details_download_season_$selectedSeason")
@@ -643,14 +582,14 @@ fun DetailsScreen(
                                     Icon(
                                         imageVector = Icons.Default.CloudDownload,
                                         contentDescription = "Download Season $selectedSeason",
-                                        tint = if (seasonEligibility.eligibleEpisodes.isNotEmpty()) colors.softRose else colors.textMuted,
+                                        tint = if (seasonEligibility.eligibleEpisodes.isNotEmpty()) colors.textPrimary else colors.textMuted,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "Download Season",
                                         fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = if (seasonEligibility.eligibleEpisodes.isNotEmpty()) colors.textPrimary else colors.textMuted
                                     )
                                 }
@@ -661,13 +600,12 @@ fun DetailsScreen(
                                 enter = fadeIn(tween(180, easing = CineEase)) + expandVertically(tween(220, easing = CineEase)),
                                 exit = fadeOut(tween(140, easing = CineEase)) + shrinkVertically(tween(180, easing = CineEase))
                             ) {
-                                CineGradientButton(
+                                RedButton(
                                     onClick = {
                                         val picked = currentSeasonSelection
                                         onDownloadSelectedEpisodes(selectedSeason, picked)
                                         selectedEpisodesBySeason = selectedEpisodesBySeason + (selectedSeason to emptySet())
                                     },
-                                    shape = RoundedCornerShape(8.dp),
                                     fillWidth = true,
                                     minHeight = 48.dp,
                                     modifier = Modifier
@@ -678,7 +616,7 @@ fun DetailsScreen(
                                     Icon(
                                         imageVector = Icons.Default.Download,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = colors.onPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -686,7 +624,7 @@ fun DetailsScreen(
                                         text = "Download selected (${currentSeasonSelection.size})",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = colors.onPrimary
                                     )
                                 }
                             }
@@ -710,218 +648,227 @@ fun DetailsScreen(
                     key = { epInfo -> "ep_${media.id}_${selectedSeason}_${epInfo.episodeNumber}" },
                     contentType = { "episode_row" }
                 ) { epInfo ->
-                val epNum = epInfo.episodeNumber
-                val epDownload = mediaDownloads
-                    .filter { it.season == selectedSeason && it.episode == epNum }
-                    .maxByOrNull { it.updatedAt }
-                val epStatus = epDownload?.parsedStatus
-                val isEpDownloaded = epStatus == DownloadStatus.COMPLETED &&
-                    epDownload.localFilePath.isNotBlank() &&
-                    File(epDownload.localFilePath).exists()
-                val resolvedLink = media.resolveDirectLinkForEpisode(
-                    season = selectedSeason,
-                    episode = epNum,
-                    episodesInSeason = episodeEntries
-                )
-                val hasDirectLink = resolvedLink.hasAnyLink()
-                val isEpEligible = hasDirectLink && !isEpDownloaded && (epStatus == null || !epStatus.isActive)
-                val isEpChecked = epNum in currentSeasonSelection
+                    val epNum = epInfo.episodeNumber
+                    val epDownload = mediaDownloads
+                        .filter { it.season == selectedSeason && it.episode == epNum }
+                        .maxByOrNull { it.updatedAt }
+                    val epStatus = epDownload?.parsedStatus
+                    val isEpDownloaded = epStatus == DownloadStatus.COMPLETED &&
+                        epDownload.localFilePath.isNotBlank() &&
+                        File(epDownload.localFilePath).exists()
+                    val resolvedLink = media.resolveDirectLinkForEpisode(
+                        season = selectedSeason,
+                        episode = epNum,
+                        episodesInSeason = episodeEntries
+                    )
+                    val hasDirectLink = resolvedLink.hasAnyLink()
+                    val isEpEligible = hasDirectLink && !isEpDownloaded && (epStatus == null || !epStatus.isActive)
+                    val isEpChecked = epNum in currentSeasonSelection
 
-                val metaParts = buildList {
-                    epInfo.runtimeMinutes?.let { add("${it}m") }
-                    if (epInfo.airDate.isNotBlank()) add(formatReleaseDate(epInfo.airDate))
-                }
-                val subtitleText = when {
-                    !hasDirectLink && !isEpDownloaded -> "No link • Embed stream only"
-                    metaParts.isNotEmpty() -> "S$selectedSeason • E$epNum • ${metaParts.joinToString(" • ")}"
-                    else -> "Season $selectedSeason • Direct Ready"
-                }
+                    val metaParts = buildList {
+                        epInfo.runtimeMinutes?.let { add("${it}m") }
+                        if (epInfo.airDate.isNotBlank()) add(formatReleaseDate(epInfo.airDate))
+                    }
+                    val subtitleText = when {
+                        !hasDirectLink && !isEpDownloaded -> "No link • Embed stream only"
+                        metaParts.isNotEmpty() -> "S$selectedSeason • E$epNum • ${metaParts.joinToString(" • ")}"
+                        else -> "Season $selectedSeason • Direct Ready"
+                    }
 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .alpha(if (!hasDirectLink && !isEpDownloaded) 0.58f else 1f)
-                        .testTag("details_episode_${selectedSeason}_$epNum")
-                ) {
-                    Column(
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        shape = MaterialTheme.shapes.medium, // 14.dp
+                        border = BorderStroke(1.dp, colors.border),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .alpha(if (!hasDirectLink && !isEpDownloaded) 0.58f else 1f)
+                            .testTag("details_episode_${selectedSeason}_$epNum")
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Checkbox(
-                                checked = isEpDownloaded || isEpChecked,
-                                enabled = isEpEligible,
-                                onCheckedChange = { checked ->
-                                    if (!isEpEligible) return@Checkbox
-                                    val updated = if (checked) {
-                                        currentSeasonSelection + epNum
-                                    } else {
-                                        currentSeasonSelection - epNum
-                                    }
-                                    selectedEpisodesBySeason = selectedEpisodesBySeason + (selectedSeason to updated)
-                                },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = if (isEpDownloaded) colors.success else colors.primary,
-                                    uncheckedColor = colors.textSecondary,
-                                    disabledCheckedColor = colors.success.copy(alpha = 0.65f),
-                                    disabledUncheckedColor = colors.textMuted.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier.testTag("details_ep_checkbox_${selectedSeason}_$epNum")
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(colors.background.copy(alpha = 0.65f), RoundedCornerShape(14.dp)),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "$epNum",
-                                    color = colors.gold,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
+                                Checkbox(
+                                    checked = isEpDownloaded || isEpChecked,
+                                    enabled = isEpEligible,
+                                    onCheckedChange = { checked ->
+                                        if (!isEpEligible) return@Checkbox
+                                        val updated = if (checked) {
+                                            currentSeasonSelection + epNum
+                                        } else {
+                                            currentSeasonSelection - epNum
+                                        }
+                                        selectedEpisodesBySeason = selectedEpisodesBySeason + (selectedSeason to updated)
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = if (isEpDownloaded) colors.success else colors.primary,
+                                        uncheckedColor = colors.textSecondary,
+                                        disabledCheckedColor = colors.success.copy(alpha = 0.65f),
+                                        disabledUncheckedColor = colors.textMuted.copy(alpha = 0.4f)
+                                    ),
+                                    modifier = Modifier.testTag("details_ep_checkbox_${selectedSeason}_$epNum")
                                 )
-                            }
 
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = epInfo.name,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colors.textPrimary,
-                                    fontSize = 14.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = subtitleText,
-                                    color = if (!hasDirectLink && !isEpDownloaded) colors.textMuted else colors.textSecondary,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(6.dp))
-
-                            when {
-                                isEpDownloaded -> {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(colors.success.copy(alpha = 0.16f))
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                            .testTag("details_ep_downloaded_badge_${selectedSeason}_$epNum")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.DownloadDone,
-                                            contentDescription = "Downloaded",
-                                            tint = colors.success,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Downloaded",
-                                            color = colors.success,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                }
-
-                                !hasDirectLink -> {
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(colors.surfaceElevated)
+                                        .border(1.dp, colors.border, RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
-                                        text = "No link",
-                                        color = colors.textMuted,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(colors.background.copy(alpha = 0.5f))
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        text = "$epNum",
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                 }
 
-                                epDownload == null -> {
-                                    IconButton(
-                                        onClick = { onDownloadClick(selectedSeason, epNum, epInfo.name) },
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .testTag("details_download_ep_${selectedSeason}_$epNum")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Download,
-                                            contentDescription = "Download Episode $epNum",
-                                            tint = colors.gold
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = epInfo.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
+                                        ),
+                                        color = colors.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = subtitleText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.textMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                when {
+                                    isEpDownloaded -> {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(colors.success.copy(alpha = 0.16f))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                .testTag("details_ep_downloaded_badge_${selectedSeason}_$epNum")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DownloadDone,
+                                                contentDescription = "Downloaded",
+                                                tint = colors.success,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Downloaded",
+                                                color = colors.success,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    !hasDirectLink -> {
+                                        Text(
+                                            text = "No link",
+                                            color = colors.textMuted,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(colors.surfaceElevated)
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
                                         )
+                                        Spacer(modifier = Modifier.width(6.dp))
                                     }
+
+                                    epDownload == null -> {
+                                        IconButton(
+                                            onClick = { onDownloadClick(selectedSeason, epNum, epInfo.name) },
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .testTag("details_download_ep_${selectedSeason}_$epNum")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Download,
+                                                contentDescription = "Download Episode $epNum",
+                                                tint = colors.textSecondary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        if (isEpDownloaded && epDownload != null) {
+                                            onPlayOffline(epDownload)
+                                        } else {
+                                            onWatchClick(selectedSeason, epNum)
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, colors.border),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Play",
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = "Play",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.textPrimary
+                                    )
                                 }
                             }
 
-                            CineGradientButton(
-                                onClick = {
-                                    if (isEpDownloaded && epDownload != null) {
-                                        onPlayOffline(epDownload)
-                                    } else {
-                                        onWatchClick(selectedSeason, epNum)
-                                    }
-                                },
-                                shape = RoundedCornerShape(6.dp),
-                                minHeight = 40.dp,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.height(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Play",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = if (isEpDownloaded) "Play" else "Play",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                            if (epDownload != null && !isEpDownloaded) {
+                                InlineEpisodeDownloadRow(
+                                    download = epDownload,
+                                    onPause = { onPauseDownload(epDownload.id) },
+                                    onResume = { onResumeDownload(epDownload.id) },
+                                    onCancel = { onCancelDownload(epDownload.id) },
+                                    onRetry = { onRetryDownload(epDownload) }
                                 )
                             }
-                        }
 
-                        // Inline live download progress row for active/failed episodes
-                        if (epDownload != null && !isEpDownloaded) {
-                            InlineEpisodeDownloadRow(
-                                download = epDownload,
-                                onPause = { onPauseDownload(epDownload.id) },
-                                onResume = { onResumeDownload(epDownload.id) },
-                                onCancel = { onCancelDownload(epDownload.id) },
-                                onRetry = { onRetryDownload(epDownload) }
-                            )
-                        }
-
-                        if (epInfo.overview.isNotBlank()) {
-                            Text(
-                                text = epInfo.overview,
-                                color = colors.textSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = 12.dp)
-                            )
+                            if (epInfo.overview.isNotBlank()) {
+                                Text(
+                                    text = epInfo.overview,
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(start = 12.dp)
+                                )
+                            }
                         }
                     }
-                }
                 }
             }
         }
@@ -938,11 +885,8 @@ fun DetailsScreen(
                         .padding(top = 24.dp)
                         .testTag("details_similar_section")
                 ) {
-                    Text(
-                        text = if (media.mediaType == "tv") "Similar TV Series" else "Similar Movies",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary,
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                    SectionHeader(
+                        title = if (media.mediaType == "tv") "Similar TV Series" else "Similar Movies"
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     LazyRow(
@@ -954,7 +898,7 @@ fun DetailsScreen(
                             key = { "sim_${it.id}" },
                             contentType = { "movie_card" }
                         ) { simItem ->
-                            MovieCard(
+                            PosterCard(
                                 media = simItem,
                                 onClick = { onSimilarMediaClick(simItem) },
                                 modifier = Modifier.animateItem()
@@ -980,7 +924,7 @@ private fun LiveDownloadControlCard(
     onRetry: () -> Unit,
     onPlayOffline: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val status = download?.parsedStatus
     val hasCompletedFile = status == DownloadStatus.COMPLETED &&
         !download.localFilePath.isBlank() &&
@@ -990,10 +934,10 @@ private fun LiveDownloadControlCard(
         hasCompletedFile && download != null -> {
             Button(
                 onClick = onPlayOffline,
-                shape = RoundedCornerShape(10.dp),
+                shape = MaterialTheme.shapes.small, // 12.dp
                 colors = ButtonDefaults.buttonColors(
                     containerColor = colors.success,
-                    contentColor = Color.White
+                    contentColor = colors.onPrimary
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1003,7 +947,7 @@ private fun LiveDownloadControlCard(
                 Icon(
                     imageVector = Icons.Default.DownloadDone,
                     contentDescription = "Downloaded",
-                    tint = Color.White,
+                    tint = colors.onPrimary,
                     modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1019,15 +963,14 @@ private fun LiveDownloadControlCard(
 
         download != null && status != null && (status.isActive || status == DownloadStatus.FAILED) -> {
             Card(
-                colors = CardDefaults.cardColors(containerColor = colors.surfaceElevated),
-                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = MaterialTheme.shapes.medium, // 14.dp
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (status == DownloadStatus.FAILED) colors.primary.copy(alpha = 0.6f) else colors.border
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        if (status == DownloadStatus.FAILED) colors.softRose.copy(alpha = 0.6f) else colors.primary.copy(alpha = 0.55f),
-                        RoundedCornerShape(10.dp)
-                    )
                     .testTag("details_live_download_card")
             ) {
                 Column(
@@ -1062,8 +1005,8 @@ private fun LiveDownloadControlCard(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = when (status) {
-                                DownloadStatus.FAILED -> colors.softRose
-                                DownloadStatus.PAUSED -> colors.gold
+                                DownloadStatus.FAILED -> colors.primary
+                                DownloadStatus.PAUSED -> colors.textSecondary
                                 else -> colors.textPrimary
                             }
                         )
@@ -1077,28 +1020,24 @@ private fun LiveDownloadControlCard(
                         Text(
                             text = sizeText,
                             fontSize = 11.sp,
-                            color = colors.textSecondary
+                            color = colors.textMuted
                         )
                     }
 
                     if (status != DownloadStatus.FAILED) {
                         if (download.progressPercent > 0) {
-                            LinearProgressIndicator(
-                                progress = { animatedProgress },
-                                color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
-                                trackColor = colors.background,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(50))
+                            StylishProgressBar(
+                                progress = animatedProgress,
+                                label = "$animatedPercent%",
+                                modifier = Modifier.fillMaxWidth()
                             )
                         } else {
                             LinearProgressIndicator(
-                                color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
-                                trackColor = colors.background,
+                                color = colors.primary,
+                                trackColor = colors.surfaceHover,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(6.dp)
+                                    .height(5.dp)
                                     .clip(RoundedCornerShape(50))
                             )
                         }
@@ -1106,7 +1045,7 @@ private fun LiveDownloadControlCard(
                         Text(
                             text = download.errorReason,
                             fontSize = 11.sp,
-                            color = colors.softRose,
+                            color = colors.primary,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1120,45 +1059,58 @@ private fun LiveDownloadControlCard(
                             DownloadStatus.RUNNING, DownloadStatus.QUEUED -> {
                                 OutlinedButton(
                                     onClick = onPause,
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = MaterialTheme.shapes.small,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, colors.border),
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(48.dp)
                                         .testTag("details_pause_download_button")
                                 ) {
-                                    Icon(Icons.Default.Pause, contentDescription = null, tint = colors.gold, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Pause, contentDescription = null, tint = colors.textPrimary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Pause", color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             DownloadStatus.PAUSED -> {
-                                Button(
+                                OutlinedButton(
                                     onClick = onResume,
-                                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = MaterialTheme.shapes.small,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.7f)),
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(48.dp)
                                         .testTag("details_resume_download_button")
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Resume", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Resume", color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             DownloadStatus.FAILED -> {
-                                Button(
+                                OutlinedButton(
                                     onClick = onRetry,
-                                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = MaterialTheme.shapes.small,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.7f)),
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(48.dp)
                                         .testTag("details_retry_download_button")
                                 ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Retry", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Retry", color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                             else -> Unit
@@ -1166,16 +1118,20 @@ private fun LiveDownloadControlCard(
 
                         OutlinedButton(
                             onClick = onCancel,
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
+                            shape = MaterialTheme.shapes.small,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = colors.surfaceElevated,
+                                contentColor = colors.textSecondary
+                            ),
+                            border = BorderStroke(1.dp, colors.border),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .testTag("details_cancel_download_button")
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = colors.softRose, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cancel", color = colors.softRose, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Cancel", color = colors.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1183,19 +1139,14 @@ private fun LiveDownloadControlCard(
         }
 
         else -> {
-            val hasDirect = if (media.mediaType == "tv") {
-                media.resolveDirectLinkForEpisode(season, episode).hasAnyLink()
-            } else {
-                media.effectiveDownloadUrl().startsWith("http", ignoreCase = true)
-            }
             OutlinedButton(
                 onClick = onStartDownload,
-                shape = RoundedCornerShape(10.dp),
+                shape = MaterialTheme.shapes.small, // 12.dp
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = colors.primaryContainer.copy(alpha = 0.55f),
+                    containerColor = colors.surfaceElevated,
                     contentColor = colors.textPrimary
                 ),
-                border = BorderStroke(1.dp, colors.softRose.copy(alpha = 0.65f)),
+                border = BorderStroke(1.dp, colors.border),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
@@ -1204,7 +1155,7 @@ private fun LiveDownloadControlCard(
                 Icon(
                     imageVector = Icons.Default.CloudDownload,
                     contentDescription = "Download Offline",
-                    tint = colors.softRose,
+                    tint = colors.textPrimary,
                     modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1214,7 +1165,7 @@ private fun LiveDownloadControlCard(
                     } else {
                         "Download Offline"
                     },
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1232,7 +1183,7 @@ private fun InlineEpisodeDownloadRow(
     onCancel: () -> Unit,
     onRetry: () -> Unit
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val status = download.parsedStatus
     val animatedProgress by animateFloatAsState(
         targetValue = (download.progressPercent / 100f).coerceIn(0f, 1f),
@@ -1252,19 +1203,15 @@ private fun InlineEpisodeDownloadRow(
     ) {
         if (status != DownloadStatus.FAILED) {
             if (download.progressPercent > 0) {
-                LinearProgressIndicator(
-                    progress = { animatedProgress },
-                    color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
-                    trackColor = colors.background,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(50))
+                StylishProgressBar(
+                    progress = animatedProgress,
+                    label = "$animatedPercent%",
+                    modifier = Modifier.fillMaxWidth()
                 )
             } else {
                 LinearProgressIndicator(
-                    color = if (status == DownloadStatus.PAUSED) colors.gold else colors.primary,
-                    trackColor = colors.background,
+                    color = colors.primary,
+                    trackColor = colors.surfaceHover,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(5.dp)
@@ -1288,7 +1235,7 @@ private fun InlineEpisodeDownloadRow(
             Text(
                 text = statusSummary,
                 fontSize = 11.sp,
-                color = if (status == DownloadStatus.FAILED) colors.softRose else colors.textSecondary,
+                color = if (status == DownloadStatus.FAILED) colors.primary else colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -1297,7 +1244,7 @@ private fun InlineEpisodeDownloadRow(
                 when (status) {
                     DownloadStatus.RUNNING, DownloadStatus.QUEUED -> {
                         IconButton(onClick = onPause, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Default.Pause, contentDescription = "Pause", tint = colors.gold, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Pause, contentDescription = "Pause", tint = colors.textPrimary, modifier = Modifier.size(18.dp))
                         }
                     }
                     DownloadStatus.PAUSED -> {
@@ -1307,13 +1254,13 @@ private fun InlineEpisodeDownloadRow(
                     }
                     DownloadStatus.FAILED -> {
                         IconButton(onClick = onRetry, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = colors.gold, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = colors.primary, modifier = Modifier.size(18.dp))
                         }
                     }
                     else -> Unit
                 }
                 IconButton(onClick = onCancel, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = colors.softRose, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = colors.textMuted, modifier = Modifier.size(18.dp))
                 }
             }
         }

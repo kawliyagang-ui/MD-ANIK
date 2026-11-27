@@ -4,12 +4,39 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
+object CinetraTokens {
+    val Background = Color(0xFF000000)
+    val Surface = Color(0xFF17171B)
+    val SurfaceVariant = Color(0xFF1E1E24)
+    val ProgressTrack = Color(0xFF2A2A31)
+    val SurfaceHover = ProgressTrack
+    val Border = Color(0xFF232329)
+
+    val PrimaryRed = Color(0xFFE50914)
+    val RedGradientStart = Color(0xFFFF2E4D)
+    val RedGradientEnd = Color(0xFF8F0E1F)
+    val ProgressGlowDot = Color(0xFFFF4D5E)
+    val OnRed = Color(0xFFFFFFFF)
+
+    val TextPrimary = Color(0xFFFFFFFF)
+    val TextSecondary = Color(0xFFB9B9C0)
+    val TextMuted = Color(0xFF71717A)
+
+    val GlassSurface = Color(0xFF101014)
+    val GlassBorder = Color(0xFF232329)
+    val NavInactiveIcon = Color(0xFF8A8A93)
+
+    val Success = Color(0xFF10B981)
+    val Warning = Color(0xFFF59E0B)
+    val Info = Color(0xFF3B82F6)
+}
+
 enum class ThemeMode(
     val storageKey: String,
     val displayName: String,
     val subtitle: String
 ) {
-    DARK("dark", "Dark Mode", "Signature deep cinema look"),
+    DARK("dark", "Dark Mode", "Pure-black cinema theme with Cinetra red accents"),
     LIGHT("light", "Light Mode", "Bright high-clarity daytime UI"),
     SYSTEM("system", "System Default", "Follow device appearance setting");
 
@@ -36,31 +63,31 @@ enum class AccentColorOption(
 ) {
     VELVET_ROSE(
         storageKey = "velvet_rose",
-        displayName = "Velvet Rose",
-        primaryColor = Color(0xFFC4455B),
-        hoverColor = Color(0xFFDA5D72),
-        softTint = Color(0xFFE37A8C),
-        darkContainer = Color(0xFF2B1824),
-        lightContainer = Color(0xFFFDE8EE),
-        onDarkContainer = Color(0xFFF6D9E2),
-        onLightContainer = Color(0xFF7D1D34),
-        gradientStart = Color(0xFFC84B5F),
-        gradientMid = Color(0xFF9F365D),
-        gradientEnd = Color(0xFF6B2D5C)
+        displayName = "Cinetra Red",
+        primaryColor = CinetraTokens.PrimaryRed,
+        hoverColor = CinetraTokens.RedGradientStart,
+        softTint = CinetraTokens.RedGradientStart,
+        darkContainer = Color(0xFF2A0D12),
+        lightContainer = Color(0xFFFFE5E7),
+        onDarkContainer = CinetraTokens.OnRed,
+        onLightContainer = Color(0xFF8F0E1F),
+        gradientStart = CinetraTokens.RedGradientStart,
+        gradientMid = CinetraTokens.PrimaryRed,
+        gradientEnd = CinetraTokens.RedGradientEnd
     ),
     CRIMSON_RED(
         storageKey = "crimson_red",
         displayName = "Cinema Red",
-        primaryColor = Color(0xFFE50914),
-        hoverColor = Color(0xFFFF2A35),
-        softTint = Color(0xFFFF6B73),
-        darkContainer = Color(0xFF3A1014),
+        primaryColor = CinetraTokens.PrimaryRed,
+        hoverColor = CinetraTokens.RedGradientStart,
+        softTint = CinetraTokens.RedGradientStart,
+        darkContainer = Color(0xFF2A0D12),
         lightContainer = Color(0xFFFFE5E7),
-        onDarkContainer = Color(0xFFFFD8DB),
+        onDarkContainer = CinetraTokens.OnRed,
         onLightContainer = Color(0xFF8E000A),
-        gradientStart = Color(0xFFE50914),
-        gradientMid = Color(0xFFB80710),
-        gradientEnd = Color(0xFF7A040A)
+        gradientStart = CinetraTokens.RedGradientStart,
+        gradientMid = CinetraTokens.PrimaryRed,
+        gradientEnd = CinetraTokens.RedGradientEnd
     ),
     ELECTRIC_BLUE(
         storageKey = "electric_blue",
@@ -135,8 +162,8 @@ enum class DarkThemePalette(
 ) {
     VELVET_CINEMA(
         storageKey = "velvet_cinema",
-        displayName = "Velvet Cinema",
-        subtitle = "Deep obsidian-plum backdrop with soft rose-plum gradients.",
+        displayName = "Cinematic Dark Red",
+        subtitle = "Clean near-black obsidian surfaces with crisp #E50914 red accents.",
         badge = "Default",
         isHighReadability = false
     ),
@@ -193,11 +220,14 @@ data class CinePaletteColors(
     val primaryHover: Color,
     val primaryContainer: Color,
     val onPrimaryContainer: Color,
+    val onPrimary: Color = Color.White,
     val softRose: Color,
     val accentStart: Color,
     val accentMid: Color,
     val accentEnd: Color,
     val navIndicator: Color,
+    val glassSurface: Color = CinetraTokens.GlassSurface,
+    val glassBorder: Color = CinetraTokens.GlassBorder,
     val atmosphericTop: Color,
     val atmosphericMid: Color,
     val topBarStart: Color,
@@ -222,6 +252,7 @@ data class CinePaletteGradients(
     val topBarBackdrop: Brush,
     val bottomBarBackdrop: Brush,
     val primaryCta: Brush,
+    val redButton: Brush,
     val softBadge: Brush,
     val wordmark: Brush,
     val adGateGlow: Brush,
@@ -231,35 +262,39 @@ data class CinePaletteGradients(
 val VelvetCinemaColors = CinePaletteColors(
     palette = DarkThemePalette.VELVET_CINEMA,
     isLight = false,
-    background = Color(0xFF09090D),
-    surface = Color(0xFF13131B),
-    surfaceElevated = Color(0xFF1D1D28),
-    surfaceHover = Color(0xFF272736),
-    primary = Color(0xFFC4455B),
-    primaryHover = Color(0xFFDA5D72),
-    primaryContainer = Color(0xFF2B1824),
-    onPrimaryContainer = Color(0xFFF6D9E2),
-    softRose = Color(0xFFE37A8C),
-    accentStart = Color(0xFFC84B5F),
-    accentMid = Color(0xFF9F365D),
-    accentEnd = Color(0xFF6B2D5C),
-    navIndicator = Color(0xFF362032),
-    atmosphericTop = Color(0xFF171221),
-    atmosphericMid = Color(0xFF0D0C12),
-    topBarStart = Color(0xFF15111D),
-    topBarMid = Color(0xFF1B1422),
-    topBarEnd = Color(0xFF12121A),
-    bottomBarTop = Color(0xFF171421),
-    bottomBarBottom = Color(0xFF0F0E15),
-    gold = Color(0xFFFFC107),
-    goldLight = Color(0xFFFFD54F),
-    textPrimary = Color(0xFFF5F5F7),
-    textSecondary = Color(0xFFB3B3C0),
-    textMuted = Color(0xFF838391),
-    border = Color(0xFF2E2E3E),
-    success = Color(0xFF10B981),
-    warning = Color(0xFFF59E0B),
-    info = Color(0xFF3B82F6)
+    accentOption = AccentColorOption.VELVET_ROSE,
+    background = CinetraTokens.Background,
+    surface = CinetraTokens.Surface,
+    surfaceElevated = CinetraTokens.SurfaceVariant,
+    surfaceHover = CinetraTokens.SurfaceHover,
+    primary = CinetraTokens.PrimaryRed,
+    primaryHover = CinetraTokens.RedGradientStart,
+    primaryContainer = Color(0xFF2A0D12),
+    onPrimaryContainer = CinetraTokens.OnRed,
+    onPrimary = CinetraTokens.OnRed,
+    softRose = CinetraTokens.RedGradientStart,
+    accentStart = CinetraTokens.RedGradientStart,
+    accentMid = CinetraTokens.PrimaryRed,
+    accentEnd = CinetraTokens.RedGradientEnd,
+    navIndicator = Color(0xFF2A0D12),
+    glassSurface = CinetraTokens.GlassSurface,
+    glassBorder = CinetraTokens.GlassBorder,
+    atmosphericTop = CinetraTokens.Background,
+    atmosphericMid = CinetraTokens.Background,
+    topBarStart = CinetraTokens.Background,
+    topBarMid = CinetraTokens.Background,
+    topBarEnd = CinetraTokens.Background,
+    bottomBarTop = CinetraTokens.GlassSurface,
+    bottomBarBottom = CinetraTokens.GlassSurface,
+    gold = CinetraTokens.PrimaryRed,
+    goldLight = CinetraTokens.RedGradientStart,
+    textPrimary = CinetraTokens.TextPrimary,
+    textSecondary = CinetraTokens.TextSecondary,
+    textMuted = CinetraTokens.TextMuted,
+    border = CinetraTokens.Border,
+    success = CinetraTokens.Success,
+    warning = CinetraTokens.Warning,
+    info = CinetraTokens.Info
 )
 
 val CrispSlateColors = CinePaletteColors(
@@ -274,18 +309,21 @@ val CrispSlateColors = CinePaletteColors(
     primaryHover = Color(0xFF38BDF8),
     primaryContainer = Color(0xFF132D46),
     onPrimaryContainer = Color(0xFFE0F2FE),
+    onPrimary = Color.White,
     softRose = Color(0xFF7DD3FC),
     accentStart = Color(0xFF0284C7),
     accentMid = Color(0xFF0EA5E9),
     accentEnd = Color(0xFF2563EB),
     navIndicator = Color(0xFF183654),
+    glassSurface = Color(0xCC121B29),
+    glassBorder = Color(0xFF3A4E6C),
     atmosphericTop = Color(0xFF111D2E),
     atmosphericMid = Color(0xFF0D1521),
     topBarStart = Color(0xFF101927),
     topBarMid = Color(0xFF162235),
     topBarEnd = Color(0xFF101927),
-    bottomBarTop = Color(0xFF141F30),
-    bottomBarBottom = Color(0xFF0C131E),
+    bottomBarTop = Color(0xCC121B29),
+    bottomBarBottom = Color(0xCC121B29),
     gold = Color(0xFFFBBF24),
     goldLight = Color(0xFFFDE68A),
     textPrimary = Color(0xFFFFFFFF),
@@ -309,18 +347,21 @@ val WarmAmberNightColors = CinePaletteColors(
     primaryHover = Color(0xFFE89174),
     primaryContainer = Color(0xFF3A241B),
     onPrimaryContainer = Color(0xFFFDE8DC),
+    onPrimary = Color.White,
     softRose = Color(0xFFF4A261),
     accentStart = Color(0xFFE07A5F),
     accentMid = Color(0xFFC8644B),
     accentEnd = Color(0xFF8C4338),
     navIndicator = Color(0xFF3C2820),
+    glassSurface = Color(0xCC1B1612),
+    glassBorder = Color(0xFF45382E),
     atmosphericTop = Color(0xFF1E1712),
     atmosphericMid = Color(0xFF15110D),
     topBarStart = Color(0xFF1A1410),
     topBarMid = Color(0xFF231B15),
     topBarEnd = Color(0xFF17120E),
-    bottomBarTop = Color(0xFF1D1713),
-    bottomBarBottom = Color(0xFF130F0C),
+    bottomBarTop = Color(0xCC1B1612),
+    bottomBarBottom = Color(0xCC1B1612),
     gold = Color(0xFFF4B942),
     goldLight = Color(0xFFFAD37D),
     textPrimary = Color(0xFFFAF3E8),
@@ -340,24 +381,27 @@ val LightCinemaColors = CinePaletteColors(
     surface = Color(0xFFFFFFFF),
     surfaceElevated = Color(0xFFEEF1F7),
     surfaceHover = Color(0xFFE3E8F2),
-    primary = Color(0xFFC4455B),
-    primaryHover = Color(0xFFA63146),
-    primaryContainer = Color(0xFFFDE8EE),
-    onPrimaryContainer = Color(0xFF7D1D34),
-    softRose = Color(0xFFB52E47),
-    accentStart = Color(0xFFC84B5F),
-    accentMid = Color(0xFF9F365D),
-    accentEnd = Color(0xFF6B2D5C),
-    navIndicator = Color(0xFFFADBE4),
+    primary = CinetraTokens.PrimaryRed,
+    primaryHover = CinetraTokens.RedGradientEnd,
+    primaryContainer = Color(0xFFFFE5E7),
+    onPrimaryContainer = Color(0xFF8F0E1F),
+    onPrimary = Color.White,
+    softRose = CinetraTokens.PrimaryRed,
+    accentStart = CinetraTokens.RedGradientStart,
+    accentMid = CinetraTokens.PrimaryRed,
+    accentEnd = CinetraTokens.RedGradientEnd,
+    navIndicator = Color(0xFFFFE5E7),
+    glassSurface = Color(0xCCFFFFFF),
+    glassBorder = Color(0xFFD8DEE9),
     atmosphericTop = Color(0xFFECEFF7),
     atmosphericMid = Color(0xFFF3F5FA),
     topBarStart = Color(0xFFFFFFFF),
     topBarMid = Color(0xFFF9FAFD),
     topBarEnd = Color(0xFFFFFFFF),
-    bottomBarTop = Color(0xFFFFFFFF),
-    bottomBarBottom = Color(0xFFF4F6FA),
-    gold = Color(0xFFD97706),
-    goldLight = Color(0xFFB45309),
+    bottomBarTop = Color(0xCCFFFFFF),
+    bottomBarBottom = Color(0xCCF4F6FA),
+    gold = CinetraTokens.PrimaryRed,
+    goldLight = CinetraTokens.RedGradientEnd,
     textPrimary = Color(0xFF111827),
     textSecondary = Color(0xFF4B5563),
     textMuted = Color(0xFF6B7280),
@@ -401,8 +445,7 @@ fun buildPaletteGradients(colors: CinePaletteColors): CinePaletteGradients {
     return CinePaletteGradients(
         appBackdrop = Brush.verticalGradient(
             colors = listOf(
-                colors.atmosphericTop,
-                colors.atmosphericMid,
+                colors.background,
                 colors.background
             )
         ),
@@ -415,33 +458,37 @@ fun buildPaletteGradients(colors: CinePaletteColors): CinePaletteGradients {
         ),
         bottomBarBackdrop = Brush.verticalGradient(
             colors = listOf(
-                colors.bottomBarTop,
-                colors.bottomBarBottom
+                colors.glassSurface,
+                colors.glassSurface
             )
         ),
         primaryCta = Brush.horizontalGradient(
             colors = listOf(
                 colors.accentStart,
-                colors.accentMid,
+                colors.accentEnd
+            )
+        ),
+        redButton = Brush.horizontalGradient(
+            colors = listOf(
+                colors.accentStart,
                 colors.accentEnd
             )
         ),
         softBadge = Brush.horizontalGradient(
             colors = listOf(
-                colors.accentMid,
+                colors.accentStart,
                 colors.accentEnd
             )
         ),
         wordmark = Brush.horizontalGradient(
             colors = listOf(
-                colors.textPrimary,
-                colors.softRose,
-                colors.goldLight
+                colors.accentStart,
+                colors.accentEnd
             )
         ),
         adGateGlow = Brush.radialGradient(
             colors = listOf(
-                colors.accentEnd.copy(alpha = 0.24f),
+                colors.accentEnd.copy(alpha = 0.20f),
                 colors.surface,
                 colors.background
             )
@@ -455,7 +502,7 @@ fun buildPaletteGradients(colors: CinePaletteColors): CinePaletteGradients {
     )
 }
 
-// Legacy top-level defaults (point to Velvet Cinema baseline for static contexts)
+// Legacy top-level defaults (point to Cinetra Dark Red baseline for static contexts)
 val CineDarkBackground = VelvetCinemaColors.background
 val CineDarkSurface = VelvetCinemaColors.surface
 val CineDarkSurfaceElevated = VelvetCinemaColors.surfaceElevated

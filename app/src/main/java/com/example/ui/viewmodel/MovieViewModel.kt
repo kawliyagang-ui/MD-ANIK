@@ -142,6 +142,15 @@ data class UserUiState(
     val topRatedMovies: List<MediaItem> = emptyList(),
     val topRatedTv: List<MediaItem> = emptyList(),
     val customMedia: List<MediaItem> = emptyList(),
+    // Curated Home Screen Rows (pure-black poster-first reskin)
+    val homeLatestReleased: List<MediaItem> = emptyList(),
+    val homeBollywoodMovies: List<MediaItem> = emptyList(),
+    val homeSouthIndianMovies: List<MediaItem> = emptyList(),
+    val homeBanglaMixed: List<MediaItem> = emptyList(),
+    val homeHollywoodMovies: List<MediaItem> = emptyList(),
+    val homeKDramaSeries: List<MediaItem> = emptyList(),
+    val homeCDramaSeries: List<MediaItem> = emptyList(),
+    val homeUpcomingSoonest: List<MediaItem> = emptyList(),
     val searchResults: List<MediaItem> = emptyList(),
     val discoverResults: List<MediaItem> = emptyList(),
     val discoverFilters: DiscoverFilters = DiscoverFilters(),
@@ -293,6 +302,12 @@ class MovieViewModel(
     private var rawUpcomingMovies: List<MediaItem> = emptyList()
     private var rawTopRatedMovies: List<MediaItem> = emptyList()
     private var rawTopRatedTv: List<MediaItem> = emptyList()
+    private var rawHomeBollywoodMovies: List<MediaItem> = emptyList()
+    private var rawHomeSouthIndianMovies: List<MediaItem> = emptyList()
+    private var rawHomeBanglaMixed: List<MediaItem> = emptyList()
+    private var rawHomeHollywoodMovies: List<MediaItem> = emptyList()
+    private var rawHomeKDramaSeries: List<MediaItem> = emptyList()
+    private var rawHomeCDramaSeries: List<MediaItem> = emptyList()
     private var rawSearchResults: List<MediaItem> = emptyList()
     private var rawSearchSuggestions: List<MediaItem> = emptyList()
     private var rawDiscoverResults: List<MediaItem> = emptyList()
@@ -464,6 +479,49 @@ class MovieViewModel(
         return UpcomingReleasePolicy.filterStrictUpcoming(overridden)
     }
 
+    private fun buildHomeUpcomingSoonestList(
+        rawUpcoming: List<MediaItem>,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        return buildStrictUpcomingUiList(rawUpcoming, mappedCustom)
+            .filter { UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+            .sortedWith(
+                compareBy<MediaItem> { UpcomingReleasePolicy.extractIsoDatePrefix(it.releaseDate) ?: "9999-12-31" }
+                    .thenByDescending { it.popularity }
+            )
+    }
+
+    private fun buildHomeReleasedList(
+        items: List<MediaItem>,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        return CatalogOverridePolicy.applyAdminOverrides(items, mappedCustom)
+            .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+            .distinctBy { it.id }
+    }
+
+    private fun buildHomeLatestReleasedList(
+        resolvedNewReleases: List<MediaItem>,
+        trending: List<MediaItem>,
+        trendingMovies: List<MediaItem>,
+        trendingTv: List<MediaItem>,
+        mappedCustom: List<MediaItem>
+    ): List<MediaItem> {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        val combined = CatalogOverridePolicy.applyAdminOverrides(
+            (resolvedNewReleases + trendingMovies + trendingTv + trending).distinctBy { it.id },
+            mappedCustom
+        )
+        return combined
+            .filter { UpcomingReleasePolicy.isReleasedOnOrBeforeToday(it.releaseDate, today) }
+            .sortedWith(
+                compareByDescending<MediaItem> { UpcomingReleasePolicy.extractIsoDatePrefix(it.releaseDate) ?: "" }
+                    .thenByDescending { it.popularity }
+            )
+    }
+
     private fun buildLanguageCatalogUiList(
         rawTmdbItems: List<MediaItem>,
         languageCode: String,
@@ -491,16 +549,34 @@ class MovieViewModel(
                 rawCustomEntities = list
                 val mappedCustom = list.map { it.toMediaItem() }
                 _uiState.update { current ->
+                    val resolvedNewReleases = buildDailyNewReleasesUiList(rawNewReleases, list, mappedCustom)
+                    val resolvedTrending = buildHomeReleasedList(rawTrending, mappedCustom)
+                    val resolvedTrendingMovies = buildHomeReleasedList(rawTrendingMovies, mappedCustom)
+                    val resolvedTrendingTv = buildHomeReleasedList(rawTrendingTv, mappedCustom)
                     current.copy(
                         customMedia = mappedCustom,
-                        trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, mappedCustom),
-                        trendingMovies = CatalogOverridePolicy.applyAdminOverrides(rawTrendingMovies, mappedCustom),
-                        trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, mappedCustom),
-                        newReleases = buildDailyNewReleasesUiList(rawNewReleases, list, mappedCustom),
+                        trending = resolvedTrending,
+                        trendingMovies = resolvedTrendingMovies,
+                        trendingTv = resolvedTrendingTv,
+                        newReleases = resolvedNewReleases,
                         popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, mappedCustom),
                         upcomingMovies = buildStrictUpcomingUiList(rawUpcomingMovies, mappedCustom),
                         topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedMovies, mappedCustom),
                         topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, mappedCustom),
+                        homeLatestReleased = buildHomeLatestReleasedList(
+                            resolvedNewReleases = resolvedNewReleases,
+                            trending = resolvedTrending,
+                            trendingMovies = resolvedTrendingMovies,
+                            trendingTv = resolvedTrendingTv,
+                            mappedCustom = mappedCustom
+                        ),
+                        homeBollywoodMovies = buildHomeReleasedList(rawHomeBollywoodMovies, mappedCustom),
+                        homeSouthIndianMovies = buildHomeReleasedList(rawHomeSouthIndianMovies, mappedCustom),
+                        homeBanglaMixed = buildHomeReleasedList(rawHomeBanglaMixed, mappedCustom),
+                        homeHollywoodMovies = buildHomeReleasedList(rawHomeHollywoodMovies, mappedCustom),
+                        homeKDramaSeries = buildHomeReleasedList(rawHomeKDramaSeries, mappedCustom),
+                        homeCDramaSeries = buildHomeReleasedList(rawHomeCDramaSeries, mappedCustom),
+                        homeUpcomingSoonest = buildHomeUpcomingSoonestList(rawUpcomingMovies, mappedCustom),
                         searchResults = CatalogOverridePolicy.applyAdminOverrides(rawSearchResults, mappedCustom),
                         searchSuggestions = CatalogOverridePolicy.applyAdminOverrides(
                             SearchSuggestionPolicy.rankSuggestions(
@@ -596,6 +672,12 @@ class MovieViewModel(
                     val upcomingDeferred = async { repository.getUpcomingMoviesBatch(1, targetBatchSize) }
                     val topRatedMoviesDef = async { repository.getTopRatedMoviesBatch(1, targetBatchSize) }
                     val tvDeferred = async { repository.getTopRatedTvBatch(1, targetBatchSize) }
+                    val bollywoodDef = async { repository.getReleasedMoviesByLanguage("hi", minVotes = 5) }
+                    val southIndianDef = async { repository.getSouthIndianMoviesHome() }
+                    val banglaDef = async { repository.getBanglaMixedHome() }
+                    val hollywoodDef = async { repository.getReleasedMoviesByLanguage("en", minVotes = 50) }
+                    val kDramaDef = async { repository.getReleasedTvByLanguage("ko", minVotes = 10) }
+                    val cDramaDef = async { repository.getReleasedTvByLanguage("zh", minVotes = 5) }
 
                     val trendingResult = trendingDeferred.await()
                     val trendingMoviesRes = trendingMoviesDef.await()
@@ -605,6 +687,12 @@ class MovieViewModel(
                     val upcomingRes = upcomingDeferred.await()
                     val topRatedMoviesRes = topRatedMoviesDef.await()
                     val tvResult = tvDeferred.await()
+                    val bollywoodItems = bollywoodDef.await()
+                    val southIndianItems = southIndianDef.await()
+                    val banglaItems = banglaDef.await()
+                    val hollywoodItems = hollywoodDef.await()
+                    val kDramaItems = kDramaDef.await()
+                    val cDramaItems = cDramaDef.await()
 
                     val allFailed = trendingResult.isFailure && popularResult.isFailure && tvResult.isFailure
 
@@ -634,6 +722,12 @@ class MovieViewModel(
                     if (upcomingBatch != null) rawUpcomingMovies = upcomingItems
                     if (topRatedMovieItems.isNotEmpty()) rawTopRatedMovies = topRatedMovieItems
                     if (tvItems.isNotEmpty()) rawTopRatedTv = tvItems
+                    if (bollywoodItems.isNotEmpty()) rawHomeBollywoodMovies = bollywoodItems
+                    if (southIndianItems.isNotEmpty()) rawHomeSouthIndianMovies = southIndianItems
+                    if (banglaItems.isNotEmpty()) rawHomeBanglaMixed = banglaItems
+                    if (hollywoodItems.isNotEmpty()) rawHomeHollywoodMovies = hollywoodItems
+                    if (kDramaItems.isNotEmpty()) rawHomeKDramaSeries = kDramaItems
+                    if (cDramaItems.isNotEmpty()) rawHomeCDramaSeries = cDramaItems
 
                     trendingBatch?.let {
                         trendingFeed = FeedPaginationState(it.lastFetchedPage + 1, it.totalPages, it.totalResults, it.items.drop(trendingItems.size))
@@ -664,15 +758,32 @@ class MovieViewModel(
                         val overrides = state.customMedia
                         val resolvedNewReleases = buildDailyNewReleasesUiList(rawNewReleases, rawCustomEntities, overrides)
                         val resolvedUpcoming = buildStrictUpcomingUiList(rawUpcomingMovies, overrides)
+                        val resolvedTrending = buildHomeReleasedList(rawTrending, overrides)
+                        val resolvedTrendingMovies = buildHomeReleasedList(rawTrendingMovies, overrides)
+                        val resolvedTrendingTv = buildHomeReleasedList(rawTrendingTv, overrides)
                         state.copy(
-                            trending = CatalogOverridePolicy.applyAdminOverrides(rawTrending, overrides),
-                            trendingMovies = CatalogOverridePolicy.applyAdminOverrides(rawTrendingMovies, overrides),
-                            trendingTv = CatalogOverridePolicy.applyAdminOverrides(rawTrendingTv, overrides),
+                            trending = resolvedTrending,
+                            trendingMovies = resolvedTrendingMovies,
+                            trendingTv = resolvedTrendingTv,
                             newReleases = resolvedNewReleases,
                             popularMovies = CatalogOverridePolicy.applyAdminOverrides(rawPopularMovies, overrides),
                             upcomingMovies = resolvedUpcoming,
                             topRatedMovies = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedMovies, overrides),
                             topRatedTv = CatalogOverridePolicy.applyAdminOverrides(rawTopRatedTv, overrides),
+                            homeLatestReleased = buildHomeLatestReleasedList(
+                                resolvedNewReleases = resolvedNewReleases,
+                                trending = resolvedTrending,
+                                trendingMovies = resolvedTrendingMovies,
+                                trendingTv = resolvedTrendingTv,
+                                mappedCustom = overrides
+                            ),
+                            homeBollywoodMovies = buildHomeReleasedList(rawHomeBollywoodMovies, overrides),
+                            homeSouthIndianMovies = buildHomeReleasedList(rawHomeSouthIndianMovies, overrides),
+                            homeBanglaMixed = buildHomeReleasedList(rawHomeBanglaMixed, overrides),
+                            homeHollywoodMovies = buildHomeReleasedList(rawHomeHollywoodMovies, overrides),
+                            homeKDramaSeries = buildHomeReleasedList(rawHomeKDramaSeries, overrides),
+                            homeCDramaSeries = buildHomeReleasedList(rawHomeCDramaSeries, overrides),
+                            homeUpcomingSoonest = buildHomeUpcomingSoonestList(rawUpcomingMovies, overrides),
                             trendingTotalResults = trendingBatch?.totalResults ?: state.trendingTotalResults,
                             trendingMoviesTotalResults = trendingMoviesBatch?.totalResults ?: state.trendingMoviesTotalResults,
                             trendingTvTotalResults = trendingTvBatch?.totalResults ?: state.trendingTvTotalResults,

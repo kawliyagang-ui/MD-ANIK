@@ -40,10 +40,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +99,13 @@ fun DirectPlayerSheetsHost(
     modifier: Modifier = Modifier
 ) {
     val visible = activeSheet != DirectPlayerActiveSheet.NONE
+    val firstOptionFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(activeSheet) {
+        if (activeSheet != DirectPlayerActiveSheet.NONE) {
+            runCatching { firstOptionFocusRequester.requestFocus() }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         AnimatedVisibility(
             visible = visible,
@@ -125,7 +139,7 @@ fun DirectPlayerSheetsHost(
             when (activeSheet) {
                 DirectPlayerActiveSheet.SPEED -> {
                     DirectPlayerSheetContainer(title = "Playback Speed") {
-                        LongPressSpeedController.SPEED_PRESETS.forEach { speed ->
+                        LongPressSpeedController.SPEED_PRESETS.forEachIndexed { idx, speed ->
                             val selected = abs(currentBaseSpeed - speed) < 0.01f
                             val label = if (abs(speed - 1.0f) < 0.01f) {
                                 "1.0x (Normal)"
@@ -136,6 +150,7 @@ fun DirectPlayerSheetsHost(
                                 label = label,
                                 selected = selected,
                                 testTag = "sheet_speed_${speed}",
+                                focusRequester = if (idx == 0) firstOptionFocusRequester else null,
                                 onClick = {
                                     onSelectSpeed(speed)
                                     onDismiss()
@@ -151,6 +166,7 @@ fun DirectPlayerSheetsHost(
                             label = "Off",
                             selected = areSubtitlesDisabled || subtitleTrackChoices.none { it.isSelected },
                             testTag = "sheet_subtitle_off",
+                            focusRequester = firstOptionFocusRequester,
                             onClick = {
                                 onDisableSubtitles()
                                 onDismiss()
@@ -186,6 +202,7 @@ fun DirectPlayerSheetsHost(
                                 label = "Default Audio",
                                 selected = true,
                                 testTag = "sheet_audio_default",
+                                focusRequester = firstOptionFocusRequester,
                                 onClick = onDismiss
                             )
                         } else {
@@ -194,6 +211,7 @@ fun DirectPlayerSheetsHost(
                                     label = choice.label,
                                     selected = choice.isSelected,
                                     testTag = "sheet_audio_$idx",
+                                    focusRequester = if (idx == 0) firstOptionFocusRequester else null,
                                     onClick = {
                                         onSelectAudioTrack(choice)
                                         onDismiss()
@@ -210,6 +228,7 @@ fun DirectPlayerSheetsHost(
                             label = "Auto (Adaptive)",
                             selected = isAutoVideoSelected,
                             testTag = "sheet_quality_auto",
+                            focusRequester = firstOptionFocusRequester,
                             onClick = {
                                 onSelectAutoVideo()
                                 onDismiss()
@@ -231,11 +250,12 @@ fun DirectPlayerSheetsHost(
 
                 DirectPlayerActiveSheet.ASPECT_RATIO -> {
                     DirectPlayerSheetContainer(title = "Aspect Ratio") {
-                        DirectAspectRatio.entries.forEach { ratio ->
+                        DirectAspectRatio.entries.forEachIndexed { idx, ratio ->
                             DirectSheetOptionRow(
                                 label = ratio.label,
                                 selected = ratio == currentAspectRatio,
                                 testTag = "sheet_aspect_${ratio.name}",
+                                focusRequester = if (idx == 0) firstOptionFocusRequester else null,
                                 onClick = {
                                     onSelectAspectRatio(ratio)
                                     onDismiss()
@@ -309,16 +329,33 @@ private fun DirectSheetOptionRow(
     label: String,
     selected: Boolean,
     testTag: String,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     val colors = CineTheme.colors
     val interaction = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) colors.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .background(
+                when {
+                    isFocused -> colors.primary.copy(alpha = 0.28f)
+                    selected -> colors.primary.copy(alpha = 0.14f)
+                    else -> Color.Transparent
+                }
+            )
+            .then(
+                if (isFocused) {
+                    Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                } else {
+                    Modifier
+                }
+            )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interaction,
                 indication = ripple(bounded = true),
@@ -346,8 +383,8 @@ private fun DirectSheetOptionRow(
             Text(
                 text = label,
                 fontSize = 14.sp,
-                color = if (selected) Color.White else Color.White.copy(alpha = 0.84f),
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                color = if (selected || isFocused) Color.White else Color.White.copy(alpha = 0.84f),
+                fontWeight = if (selected || isFocused) FontWeight.SemiBold else FontWeight.Normal
             )
         }
         if (selected) {

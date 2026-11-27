@@ -5,11 +5,15 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,65 +24,62 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CatalogBatchPolicy
-import com.example.data.model.MediaItem
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.ripple
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
 import com.example.data.model.DiscoverFilters
+import com.example.data.model.MediaItem
 import com.example.data.model.TmdbSearchHistoryEntity
 import com.example.ui.components.AdvancedFilterSheet
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineEase
-import com.example.ui.components.CineGradientButton
+import com.example.ui.components.CinetraEmptyState
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
+import com.example.ui.components.RedButton
 import com.example.ui.components.SearchResultsSkeletonGrid
 import com.example.ui.components.cinePressScale
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 
 @Composable
 fun ExploreScreen(
@@ -118,8 +119,8 @@ fun ExploreScreen(
     onLoadMoreDiscover: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
+    val bottomClearance = CinetraTheme.bottomBarClearance
     var showFilterSheet by remember { mutableStateOf(false) }
     val genres = remember {
         listOf(
@@ -132,7 +133,6 @@ fun ExploreScreen(
         listOf("All", "movie", "tv")
     }
 
-    // Determine displayed items: Search > TMDB Discover API (when advanced criteria active) > Loaded Catalog
     val isSearchActive = searchQuery.isNotBlank()
     val useDiscoverMode = !isSearchActive && (discoverFilters.hasDiscoverApiCriteria() || discoverResults.isNotEmpty())
     val baseList = when {
@@ -162,18 +162,9 @@ fun ExploreScreen(
         !selectedCategory.equals("All", ignoreCase = true) ||
         !selectedGenre.equals("All", ignoreCase = true)
 
-    val effectiveHasMore = when {
-        useDiscoverMode -> hasMoreDiscover
-        else -> hasMore
-    }
-    val effectiveIsLoadingMore = when {
-        useDiscoverMode -> isLoadingMoreDiscover
-        else -> isLoadingMore
-    }
-    val effectiveOnLoadMore: () -> Unit = when {
-        useDiscoverMode -> onLoadMoreDiscover
-        else -> onLoadMore
-    }
+    val effectiveHasMore = if (useDiscoverMode) hasMoreDiscover else hasMore
+    val effectiveIsLoadingMore = if (useDiscoverMode) isLoadingMoreDiscover else isLoadingMore
+    val effectiveOnLoadMore: () -> Unit = if (useDiscoverMode) onLoadMoreDiscover else onLoadMore
 
     val displayTotal = remember(
         searchQuery,
@@ -201,18 +192,17 @@ fun ExploreScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
     ) {
-        // Content Feed Header with Live Database Total Chip & Search Bar
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp)
+                    .padding(bottom = 10.dp)
                     .testTag("explore_feed_header"),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -221,12 +211,9 @@ fun ExploreScreen(
                     text = when {
                         isSearchActive -> "Search Results"
                         hasActiveFilterOrSearch -> "Filtered Feed"
-                        else -> "Catalog Feed"
+                        else -> "Explore Catalog"
                     },
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    ),
+                    style = MaterialTheme.typography.titleMedium, // Bold 18.sp
                     color = colors.textPrimary
                 )
                 CatalogCountChip(
@@ -236,28 +223,30 @@ fun ExploreScreen(
                     testTag = "explore_catalog_total_chip"
                 )
             }
+
             val searchBarInteraction = remember { MutableInteractionSource() }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(50.dp)
                     .cinePressScale(searchBarInteraction)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(50))
                     .background(colors.surfaceElevated)
-                    .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                    .border(1.dp, colors.border, RoundedCornerShape(50))
                     .clickable(
                         interactionSource = searchBarInteraction,
                         indication = ripple(bounded = true),
                         onClick = onOpenSearch
                     )
-                    .padding(horizontal = 14.dp)
+                    .padding(horizontal = 16.dp)
                     .testTag("search_input_field"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
-                    tint = colors.softRose
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
@@ -281,9 +270,8 @@ fun ExploreScreen(
                 }
             }
 
-            // Search History (Last 5 movie searches from Room DB)
             if (searchHistory.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -293,21 +281,20 @@ fun ExploreScreen(
                         Icon(
                             imageVector = Icons.Default.History,
                             contentDescription = "Search History",
-                            tint = colors.gold,
+                            tint = colors.textMuted,
                             modifier = Modifier.size(13.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "Recent Searches (${searchHistory.size}/5):",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.gold
+                            text = "Recent Searches",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
                         )
                     }
                     Text(
                         text = "Clear All",
-                        fontSize = 11.sp,
-                        color = colors.textSecondary,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.primary,
                         modifier = Modifier
                             .clickable { onClearSearchHistory() }
                             .padding(horizontal = 4.dp, vertical = 2.dp)
@@ -315,9 +302,9 @@ fun ExploreScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     items(
@@ -327,9 +314,9 @@ fun ExploreScreen(
                     ) { item ->
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(colors.surface)
-                                .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.surfaceElevated)
+                                .border(1.dp, colors.border, RoundedCornerShape(50))
                                 .clickable {
                                     onSearchQueryChange(item.query)
                                     onOpenSearch()
@@ -356,7 +343,7 @@ fun ExploreScreen(
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "Remove ${item.query}",
-                                        tint = colors.textSecondary,
+                                        tint = colors.textMuted,
                                         modifier = Modifier.size(11.dp)
                                     )
                                 }
@@ -368,66 +355,46 @@ fun ExploreScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Category Filter Pills (All / Movies / TV Series)
+            // Category, Filters & Sort Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 categories.forEach { cat ->
                     val isSelected = selectedCategory == cat
                     val label = when (cat) {
                         "movie" -> "Movies"
                         "tv" -> "TV Series"
-                        else -> "All Types"
+                        else -> "All"
                     }
-                    FilterChip(
+                    CategoryPill(
+                        label = label,
                         selected = isSelected,
                         onClick = { onCategorySelect(cat) },
-                        label = { Text(label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = colors.accentMid,
-                            selectedLabelColor = Color.White,
-                            containerColor = colors.surfaceElevated,
-                            labelColor = colors.textPrimary
-                        ),
                         modifier = Modifier.testTag("filter_cat_$cat")
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Advanced Filter Panel button
                 val advCount = discoverFilters.activeFilterCount()
-                FilterChip(
+                CategoryPill(
+                    label = if (advCount > 0) "Filters ($advCount)" else "Filters",
                     selected = advCount > 0,
+                    leadingIcon = Icons.Default.Tune,
                     onClick = { showFilterSheet = true },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = "Advanced Filters",
-                            tint = if (advCount > 0) Color.White else colors.softRose,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            text = if (advCount > 0) "Filters ($advCount)" else "Filters",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = colors.accentMid,
-                        selectedLabelColor = Color.White,
-                        containerColor = colors.surfaceElevated,
-                        labelColor = colors.textPrimary
-                    ),
                     modifier = Modifier.testTag("explore_advanced_filters_button")
                 )
 
-                // Sort toggle (Popular / Rating / Newest)
-                FilterChip(
+                CategoryPill(
+                    label = when (sortBy) {
+                        "rating" -> "Top Rated"
+                        "newest" -> "Newest"
+                        else -> "Popular"
+                    },
                     selected = sortBy != "popular",
+                    leadingIcon = Icons.Default.FilterList,
                     onClick = {
                         val next = when (sortBy) {
                             "popular" -> "rating"
@@ -436,43 +403,18 @@ fun ExploreScreen(
                         }
                         onSortSelect(next)
                     },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.FilterList,
-                            contentDescription = null,
-                            tint = colors.gold,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            text = when (sortBy) {
-                                "rating" -> "★ Rating"
-                                "newest" -> "Newest"
-                                else -> "Popular"
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = colors.surfaceElevated,
-                        selectedLabelColor = colors.gold,
-                        containerColor = colors.surfaceElevated,
-                        labelColor = colors.textPrimary
-                    ),
                     modifier = Modifier.testTag("sort_filter_chip")
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Genre & Batch Size Horizontal Pills
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BatchSizeChip(
@@ -481,52 +423,46 @@ fun ExploreScreen(
                     testTag = "explore_batch_size_chip"
                 )
                 if (discoverFilters.releaseYear != null) {
-                    FilterChip(
+                    CategoryPill(
+                        label = "Year: ${discoverFilters.releaseYear} ✕",
                         selected = true,
-                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(releaseYear = null)) },
-                        label = { Text("Year: ${discoverFilters.releaseYear} ✕", fontSize = 11.sp) }
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(releaseYear = null)) }
                     )
                 }
                 if (discoverFilters.minRating > 0.0) {
-                    FilterChip(
+                    CategoryPill(
+                        label = "${discoverFilters.minRating.toInt()}+ ★ ✕",
                         selected = true,
-                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(minRating = 0.0)) },
-                        label = { Text("${discoverFilters.minRating.toInt()}+ ★ ✕", fontSize = 11.sp) }
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(minRating = 0.0)) }
                     )
                 }
                 if (discoverFilters.originalLanguage.isNotBlank()) {
-                    FilterChip(
+                    CategoryPill(
+                        label = "Lang: ${discoverFilters.originalLanguage.uppercase()} ✕",
                         selected = true,
-                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originalLanguage = "")) },
-                        label = { Text("Lang: ${discoverFilters.originalLanguage.uppercase()} ✕", fontSize = 11.sp) }
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originalLanguage = "")) }
                     )
                 }
                 if (discoverFilters.originCountry.isNotBlank()) {
-                    FilterChip(
+                    CategoryPill(
+                        label = "Country: ${discoverFilters.originCountry} ✕",
                         selected = true,
-                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originCountry = "")) },
-                        label = { Text("Country: ${discoverFilters.originCountry} ✕", fontSize = 11.sp) }
+                        onClick = { onApplyDiscoverFilters(discoverFilters.copy(originCountry = "")) }
                     )
                 }
                 genres.forEach { genre ->
                     val isSelected = selectedGenre == genre || genre in discoverFilters.selectedGenres
-                    FilterChip(
+                    CategoryPill(
+                        label = genre,
                         selected = isSelected,
                         onClick = { onGenreSelect(genre) },
-                        label = { Text(genre, fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = if (isSelected) colors.gold else colors.surfaceElevated,
-                            selectedLabelColor = if (isSelected) Color.Black else colors.textPrimary,
-                            containerColor = colors.surfaceElevated,
-                            labelColor = colors.textPrimary
-                        ),
                         modifier = Modifier.testTag("genre_chip_$genre")
                     )
                 }
             }
         }
 
-        // Search status & result count
+        // Status row
         val showSkeletonGrid = (isSearching && filteredList.isEmpty()) ||
             (isLoadingDiscover && filteredList.isEmpty()) ||
             (isLoadingCatalog && searchQuery.isBlank() && filteredList.isEmpty())
@@ -547,16 +483,16 @@ fun ExploreScreen(
                         totalAvailable = displayTotal
                     )
                 },
-                fontSize = 12.sp,
-                color = colors.textSecondary,
-                fontWeight = FontWeight.Medium
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                color = colors.textMuted
             )
 
             if (isSearching || effectiveIsLoadingMore || isLoadingDiscover || (isLoadingCatalog && filteredList.isEmpty())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
-                        color = colors.softRose,
-                        modifier = Modifier.size(14.dp)
+                        color = colors.primary,
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -567,13 +503,12 @@ fun ExploreScreen(
                             else -> "Syncing TMDb"
                         },
                         fontSize = 11.sp,
-                        color = colors.gold
+                        color = colors.textSecondary
                     )
                 }
             }
         }
 
-        // Grid of results / Skeleton / Error / Empty state
         val exploreMode = when {
             showSkeletonGrid -> "skeleton"
             searchErrorMessage != null && filteredList.isEmpty() && !isSearching -> "error"
@@ -592,162 +527,147 @@ fun ExploreScreen(
                 .fillMaxWidth()
                 .weight(1f)
         ) { mode ->
-        when (mode) {
-            "skeleton" -> {
-            SearchResultsSkeletonGrid()
-            }
-            "error" -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp)
-                    .testTag("explore_search_error_state"),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.WifiOff,
-                        contentDescription = null,
-                        tint = colors.softRose,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "TMDb Search Unavailable",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = searchErrorMessage.orEmpty(),
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    CineGradientButton(
-                        onClick = onRetrySearch,
-                        shape = RoundedCornerShape(50),
-                        minHeight = 48.dp,
-                        modifier = Modifier.testTag("explore_retry_search_button")
+            when (mode) {
+                "skeleton" -> SearchResultsSkeletonGrid()
+                "error" -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = bottomClearance)
+                            .testTag("explore_search_error_state"),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Retry Search", fontWeight = FontWeight.Bold)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CinetraEmptyState(
+                                icon = Icons.Default.WifiOff,
+                                title = "TMDb Search Unavailable",
+                                subtitle = searchErrorMessage.orEmpty()
+                            )
+                            RedButton(
+                                onClick = onRetrySearch,
+                                modifier = Modifier.testTag("explore_retry_search_button")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry Search", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
-            }
-            }
-            "empty" -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp)
-                    .testTag("explore_empty_state"),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = if (searchQuery.isNotBlank()) {
-                            "No results found for \"$searchQuery\""
-                        } else {
-                            "No matching titles found"
-                        },
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = colors.textPrimary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (searchQuery.isNotBlank()) {
-                            "Try another search query or reset your category and genre filters."
-                        } else {
-                            "Reset your active filters or search TMDb above to discover more movies and series."
-                        },
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                    if (hasActiveFilterOrSearch) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedButton(
-                            onClick = onResetFilters,
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier.testTag("explore_reset_filters_button")
-                        ) {
-                            Text(
-                                text = "Reset Filters",
-                                color = colors.textPrimary,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
+                "empty" -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = bottomClearance)
+                            .testTag("explore_empty_state"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CinetraEmptyState(
+                                icon = Icons.Default.Search,
+                                title = if (searchQuery.isNotBlank()) {
+                                    "No results found for \"$searchQuery\""
+                                } else {
+                                    "No matching titles found"
+                                },
+                                subtitle = if (searchQuery.isNotBlank()) {
+                                    "Try another search query or reset your category and genre filters."
+                                } else {
+                                    "Reset your active filters or search TMDb above to discover more movies and series."
+                                }
                             )
+                            if (hasActiveFilterOrSearch) {
+                                OutlinedButton(
+                                    onClick = onResetFilters,
+                                    shape = MaterialTheme.shapes.small,
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = colors.surfaceElevated,
+                                        contentColor = colors.textPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, colors.border),
+                                    modifier = Modifier.testTag("explore_reset_filters_button")
+                                ) {
+                                    Text(
+                                        text = "Reset Filters",
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    val gridState = rememberLazyGridState()
+                    val shouldAutoLoadMore by remember(effectiveHasMore, effectiveIsLoadingMore, filteredList.size) {
+                        derivedStateOf {
+                            val total = gridState.layoutInfo.totalItemsCount
+                            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            effectiveHasMore && !effectiveIsLoadingMore && total > 8 && lastVisible >= total - 4
+                        }
+                    }
+                    LaunchedEffect(shouldAutoLoadMore) {
+                        if (shouldAutoLoadMore) {
+                            effectiveOnLoadMore()
+                        }
+                    }
+
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val columnCount = if (maxWidth >= 600.dp) 4 else 3
+                        val horizontalSpacing = 10.dp
+                        val totalGap = 32.dp + horizontalSpacing * (columnCount - 1)
+                        val colWidth = ((maxWidth - totalGap) / columnCount).coerceAtLeast(96.dp)
+                        val colHeight = colWidth * 1.5f
+                        val showTypePill = selectedCategory.equals("All", ignoreCase = true)
+
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Fixed(columnCount),
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 12.dp,
+                                bottom = bottomClearance + 24.dp
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(
+                                items = filteredList,
+                                key = { it.id },
+                                contentType = { "movie_card" }
+                            ) { item ->
+                                MovieCard(
+                                    media = item,
+                                    onClick = { onMediaClick(item) },
+                                    cardWidth = colWidth,
+                                    cardHeight = colHeight,
+                                    showTypePill = showTypePill,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+
+                            item(
+                                span = { GridItemSpan(maxLineSpan) },
+                                key = "explore_load_more_footer",
+                                contentType = "load_more_footer"
+                            ) {
+                                LoadMoreBatchFooter(
+                                    shownCount = filteredList.size,
+                                    totalAvailable = displayTotal,
+                                    batchSize = batchSize,
+                                    hasMore = effectiveHasMore,
+                                    isLoadingMore = effectiveIsLoadingMore,
+                                    onLoadMore = effectiveOnLoadMore,
+                                    testTag = "explore_load_more_button"
+                                )
+                            }
                         }
                     }
                 }
             }
-            }
-            else -> {
-            val gridState = rememberLazyGridState()
-            val shouldAutoLoadMore by remember(effectiveHasMore, effectiveIsLoadingMore, filteredList.size) {
-                derivedStateOf {
-                    val total = gridState.layoutInfo.totalItemsCount
-                    val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    effectiveHasMore && !effectiveIsLoadingMore && total > 8 && lastVisible >= total - 4
-                }
-            }
-            LaunchedEffect(shouldAutoLoadMore) {
-                if (shouldAutoLoadMore) {
-                    effectiveOnLoadMore()
-                }
-            }
-
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(minSize = 135.dp),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(
-                    items = filteredList,
-                    key = { it.id },
-                    contentType = { "movie_card" }
-                ) { item ->
-                    MovieCard(
-                        media = item,
-                        onClick = { onMediaClick(item) },
-                        cardWidth = 140.dp,
-                        cardHeight = 205.dp,
-                        modifier = Modifier.animateItem()
-                    )
-                }
-
-                item(
-                    span = { GridItemSpan(maxLineSpan) },
-                    key = "explore_load_more_footer",
-                    contentType = "load_more_footer"
-                ) {
-                    LoadMoreBatchFooter(
-                        shownCount = filteredList.size,
-                        totalAvailable = displayTotal,
-                        batchSize = batchSize,
-                        hasMore = effectiveHasMore,
-                        isLoadingMore = effectiveIsLoadingMore,
-                        onLoadMore = effectiveOnLoadMore,
-                        testTag = "explore_load_more_button"
-                    )
-                }
-            }
-            }
-        }
         }
     }
 

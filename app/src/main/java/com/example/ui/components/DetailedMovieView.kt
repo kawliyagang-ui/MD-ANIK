@@ -9,54 +9,49 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.MediaItem
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-/**
- * Reusable detailed movie view component displaying backdrop image,
- * plot summary, formatted release date, rating, genres, and optional actions.
- */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailedMovieView(
     media: MediaItem,
@@ -71,25 +66,20 @@ fun DetailedMovieView(
         formatReleaseDate(media.releaseDate)
     }
 
-    val formattedRating = remember(media.voteAverage) {
-        if (media.voteAverage > 0.0) {
-            String.format(Locale.US, "%.1f / 10", media.voteAverage)
-        } else {
-            "Not Rated"
-        }
+    val yearText = remember(media.releaseDate) {
+        media.releaseDate.take(4).ifBlank { formattedReleaseDate }
     }
 
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
-    val darkPlaceholder = rememberDarkImagePainter(colors.surfaceElevated)
+    val colors = CinetraTheme.colors
+    val gradients = CinetraTheme.gradients
+    val darkPlaceholder = rememberDarkImagePainter(colors.surface)
     val backdropFadeBrush = rememberVerticalGradientBrush(
-        Color.Black.copy(alpha = 0.55f),
-        Color.Transparent,
-        colors.background.copy(alpha = 0.90f),
+        colors.background.copy(alpha = 0.20f),
+        colors.background.copy(alpha = 0.45f),
+        colors.background.copy(alpha = 0.88f),
         colors.background
     )
 
-    // Soft backdrop/poster entrance: fade + tiny 0.98f -> 1f scale
     val heroReveal = remember(media.id) { Animatable(0f) }
     LaunchedEffect(media.id) {
         heroReveal.snapTo(0f)
@@ -99,150 +89,35 @@ fun DetailedMovieView(
         )
     }
 
+    val resolvedBackdropHeight = backdropHeight ?: 240.dp
+    val posterOverlapOffset = 48.dp
+    val posterCardShape = RoundedCornerShape(14.dp)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(colors.background)
             .testTag("detailed_movie_view")
     ) {
-        // Backdrop Image Header
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (backdropHeight != null) {
-                        Modifier.height(backdropHeight)
-                    } else {
-                        Modifier.aspectRatio(16f / 9f)
-                    }
-                )
-        ) {
-            val targetBackdropWidth = maxWidth
-            val targetBackdropHeight = backdropHeight ?: (targetBackdropWidth * 9f / 16f)
-
-            Box(
+        // Backdrop + Overlapping Poster Thumbnail & Title Header
+        Box(modifier = Modifier.fillMaxWidth()) {
+            BoxWithConstraints(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val p = heroReveal.value
-                        alpha = p
-                        val s = 0.98f + (0.02f * p)
-                        scaleX = s
-                        scaleY = s
-                    }
+                    .fillMaxWidth()
+                    .then(
+                        if (backdropHeight != null) {
+                            Modifier.height(backdropHeight)
+                        } else {
+                            Modifier.aspectRatio(16f / 9f)
+                        }
+                    )
             ) {
-                if (media.fullBackdropUrl.isNotBlank()) {
-                    val backdropReq = rememberCineImageRequest(
-                        url = media.fullBackdropUrl,
-                        widthDp = targetBackdropWidth,
-                        heightDp = targetBackdropHeight,
-                        crossfadeMs = 240
-                    )
-                    AsyncImage(
-                        model = backdropReq,
-                        contentDescription = "${media.title} backdrop",
-                        placeholder = darkPlaceholder,
-                        error = darkPlaceholder,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("detailed_movie_backdrop")
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(gradients.appBackdrop)
-                            .testTag("detailed_movie_backdrop")
-                    )
-                }
+                val targetBackdropWidth = maxWidth
+                val targetBackdropHeight = backdropHeight ?: (targetBackdropWidth * 9f / 16f)
 
-                // Gradient Fade Overlay
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(backdropFadeBrush)
-                )
-            }
-
-            // Navigation / Dismiss button
-            if (showBackButton && onDismissOrBack != null) {
-                IconButton(
-                    onClick = onDismissOrBack,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(top = 12.dp, start = 12.dp)
-                        .minimumInteractiveComponentSize()
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                        .testTag("detailed_movie_back_button")
-                ) {
-                    Icon(
-                        imageVector = if (useCloseIcon) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = if (useCloseIcon) "Close Details" else "Back",
-                        tint = Color.White
-                    )
-                }
-            }
-
-            // Media Type & Certification Badges in bottom-right of backdrop
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (media.certification.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = 0.72f))
-                            .border(0.75.dp, colors.gold.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                            .testTag("detailed_movie_certification")
-                    ) {
-                        Text(
-                            text = media.certification,
-                            color = colors.gold,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.6.sp
-                        )
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(gradients.softBadge)
-                        .border(0.75.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (media.mediaType == "tv") "TV SERIES" else "MOVIE",
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-                }
-            }
-        }
-
-        // Main Details Body
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            // Poster + Title & Genres Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(100.dp)
-                        .height(150.dp)
                         .graphicsLayer {
                             val p = heroReveal.value
                             alpha = p
@@ -250,16 +125,78 @@ fun DetailedMovieView(
                             scaleX = s
                             scaleY = s
                         }
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
-                        .background(colors.surfaceElevated),
+                ) {
+                    val imageUrl = media.fullBackdropUrl.ifBlank { media.fullPosterUrl }
+                    if (imageUrl.isNotBlank()) {
+                        val backdropReq = rememberCineImageRequest(
+                            url = imageUrl,
+                            widthDp = targetBackdropWidth,
+                            heightDp = targetBackdropHeight,
+                            crossfadeMs = 240
+                        )
+                        AsyncImage(
+                            model = backdropReq,
+                            contentDescription = "${media.title} backdrop",
+                            placeholder = darkPlaceholder,
+                            error = darkPlaceholder,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("detailed_movie_backdrop")
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(gradients.appBackdrop)
+                                .testTag("detailed_movie_backdrop")
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(backdropFadeBrush)
+                    )
+                }
+
+                if (showBackButton && onDismissOrBack != null) {
+                    GlassIconButton(
+                        onClick = onDismissOrBack,
+                        icon = if (useCloseIcon) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = if (useCloseIcon) "Close Details" else "Back",
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(top = 10.dp, start = 14.dp)
+                            .testTag("detailed_movie_back_button")
+                    )
+                }
+            }
+
+            // Overlapping Poster (2:3) + Title + Single Meta Line
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = (resolvedBackdropHeight - posterOverlapOffset).coerceAtLeast(120.dp))
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 96.dp, height = 144.dp)
+                        .clip(posterCardShape)
+                        .background(colors.surface)
+                        .border(1.dp, colors.border, posterCardShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (media.fullPosterUrl.isNotBlank()) {
+                    val posterUrl = media.fullPosterUrl.ifBlank { media.fullBackdropUrl }
+                    if (posterUrl.isNotBlank()) {
                         val posterReq = rememberCineImageRequest(
-                            url = media.fullPosterUrl,
-                            widthDp = 100.dp,
-                            heightDp = 150.dp
+                            url = posterUrl,
+                            widthDp = 96.dp,
+                            heightDp = 144.dp,
+                            crossfadeMs = 220
                         )
                         AsyncImage(
                             model = posterReq,
@@ -274,168 +211,144 @@ fun DetailedMovieView(
                             imageVector = Icons.Default.Movie,
                             contentDescription = null,
                             tint = colors.textMuted,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
-                    }
-                    if (LocalDownloadedMediaIds.current.contains(media.id)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .background(colors.success.copy(alpha = 0.92f))
-                                .padding(horizontal = 6.dp, vertical = 3.dp)
-                                .testTag("details_poster_downloaded_badge")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DownloadDone,
-                                contentDescription = "Downloaded",
-                                tint = Color.White,
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "Downloaded",
-                                color = Color.White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(bottom = 4.dp)
+                ) {
                     Text(
                         text = media.title,
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineMedium.copy(
                             fontSize = 20.sp,
-                            lineHeight = 26.sp
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 25.sp
                         ),
                         color = colors.textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("detailed_movie_title")
                     )
 
-                    if (media.genres.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val genresString = remember(media.genres) { media.genres.joinToString(" • ") }
-                        Text(
-                            text = genresString,
-                            color = colors.gold,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Single crisp meta row: ★ Rating • Year • Certification
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        var hasPrefix = false
+                        if (media.voteAverage > 0.0) {
+                            RatingInlineLabel(
+                                rating = media.voteAverage,
+                                fontSize = 12.sp,
+                                textColor = colors.textPrimary,
+                                iconSize = 13.dp,
+                                modifier = Modifier.testTag("detailed_movie_rating")
+                            )
+                            hasPrefix = true
+                        }
+
+                        if (yearText.isNotBlank() && yearText != "TBA") {
+                            if (hasPrefix) {
+                                Text(
+                                    text = "•",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textMuted
+                                )
+                            }
+                            Text(
+                                text = yearText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.textSecondary,
+                                modifier = Modifier.testTag("detailed_movie_release_date")
+                            )
+                            hasPrefix = true
+                        }
+
+                        if (media.certification.isNotBlank()) {
+                            if (hasPrefix) {
+                                Text(
+                                    text = "•",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textMuted
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(colors.surfaceElevated)
+                                    .border(1.dp, colors.border, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    .testTag("detailed_movie_certification")
+                            ) {
+                                Text(
+                                    text = media.certification,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textSecondary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
+                }
+            }
+        }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Stream ID: ${media.streamId}",
-                        fontSize = 11.sp,
-                        color = colors.textSecondary
-                    )
+        // Genre Chips + Action Buttons + Synopsis
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            if (media.genres.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    media.genres.take(5).forEach { genre ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.surfaceElevated)
+                                .border(1.dp, colors.border, RoundedCornerShape(50))
+                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = genre,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.textSecondary
+                            )
+                        }
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Key Metadata Pills: Rating & Release Date
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Surface(
-                    color = colors.surfaceElevated,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
-                        .testTag("detailed_movie_rating")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = "Rating",
-                            tint = colors.gold,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "Rating",
-                                fontSize = 10.sp,
-                                color = colors.textSecondary
-                            )
-                            Text(
-                                text = formattedRating,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary
-                            )
-                        }
-                    }
-                }
-
-                Surface(
-                    color = colors.surfaceElevated,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(1.dp, colors.border, RoundedCornerShape(10.dp))
-                        .testTag("detailed_movie_release_date")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DateRange,
-                            contentDescription = "Release Date",
-                            tint = colors.softRose,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "Release Date",
-                                fontSize = 10.sp,
-                                color = colors.textSecondary
-                            )
-                            Text(
-                                text = formattedReleaseDate,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.textPrimary
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Action Buttons Slot
+            // Primary Play button + 2-column ActionCard grid slot
             actionsContent()
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // Plot Summary Section
             Text(
-                text = "Plot Summary",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                text = "Synopsis",
+                style = MaterialTheme.typography.titleMedium,
                 color = colors.textPrimary
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = media.overview.ifBlank { "No plot summary available for this title." },
-                style = MaterialTheme.typography.bodyMedium.copy(
+                style = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = 14.sp,
                     lineHeight = 22.sp
                 ),

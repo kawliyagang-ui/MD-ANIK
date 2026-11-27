@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -32,15 +31,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -49,10 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,12 +57,13 @@ import com.example.data.model.MediaItem
 import com.example.data.model.TmdbFilterCatalog
 import com.example.ui.components.BatchSizeChip
 import com.example.ui.components.CatalogCountChip
+import com.example.ui.components.CategoryPill
 import com.example.ui.components.CineEase
-import com.example.ui.components.CineGradientButton
+import com.example.ui.components.CinetraEmptyState
 import com.example.ui.components.LoadMoreBatchFooter
 import com.example.ui.components.MovieCard
 import com.example.ui.components.SearchResultsSkeletonGrid
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
 
 @Composable
 fun LanguageCatalogScreen(
@@ -90,8 +87,7 @@ fun LanguageCatalogScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
     val langMeta = remember(languageCode) { TmdbFilterCatalog.browseLanguageByCode(languageCode) }
     val nativeSubtitle = langMeta?.nativeName?.takeIf { !it.equals(languageName, ignoreCase = true) }
     val badgeCode = langMeta?.badgeCode ?: languageCode.uppercase()
@@ -104,15 +100,13 @@ fun LanguageCatalogScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(gradients.appBackdrop)
+            .background(colors.background)
             .testTag("language_catalog_screen")
     ) {
         // Header Bar
         Surface(
-            color = Color.Transparent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(gradients.topBarBackdrop)
+            color = colors.background,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -123,7 +117,9 @@ fun LanguageCatalogScreen(
                 ) {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.testTag("language_catalog_back_button")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("language_catalog_back_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -137,14 +133,14 @@ fun LanguageCatalogScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(gradients.softBadge)
-                            .border(1.dp, colors.softRose.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .background(colors.surfaceElevated)
+                            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
                             .padding(horizontal = 9.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = badgeCode,
-                            color = Color.White,
+                            color = colors.primary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 0.8.sp
@@ -160,10 +156,7 @@ fun LanguageCatalogScreen(
                             } else {
                                 "$languageName Titles"
                             },
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
-                            ),
+                            style = MaterialTheme.typography.titleMedium,
                             color = colors.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -177,13 +170,21 @@ fun LanguageCatalogScreen(
                                     totalAvailable = effectiveTotal
                                 )
                             },
-                            fontSize = 11.sp,
-                            color = colors.textSecondary
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textMuted
                         )
                     }
 
-                    FilterChip(
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    CategoryPill(
+                        label = when (sortBy) {
+                            "rating" -> "Top Rated"
+                            "newest" -> "Latest"
+                            else -> "Popular"
+                        },
                         selected = sortBy != "popular",
+                        leadingIcon = Icons.Default.FilterList,
                         onClick = {
                             val nextSort = when (sortBy) {
                                 "popular" -> "rating"
@@ -192,31 +193,6 @@ fun LanguageCatalogScreen(
                             }
                             onSortByChange(nextSort)
                         },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.FilterList,
-                                contentDescription = null,
-                                tint = colors.gold,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = when (sortBy) {
-                                    "rating" -> "Top Rated"
-                                    "newest" -> "Latest"
-                                    else -> "Popular"
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = colors.surfaceElevated,
-                            selectedLabelColor = colors.gold,
-                            containerColor = colors.surfaceElevated,
-                            labelColor = colors.textPrimary
-                        ),
                         modifier = Modifier
                             .padding(end = 8.dp)
                             .testTag("language_catalog_sort_chip")
@@ -228,28 +204,15 @@ fun LanguageCatalogScreen(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 10.dp),
+                        .padding(bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     listOf("All" to "All Titles", "movie" to "Movies", "tv" to "TV Series").forEach { (key, label) ->
-                        val isSelected = selectedMediaType == key
-                        FilterChip(
-                            selected = isSelected,
+                        CategoryPill(
+                            label = label,
+                            selected = selectedMediaType == key,
                             onClick = { onMediaTypeChange(key) },
-                            label = {
-                                Text(
-                                    text = label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.accentMid,
-                                selectedLabelColor = Color.White,
-                                containerColor = colors.surfaceElevated,
-                                labelColor = colors.textPrimary
-                            ),
                             modifier = Modifier.testTag("language_type_chip_$key")
                         )
                     }
@@ -268,12 +231,7 @@ fun LanguageCatalogScreen(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(colors.border.copy(alpha = 0.5f))
-                )
+                HorizontalDivider(thickness = 1.dp, color = colors.border)
             }
         }
 
@@ -299,83 +257,33 @@ fun LanguageCatalogScreen(
                 }
                 "error" -> {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.WifiOff,
-                                contentDescription = null,
-                                tint = colors.softRose,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Couldn't Load $languageName Content",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.textPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = errorMessage ?: "Please check your connection and try again.",
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            CineGradientButton(
-                                onClick = onRetry,
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                modifier = Modifier.testTag("language_retry_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry", fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        CinetraEmptyState(
+                            icon = Icons.Default.WifiOff,
+                            title = "Couldn't Load $languageName Content",
+                            subtitle = errorMessage ?: "Please check your connection and try again.",
+                            ctaLabel = "Retry",
+                            ctaTestTag = "language_retry_button",
+                            onCtaClick = onRetry
+                        )
                     }
                 }
                 "empty" -> {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = null,
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "No $languageName titles found",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = colors.textPrimary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (selectedMediaType != "All") {
-                                    "Try switching back to All Titles to see movies and series in $languageName."
-                                } else {
-                                    "No catalog entries matched $languageName right now."
-                                },
-                                fontSize = 12.sp,
-                                color = colors.textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        CinetraEmptyState(
+                            icon = Icons.Default.Language,
+                            title = "No $languageName titles found",
+                            subtitle = if (selectedMediaType != "All") {
+                                "Try switching back to All Titles to see movies and series in $languageName."
+                            } else {
+                                "No catalog entries matched $languageName right now."
+                            }
+                        )
                     }
                 }
                 else -> {

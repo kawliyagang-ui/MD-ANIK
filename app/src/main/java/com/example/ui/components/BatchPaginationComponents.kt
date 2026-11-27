@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,15 +26,14 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,7 +41,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CatalogBatchPolicy
-import com.example.ui.theme.CineTheme
+import com.example.ui.theme.CinetraTheme
+
+private val PillShape = RoundedCornerShape(50)
 
 @Composable
 fun CatalogCountChip(
@@ -52,27 +54,23 @@ fun CatalogCountChip(
     testTag: String,
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
-    val gradients = CineTheme.gradients
+    val colors = CinetraTheme.colors
     val labelText = customLabel ?: CatalogBatchPolicy.formatTotalChipText(
         totalAvailable = totalAvailable,
         isFiltered = isFiltered,
         isLoading = isLoading
     )
-    val borderColor = if (isFiltered) {
-        colors.softRose.copy(alpha = 0.55f)
-    } else {
-        colors.gold.copy(alpha = 0.45f)
-    }
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(
-                if (isFiltered) gradients.softBadge else gradients.topBarBackdrop
+            .clip(PillShape)
+            .background(if (isFiltered) colors.primary else colors.surfaceElevated)
+            .border(
+                width = 1.dp,
+                color = if (isFiltered) colors.primary else colors.border,
+                shape = PillShape
             )
-            .border(1.dp, borderColor, RoundedCornerShape(50))
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
             .testTag(testTag)
     ) {
         Row(
@@ -82,7 +80,7 @@ fun CatalogCountChip(
             Icon(
                 imageVector = if (isFiltered) Icons.Default.FilterList else Icons.Default.VideoLibrary,
                 contentDescription = null,
-                tint = if (isFiltered) Color.White else colors.gold,
+                tint = if (isFiltered) colors.onPrimary else colors.primary,
                 modifier = Modifier.size(13.dp)
             )
             AnimatedContent(
@@ -94,9 +92,11 @@ fun CatalogCountChip(
             ) { currentText ->
                 Text(
                     text = currentText,
-                    color = if (isFiltered) Color.White else colors.textPrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = if (isFiltered) colors.onPrimary else colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -112,34 +112,35 @@ fun BatchSizeChip(
     testTag: String,
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val normalized = CatalogBatchPolicy.normalizeBatchSize(batchSize)
-    FilterChip(
-        selected = normalized == 50,
-        onClick = { onToggleBatchSize(CatalogBatchPolicy.nextBatchSize(normalized)) },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Default.ViewModule,
-                contentDescription = "Batch size",
-                tint = colors.gold,
-                modifier = Modifier.size(14.dp)
-            )
-        },
-        label = {
-            Text(
-                text = "Batch: $normalized",
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .clip(PillShape)
+            .background(colors.surfaceElevated)
+            .border(1.dp, colors.border, PillShape)
+            .clickable { onToggleBatchSize(CatalogBatchPolicy.nextBatchSize(normalized)) }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag(testTag)
+    ) {
+        Icon(
+            imageVector = Icons.Default.ViewModule,
+            contentDescription = "Batch size",
+            tint = colors.primary,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "Batch: $normalized",
+            style = MaterialTheme.typography.labelSmall.copy(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold
-            )
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = colors.surfaceElevated,
-            selectedLabelColor = colors.gold,
-            containerColor = colors.surfaceElevated,
-            labelColor = colors.textPrimary
-        ),
-        modifier = modifier.testTag(testTag)
-    )
+            ),
+            color = colors.textSecondary
+        )
+    }
 }
 
 @Composable
@@ -153,7 +154,7 @@ fun LoadMoreBatchFooter(
     testTag: String,
     modifier: Modifier = Modifier
 ) {
-    val colors = CineTheme.colors
+    val colors = CinetraTheme.colors
     val safeBatch = CatalogBatchPolicy.normalizeBatchSize(batchSize)
     val summary = CatalogBatchPolicy.formatAvailabilitySummary(
         shownCount = shownCount,
@@ -164,18 +165,17 @@ fun LoadMoreBatchFooter(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 10.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.surfaceElevated.copy(alpha = 0.72f))
-            .border(1.dp, colors.border.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .clip(MaterialTheme.shapes.medium)
+            .background(colors.surface)
+            .border(1.dp, colors.border, MaterialTheme.shapes.medium)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
             text = summary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = colors.textSecondary,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textMuted,
             textAlign = TextAlign.Center
         )
 
@@ -187,7 +187,7 @@ fun LoadMoreBatchFooter(
                     modifier = Modifier.height(48.dp)
                 ) {
                     CircularProgressIndicator(
-                        color = colors.softRose,
+                        color = colors.primary,
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp
                     )
@@ -196,15 +196,13 @@ fun LoadMoreBatchFooter(
                         text = "Loading next $safeBatch titles...",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = colors.gold
+                        color = colors.textSecondary
                     )
                 }
             } else {
-                CineGradientButton(
+                RedButton(
                     onClick = onLoadMore,
-                    shape = RoundedCornerShape(50),
-                    minHeight = 48.dp,
-                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
                     modifier = Modifier.testTag(testTag)
                 ) {
                     Icon(

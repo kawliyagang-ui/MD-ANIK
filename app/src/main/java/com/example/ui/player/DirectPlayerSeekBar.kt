@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -30,10 +31,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -50,9 +57,9 @@ import kotlin.math.roundToInt
 
 /**
  * Custom Compose seek bar tailored for the Cinetra direct player:
- * - Thin 3.dp track at rest expanding smoothly to 6.dp while scrubbing
+ * - Thin 3.dp track at rest expanding smoothly to 6.dp while scrubbing or focused on TV
  * - Deep red played progress, translucent buffered bar, faint background track
- * - Thumb hidden (0.dp) at rest, smoothly growing to 14.dp with white core while dragging
+ * - Thumb hidden (0.dp) at rest, smoothly growing to 14.dp with white core while dragging or TV-focused
  * - Floating preview pill above the thumb displaying target timestamp and +/- delta
  */
 @Composable
@@ -63,12 +70,14 @@ fun DirectPlayerSeekBar(
     onScrubStart: (Long) -> Unit,
     onScrubChange: (Long) -> Unit,
     onScrubFinished: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTvDevice: Boolean = false
 ) {
     val colors = CineTheme.colors
     val density = LocalDensity.current
 
     var isScrubbing by remember { mutableStateOf(false) }
+    var isFocused by remember { mutableStateOf(false) }
     var scrubOriginMs by remember { mutableLongStateOf(currentPositionMs) }
     var scrubTargetMs by remember { mutableLongStateOf(currentPositionMs) }
     var trackWidthPx by remember { mutableFloatStateOf(1f) }
@@ -81,12 +90,12 @@ fun DirectPlayerSeekBar(
         .coerceIn(playedFraction, 1f)
 
     val trackHeight by animateDpAsState(
-        targetValue = if (isScrubbing) 6.dp else 3.dp,
+        targetValue = if (isScrubbing || isFocused) 6.dp else 3.dp,
         animationSpec = tween(durationMillis = 140, easing = CineEase),
         label = "seekTrackHeight"
     )
     val thumbDiameter by animateDpAsState(
-        targetValue = if (isScrubbing) 14.dp else 0.dp,
+        targetValue = if (isScrubbing || isFocused) 14.dp else 0.dp,
         animationSpec = tween(durationMillis = 140, easing = CineEase),
         label = "seekThumbSize"
     )
@@ -145,11 +154,47 @@ fun DirectPlayerSeekBar(
                 }
             }
 
-            // Interactive 48.dp touch-target track canvas
+            // Interactive 48.dp touch-target / TV D-pad seek track canvas
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .then(
+                        if (isTvDevice) {
+                            Modifier
+                                .onFocusChanged { isFocused = it.isFocused }
+                                .focusable()
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type != KeyEventType.KeyDown || durationMs <= 0L) {
+                                        return@onPreviewKeyEvent false
+                                    }
+                                    when (keyEvent.key) {
+                                        Key.DirectionLeft -> {
+                                            val target = (effectivePos - 10_000L).coerceIn(0L, durationMs)
+                                            onScrubFinished(target)
+                                            true
+                                        }
+                                        Key.DirectionRight -> {
+                                            val target = (effectivePos + 10_000L).coerceIn(0L, durationMs)
+                                            onScrubFinished(target)
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                .then(
+                                    if (isFocused) {
+                                        Modifier
+                                            .border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                                            .padding(horizontal = 6.dp)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                        } else {
+                            Modifier
+                        }
+                    )
                     .onSizeChanged { trackWidthPx = it.width.toFloat().coerceAtLeast(1f) }
                     .pointerInput(durationMs) {
                         detectTapGestures { offset ->

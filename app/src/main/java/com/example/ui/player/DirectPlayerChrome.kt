@@ -52,11 +52,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +93,7 @@ fun DirectPlayerTopBar(
     modifier: Modifier = Modifier
 ) {
     val colors = CineTheme.colors
+    var isBackFocused by remember { mutableStateOf(false) }
     val year = remember(media.releaseDate) { media.releaseDate.take(4).takeIf { it.length == 4 }.orEmpty() }
     val subtitleText = remember(media.mediaType, season, episode, episodeTitle, year, qualityLabel) {
         if (media.mediaType.equals("tv", ignoreCase = true)) {
@@ -117,6 +125,16 @@ fun DirectPlayerTopBar(
                 onClick = onBack,
                 modifier = Modifier
                     .size(48.dp)
+                    .onFocusChanged { isBackFocused = it.isFocused }
+                    .then(
+                        if (isBackFocused) {
+                            Modifier
+                                .border(2.dp, Color.White, CircleShape)
+                                .background(colors.primary.copy(alpha = 0.35f), CircleShape)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .testTag("direct_player_back_button")
             ) {
                 Icon(
@@ -209,7 +227,8 @@ fun DirectPlayerCenterControls(
     onForward10: () -> Unit,
     onPrevEpisode: () -> Unit,
     onNextEpisode: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    playPauseFocusRequester: FocusRequester? = null
 ) {
     val colors = CineTheme.colors
     Row(
@@ -247,6 +266,7 @@ fun DirectPlayerCenterControls(
             enabled = true,
             accentBorder = colors.primary.copy(alpha = 0.55f),
             testTag = "direct_player_play_pause",
+            focusRequester = playPauseFocusRequester,
             onClick = onPlayPause
         )
 
@@ -283,14 +303,24 @@ private fun GlassCenterButton(
     enabled: Boolean,
     accentBorder: Color = Color.White.copy(alpha = 0.22f),
     testTag: String,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
+    val colors = CineTheme.colors
     val interaction = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
+    val scale = if (isFocused) 1.12f else 1f
     Box(
         modifier = Modifier
             .size(48.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .cinePressScale(interaction, enabled = enabled)
             .clip(CircleShape)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interaction,
                 indication = ripple(bounded = false, radius = 24.dp),
@@ -304,12 +334,20 @@ private fun GlassCenterButton(
             modifier = Modifier
                 .size(visualSizeDp.dp)
                 .background(
-                    color = if (enabled) Color(0x9E0E0E13) else Color(0x520E0E13),
+                    color = when {
+                        !enabled -> Color(0x520E0E13)
+                        isFocused -> colors.primary.copy(alpha = 0.85f)
+                        else -> Color(0x9E0E0E13)
+                    },
                     shape = CircleShape
                 )
                 .border(
-                    width = 1.dp,
-                    color = if (enabled) accentBorder else Color.White.copy(alpha = 0.08f),
+                    width = if (isFocused) 2.dp else 1.dp,
+                    color = when {
+                        !enabled -> Color.White.copy(alpha = 0.08f)
+                        isFocused -> Color.White
+                        else -> accentBorder
+                    },
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -329,7 +367,7 @@ private fun GlassCenterButton(
  * - Current time on left & remaining time ("-MM:SS") on right (11.sp)
  * - Custom DirectPlayerSeekBar
  * - Compact 40.dp icon row (18.dp icons + 9.sp labels) for Speed, CC, Audio, Quality (if multi-HLS),
- *   Aspect Ratio, PiP (if supported), Lock, and Rotate/Fullscreen.
+ *   Aspect Ratio, PiP (if supported), Lock, and Rotate/Fullscreen (touch-only controls omitted on TV).
  */
 @Composable
 fun DirectPlayerBottomBar(
@@ -353,7 +391,8 @@ fun DirectPlayerBottomBar(
     onEnterPip: () -> Unit,
     onLock: () -> Unit,
     onToggleFullScreen: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTvDevice: Boolean = false
 ) {
     val remainingText = remember(currentPositionMs, durationMs) {
         if (durationMs > 0L) {
@@ -368,7 +407,7 @@ fun DirectPlayerBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = if (isTvDevice) 36.dp else 14.dp, vertical = 10.dp)
     ) {
         Row(
             modifier = Modifier
@@ -397,7 +436,8 @@ fun DirectPlayerBottomBar(
             durationMs = durationMs,
             onScrubStart = onScrubStart,
             onScrubChange = onScrubChange,
-            onScrubFinished = onScrubFinished
+            onScrubFinished = onScrubFinished,
+            isTvDevice = isTvDevice
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -442,7 +482,7 @@ fun DirectPlayerBottomBar(
                 testTag = "direct_player_aspect_button",
                 onClick = onOpenAspectRatio
             )
-            if (isPipSupported) {
+            if (!isTvDevice && isPipSupported) {
                 BottomControlAction(
                     icon = Icons.Default.PictureInPictureAlt,
                     label = "PiP",
@@ -450,18 +490,20 @@ fun DirectPlayerBottomBar(
                     onClick = onEnterPip
                 )
             }
-            BottomControlAction(
-                icon = Icons.Default.Lock,
-                label = "Lock",
-                testTag = "direct_player_lock_button",
-                onClick = onLock
-            )
-            BottomControlAction(
-                icon = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                label = if (isFullScreen) "Portrait" else "Full",
-                testTag = "direct_player_fullscreen_button",
-                onClick = onToggleFullScreen
-            )
+            if (!isTvDevice) {
+                BottomControlAction(
+                    icon = Icons.Default.Lock,
+                    label = "Lock",
+                    testTag = "direct_player_lock_button",
+                    onClick = onLock
+                )
+                BottomControlAction(
+                    icon = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    label = if (isFullScreen) "Portrait" else "Full",
+                    testTag = "direct_player_fullscreen_button",
+                    onClick = onToggleFullScreen
+                )
+            }
         }
     }
 }
@@ -476,17 +518,27 @@ private fun BottomControlAction(
 ) {
     val colors = CineTheme.colors
     val interaction = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .cinePressScale(interaction)
             .clip(RoundedCornerShape(10.dp))
+            .background(if (isFocused) colors.primary.copy(alpha = 0.35f) else Color.Transparent)
+            .then(
+                if (isFocused) {
+                    Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
+                } else {
+                    Modifier
+                }
+            )
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interaction,
                 indication = ripple(bounded = true),
                 onClick = onClick
             )
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .testTag(testTag),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -494,13 +546,21 @@ private fun BottomControlAction(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (highlighted) colors.softRose else Color.White.copy(alpha = 0.9f),
+            tint = when {
+                isFocused -> Color.White
+                highlighted -> colors.softRose
+                else -> Color.White.copy(alpha = 0.9f)
+            },
             modifier = Modifier.size(18.dp)
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
-            color = if (highlighted) colors.softRose else Color.White.copy(alpha = 0.72f),
+            color = when {
+                isFocused -> Color.White
+                highlighted -> colors.softRose
+                else -> Color.White.copy(alpha = 0.72f)
+            },
             fontSize = 9.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1

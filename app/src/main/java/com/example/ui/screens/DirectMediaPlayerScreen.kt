@@ -47,8 +47,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toAndroidRectF
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -107,6 +112,9 @@ import com.example.ui.player.VerticalAdjustmentPill
 import com.example.ui.player.VerticalSwipeSide
 import com.example.ui.player.enterPictureInPictureNow
 import com.example.ui.player.isPictureInPictureSupported
+import com.example.ui.tv.TvDevicePolicy
+import com.example.ui.tv.TvPlayerKeyCommand
+import com.example.ui.tv.TvPlayerKeyPolicy
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -156,9 +164,13 @@ fun DirectMediaPlayerScreen(
     onSavePosition: (positionMs: Long, durationMs: Long) -> Unit,
     onFallbackToWebEmbed: (() -> Unit)? = null,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTvDevice: Boolean? = null
 ) {
     val context = LocalContext.current
+    val resolvedIsTv = remember(isTvDevice, context) {
+        isTvDevice ?: TvDevicePolicy.isTvDevice(context)
+    }
     val hostView = LocalView.current
     val activity = remember(context) { context.findActivity() }
     val audioManager = remember(context) {
@@ -169,6 +181,8 @@ fun DirectMediaPlayerScreen(
     val latestOnBack by rememberUpdatedState(onBack)
     val gestureScope = rememberCoroutineScope()
     val ownerToken = remember { UUID.randomUUID().toString() }
+    val playPauseFocusRequester = remember { FocusRequester() }
+    var hasFocusInControls by remember { mutableStateOf(false) }
 
     val initialOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -398,57 +412,64 @@ fun DirectMediaPlayerScreen(
         }
     }
 
-    // Orientation + keepScreenOn strictly tied to playing state
-    LaunchedEffect(isFullScreen) {
-        WebViewFullscreenHost.applyFullScreenWindowState(
-            activity = activity,
-            hostView = hostView,
-            isFullScreen = isFullScreen,
-            originalOrientation = initialOrientation,
-            originalCutoutMode = initialCutoutMode
-        )
-        if (!isPlaying) {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-    LaunchedEffect(isPlaying, isFullScreen) {
-        if (!isPlaying) {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else if (isFullScreen) {
-            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose {
+    // Orientation + keepScreenOn strictly tied to playing state (skip phone orientation changes on TV)
+    LaunchedEffect(isFullScreen, resolvedIsTv) {
+        if (!resolvedIsTv) {
             WebViewFullscreenHost.applyFullScreenWindowState(
                 activity = activity,
                 hostView = hostView,
-                isFullScreen = false,
+                isFullScreen = isFullScreen,
                 originalOrientation = initialOrientation,
                 originalCutoutMode = initialCutoutMode
             )
-            applyWindowBrightness(activity, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+        }
+        if (!isPlaying) {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    LaunchedEffect(isPlaying, isFullScreen, resolvedIsTv) {
+        if (!isPlaying) {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else if (isFullScreen || resolvedIsTv) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    DisposableEffect(resolvedIsTv) {
+        onDispose {
+            if (!resolvedIsTv) {
+                WebViewFullscreenHost.applyFullScreenWindowState(
+                    activity = activity,
+                    hostView = hostView,
+                    isFullScreen = false,
+                    originalOrientation = initialOrientation,
+                    originalCutoutMode = initialCutoutMode
+                )
+                applyWindowBrightness(activity, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+            }
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
-    DirectPlayerPipEffects(
-        activity = activity,
-        isPlaying = isPlaying,
-        shouldAutoEnterPip = isPlaying && playbackError == null && !isEnded,
-        videoWidth = videoWidth,
-        videoHeight = videoHeight,
-        sourceRect = pipSourceRect,
-        onPipModeChanged = { inPip ->
-            isInPipMode = inPip
-            if (inPip) activeSheet = DirectPlayerActiveSheet.NONE
-        },
-        onPipClosedByUser = { exoPlayer.pause() },
-        onPipPlay = {
-            if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
-            exoPlayer.play()
-        },
-        onPipPause = { exoPlayer.pause() }
-    )
+    if (!resolvedIsTv) {
+        DirectPlayerPipEffects(
+            activity = activity,
+            isPlaying = isPlaying,
+            shouldAutoEnterPip = isPlaying && playbackError == null && !isEnded,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+            sourceRect = pipSourceRect,
+            onPipModeChanged = { inPip ->
+                isInPipMode = inPip
+                if (inPip) activeSheet = DirectPlayerActiveSheet.NONE
+            },
+            onPipClosedByUser = { exoPlayer.pause() },
+            onPipPlay = {
+                if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
+                exoPlayer.play()
+            },
+            onPipPause = { exoPlayer.pause() }
+        )
+    }
 
     // ExoPlayer listener for tracks, state, errors, and video dimensions
     DisposableEffect(exoPlayer) {
@@ -610,6 +631,20 @@ fun DirectMediaPlayerScreen(
             (isEnded || (durationMs > 15_000L && currentPositionMs >= durationMs - 10_000L))
     }
 
+    // On TV, move focus to Play/Pause whenever controls become visible without an active focus target
+    LaunchedEffect(resolvedIsTv, showControls, activeSheet, playbackError, isLocked) {
+        if (resolvedIsTv &&
+            showControls &&
+            activeSheet == DirectPlayerActiveSheet.NONE &&
+            playbackError == null &&
+            !isLocked &&
+            !hasFocusInControls
+        ) {
+            delay(30L)
+            runCatching { playPauseFocusRequester.requestFocus() }
+        }
+    }
+
     val topScrimBrush = rememberVerticalGradientBrush(Color.Black.copy(alpha = 0.78f), Color.Transparent)
     val bottomScrimBrush = rememberVerticalGradientBrush(Color.Transparent, Color.Black.copy(alpha = 0.86f))
 
@@ -620,6 +655,71 @@ fun DirectMediaPlayerScreen(
             .onGloballyPositioned { coords ->
                 pipSourceRect = coords.boundsInWindow().toAndroidRectF().toRect()
             }
+            .then(
+                if (resolvedIsTv) {
+                    Modifier.onPreviewKeyEvent { keyEvent ->
+                        if (keyEvent.type != KeyEventType.KeyDown ||
+                            activeSheet != DirectPlayerActiveSheet.NONE ||
+                            playbackError != null ||
+                            isLocked
+                        ) {
+                            return@onPreviewKeyEvent false
+                        }
+                        val cmd = TvPlayerKeyPolicy.resolveCommand(
+                            keyCode = keyEvent.nativeKeyEvent.keyCode,
+                            controlsVisible = showControls,
+                            hasFocusInControls = hasFocusInControls
+                        )
+                        when (cmd) {
+                            TvPlayerKeyCommand.TOGGLE_PLAY_PAUSE -> {
+                                controlInteractionTick++
+                                if (exoPlayer.isPlaying) {
+                                    exoPlayer.pause()
+                                } else {
+                                    if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
+                                    exoPlayer.play()
+                                }
+                                true
+                            }
+                            TvPlayerKeyCommand.PLAY -> {
+                                controlInteractionTick++
+                                if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0L)
+                                exoPlayer.play()
+                                true
+                            }
+                            TvPlayerKeyCommand.PAUSE -> {
+                                controlInteractionTick++
+                                exoPlayer.pause()
+                                true
+                            }
+                            TvPlayerKeyCommand.SEEK_FORWARD_10S -> {
+                                showControls = true
+                                controlInteractionTick++
+                                performSeekDelta(10_000L)
+                                true
+                            }
+                            TvPlayerKeyCommand.SEEK_BACKWARD_10S -> {
+                                showControls = true
+                                controlInteractionTick++
+                                performSeekDelta(-10_000L)
+                                true
+                            }
+                            TvPlayerKeyCommand.REVEAL_CONTROLS_AND_FOCUS -> {
+                                showControls = true
+                                controlInteractionTick++
+                                runCatching { playPauseFocusRequester.requestFocus() }
+                                true
+                            }
+                            TvPlayerKeyCommand.NONE -> {
+                                if (showControls) controlInteractionTick++
+                                false
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .testTag("direct_media_player_screen")
     ) {
         val isPortraitLayout = maxHeight > maxWidth && !isFullScreen
@@ -683,8 +783,8 @@ fun DirectMediaPlayerScreen(
         val currentIsInPipMode by rememberUpdatedState(isInPipMode)
 
         // Unified gesture layer placed above the video surface and below the chrome
-        // (disabled in PiP, Lock mode, playback error, or while a bottom-sheet menu is open)
-        if (!isInPipMode && !isLocked && activeSheet == DirectPlayerActiveSheet.NONE && playbackError == null) {
+        // (disabled on TV, in PiP, Lock mode, playback error, or while a bottom-sheet menu is open)
+        if (!resolvedIsTv && !isInPipMode && !isLocked && activeSheet == DirectPlayerActiveSheet.NONE && playbackError == null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -943,7 +1043,11 @@ fun DirectMediaPlayerScreen(
             exit = fadeOut(tween(220, easing = CineEase)),
             modifier = Modifier.fillMaxSize()
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { hasFocusInControls = it.hasFocus }
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -957,7 +1061,7 @@ fun DirectMediaPlayerScreen(
                         episodeTitle = currentEpisodeTitle,
                         qualityLabel = downloadEntity?.qualityLabel.orEmpty(),
                         isLocalFile = isLocalFile,
-                        showPortraitPausedDetails = isPortraitLayout && showPortraitPausedDetails,
+                        showPortraitPausedDetails = !resolvedIsTv && isPortraitLayout && showPortraitPausedDetails,
                         onBack = { if (isFullScreen) isFullScreen = false else onBack() }
                     )
                 }
@@ -967,6 +1071,7 @@ fun DirectMediaPlayerScreen(
                     isSeries = media.mediaType.equals("tv", ignoreCase = true) && onSwitchEpisode != null && sortedEpisodes.isNotEmpty(),
                     hasPrevEpisode = prevEpisode != null,
                     hasNextEpisode = nextEpisode != null,
+                    playPauseFocusRequester = if (resolvedIsTv) playPauseFocusRequester else null,
                     onRewind10 = {
                         controlInteractionTick++
                         performSeekDelta(-10_000L)
@@ -1050,7 +1155,8 @@ fun DirectMediaPlayerScreen(
                         onToggleFullScreen = {
                             controlInteractionTick++
                             isFullScreen = !isFullScreen
-                        }
+                        },
+                        isTvDevice = resolvedIsTv
                     )
                 }
             }
@@ -1162,6 +1268,7 @@ fun DirectMediaPlayerScreen(
                     },
                     onFallbackToWebEmbed = onFallbackToWebEmbed,
                     onBack = onBack,
+                    isTvDevice = resolvedIsTv,
                     modifier = Modifier.align(Alignment.Center)
                 )
             }

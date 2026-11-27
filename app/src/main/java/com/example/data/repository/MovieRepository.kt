@@ -678,6 +678,133 @@ class MovieRepository(
         }
     )
 
+    suspend fun getReleasedMoviesByLanguage(
+        originalLanguage: String,
+        minVotes: Int = 10,
+        limit: Int = 20
+    ): List<MediaItem> = withContext(Dispatchers.IO) {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        runCatching {
+            TmdbClient.apiService.discoverMovies(
+                apiKey = TmdbClient.apiKey,
+                page = 1,
+                language = currentLanguageCode,
+                sortBy = "popularity.desc",
+                releaseDateLte = today,
+                minVotes = minVotes,
+                originalLanguage = originalLanguage
+            ).results
+                .asSequence()
+                .filter { it.posterPath != null }
+                .map { it.toMediaItem(defaultType = "movie") }
+                .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+                .distinctBy { it.id }
+                .take(limit)
+                .toList()
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun getReleasedTvByLanguage(
+        originalLanguage: String,
+        minVotes: Int = 5,
+        limit: Int = 20
+    ): List<MediaItem> = withContext(Dispatchers.IO) {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        runCatching {
+            TmdbClient.apiService.discoverTv(
+                apiKey = TmdbClient.apiKey,
+                page = 1,
+                language = currentLanguageCode,
+                sortBy = "popularity.desc",
+                firstAirDateLte = today,
+                minVotes = minVotes,
+                originalLanguage = originalLanguage
+            ).results
+                .asSequence()
+                .filter { it.posterPath != null }
+                .map { it.toMediaItem(defaultType = "tv") }
+                .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+                .distinctBy { it.id }
+                .take(limit)
+                .toList()
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun getSouthIndianMoviesHome(limit: Int = 20): List<MediaItem> = withContext(Dispatchers.IO) {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        val southLangs = listOf("te", "ta", "ml", "kn")
+        runCatching {
+            coroutineScope {
+                southLangs.map { langCode ->
+                    async {
+                        runCatching {
+                            TmdbClient.apiService.discoverMovies(
+                                apiKey = TmdbClient.apiKey,
+                                page = 1,
+                                language = currentLanguageCode,
+                                sortBy = "popularity.desc",
+                                releaseDateLte = today,
+                                minVotes = 5,
+                                originalLanguage = langCode
+                            ).results
+                                .filter { it.posterPath != null }
+                                .map { it.toMediaItem(defaultType = "movie") }
+                                .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+                        }.getOrDefault(emptyList())
+                    }
+                }.awaitAll()
+                    .flatten()
+                    .distinctBy { it.id }
+                    .sortedByDescending { it.popularity }
+                    .take(limit)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun getBanglaMixedHome(limit: Int = 20): List<MediaItem> = withContext(Dispatchers.IO) {
+        val today = UpcomingReleasePolicy.todayIsoDate()
+        runCatching {
+            coroutineScope {
+                val moviesDef = async {
+                    runCatching {
+                        TmdbClient.apiService.discoverMovies(
+                            apiKey = TmdbClient.apiKey,
+                            page = 1,
+                            language = currentLanguageCode,
+                            sortBy = "popularity.desc",
+                            releaseDateLte = today,
+                            minVotes = 2,
+                            originalLanguage = "bn"
+                        ).results
+                            .filter { it.posterPath != null }
+                            .map { it.toMediaItem(defaultType = "movie") }
+                            .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+                    }.getOrDefault(emptyList())
+                }
+                val tvDef = async {
+                    runCatching {
+                        TmdbClient.apiService.discoverTv(
+                            apiKey = TmdbClient.apiKey,
+                            page = 1,
+                            language = currentLanguageCode,
+                            sortBy = "popularity.desc",
+                            firstAirDateLte = today,
+                            minVotes = 1,
+                            originalLanguage = "bn"
+                        ).results
+                            .filter { it.posterPath != null }
+                            .map { it.toMediaItem(defaultType = "tv") }
+                            .filter { !UpcomingReleasePolicy.isStrictlyFutureRelease(it.releaseDate, today) }
+                    }.getOrDefault(emptyList())
+                }
+                (moviesDef.await() + tvDef.await())
+                    .distinctBy { it.id }
+                    .sortedByDescending { it.popularity }
+                    .take(limit)
+            }
+        }.getOrDefault(emptyList())
+    }
+
     suspend fun discoverCatalogBatch(
         filters: DiscoverFilters,
         startPage: Int = 1,
