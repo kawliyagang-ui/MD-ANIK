@@ -40,7 +40,9 @@ data class BatchEpisodeDownloadRequest(
     val episodeTitle: String,
     val sourceUrl: String,
     val qualityLabel: String = "Direct HD",
-    val format: String = "MP4"
+    val format: String = "MP4",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = ""
 )
 
 class DownloadEngine(
@@ -181,7 +183,9 @@ class DownloadEngine(
         episode: Int = 1,
         episodeTitle: String = "",
         directUrl: String,
-        wifiOnly: Boolean = false
+        wifiOnly: Boolean = false,
+        subtitleUrl: String = "",
+        subtitleLabel: String = ""
     ): Result<DownloadEntity> {
         val cleanUrl = directUrl.trim()
         val format = inferExtension("", cleanUrl).uppercase(Locale.US)
@@ -196,13 +200,20 @@ class DownloadEngine(
             refererHeader = "",
             userAgentHeader = MovieBoxDownloadOption.DEFAULT_USER_AGENT
         )
+        val subtitleOption = buildDirectSubtitleOption(
+            mediaId = media.id,
+            season = season,
+            episode = episode,
+            subtitleUrl = subtitleUrl.ifBlank { media.subtitleUrl },
+            subtitleLabel = subtitleLabel.ifBlank { media.subtitleLabel }
+        )
         return enqueueDownload(
             media = media,
             season = season,
             episode = episode,
             episodeTitle = episodeTitle,
             option = opt,
-            subtitle = null,
+            subtitle = subtitleOption,
             providerName = "Direct URL",
             wifiOnly = wifiOnly
         )
@@ -266,6 +277,13 @@ class DownloadEngine(
             deleteLocalFileIfExists(destFile.absolutePath)
             deleteLocalFileIfExists("${destFile.absolutePath}.part")
 
+            val resolvedBatchSub = buildDirectSubtitleOption(
+                mediaId = req.media.id,
+                season = safeSeason,
+                episode = safeEpisode,
+                subtitleUrl = req.subtitleUrl.ifBlank { req.media.subtitleUrl },
+                subtitleLabel = req.subtitleLabel.ifBlank { req.media.subtitleLabel }
+            )
             val now = System.currentTimeMillis() + idx
             val entity = DownloadEntity(
                 id = downloadId,
@@ -285,6 +303,8 @@ class DownloadEngine(
                 sourceUrl = cleanUrl,
                 localFilePath = destFile.absolutePath,
                 localUri = Uri.fromFile(destFile).toString(),
+                subtitleUrl = resolvedBatchSub?.url.orEmpty(),
+                subtitleLabel = resolvedBatchSub?.languageName.orEmpty(),
                 status = DownloadStatus.QUEUED.storageValue,
                 bytesDownloaded = 0L,
                 totalBytes = 0L,
@@ -722,6 +742,28 @@ class DownloadEngine(
                 in 500..599 -> "CDN temporarily unavailable (HTTP $code)."
                 else -> "Server rejected download request (HTTP $code)."
             }
+        }
+
+        fun buildDirectSubtitleOption(
+            mediaId: String,
+            season: Int,
+            episode: Int,
+            subtitleUrl: String,
+            subtitleLabel: String = ""
+        ): MovieBoxSubtitleOption? {
+            val cleanSubUrl = subtitleUrl.trim()
+            if (!cleanSubUrl.startsWith("http://", ignoreCase = true) &&
+                !cleanSubUrl.startsWith("https://", ignoreCase = true)
+            ) {
+                return null
+            }
+            val cleanLabel = subtitleLabel.trim()
+            return MovieBoxSubtitleOption(
+                id = "direct_sub_${mediaId}_s${season}_e${episode}",
+                languageCode = cleanLabel.take(16).ifBlank { "en" },
+                languageName = cleanLabel.ifBlank { "English" },
+                url = cleanSubUrl
+            )
         }
 
         fun buildDownloadId(

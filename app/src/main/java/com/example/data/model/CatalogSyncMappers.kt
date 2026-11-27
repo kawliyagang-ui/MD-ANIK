@@ -52,6 +52,8 @@ object CatalogSyncMappers {
             "directVideoUrl" to entity.directVideoUrl,
             "downloadUrl" to entity.downloadUrl,
             "episodeLinksJson" to entity.episodeLinksJson,
+            "subtitleUrl" to entity.subtitleUrl,
+            "subtitleLabel" to entity.subtitleLabel,
             "createdAt" to entity.createdAt
         )
     }
@@ -82,6 +84,8 @@ object CatalogSyncMappers {
             directVideoUrl = (data["directVideoUrl"] as? String)?.trim().orEmpty(),
             downloadUrl = (data["downloadUrl"] as? String)?.trim().orEmpty(),
             episodeLinksJson = (data["episodeLinksJson"] as? String)?.trim().orEmpty(),
+            subtitleUrl = (data["subtitleUrl"] as? String)?.trim().orEmpty(),
+            subtitleLabel = (data["subtitleLabel"] as? String)?.trim().orEmpty(),
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
         )
     }
@@ -244,7 +248,9 @@ object CatalogOverridePolicy {
             },
             directVideoUrl = customOverride.directVideoUrl.ifBlank { catalogItem.directVideoUrl },
             downloadUrl = customOverride.downloadUrl.ifBlank { catalogItem.downloadUrl },
-            episodeLinksJson = customOverride.episodeLinksJson.ifBlank { catalogItem.episodeLinksJson }
+            episodeLinksJson = customOverride.episodeLinksJson.ifBlank { catalogItem.episodeLinksJson },
+            subtitleUrl = customOverride.subtitleUrl.ifBlank { catalogItem.subtitleUrl },
+            subtitleLabel = customOverride.subtitleLabel.ifBlank { catalogItem.subtitleLabel }
         )
     }
 

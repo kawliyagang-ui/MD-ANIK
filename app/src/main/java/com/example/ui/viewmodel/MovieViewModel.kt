@@ -2653,6 +2653,8 @@ class MovieViewModel(
         if (directDownloadUrl.startsWith("http://", ignoreCase = true) ||
             directDownloadUrl.startsWith("https://", ignoreCase = true)
         ) {
+            val directSubUrl = link.subtitleUrl.trim().ifBlank { resolvedMedia.subtitleUrl.trim() }
+            val directSubLabel = link.subtitleLabel.trim().ifBlank { resolvedMedia.subtitleLabel.trim() }
             val wifiOnly = _uiState.value.downloadPrefs.wifiOnly
             viewModelScope.launch {
                 repository.startDirectUrlDownload(
@@ -2661,7 +2663,9 @@ class MovieViewModel(
                     episode = episode,
                     episodeTitle = episodeTitle,
                     directUrl = directDownloadUrl,
-                    wifiOnly = wifiOnly
+                    wifiOnly = wifiOnly,
+                    subtitleUrl = directSubUrl,
+                    subtitleLabel = directSubLabel
                 ).fold(
                     onSuccess = { entry ->
                         val label = if (resolvedMedia.mediaType.equals("tv", true)) {
@@ -2749,7 +2753,9 @@ class MovieViewModel(
                 season = seasonNumber,
                 episode = epNum,
                 episodeTitle = epInfo?.name.orEmpty(),
-                sourceUrl = dlUrl
+                sourceUrl = dlUrl,
+                subtitleUrl = link.subtitleUrl.trim().ifBlank { resolvedMedia.subtitleUrl.trim() },
+                subtitleLabel = link.subtitleLabel.trim().ifBlank { resolvedMedia.subtitleLabel.trim() }
             )
         }
 

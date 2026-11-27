@@ -5,7 +5,9 @@ import com.squareup.moshi.Types
 
 data class EpisodeDirectLink(
     val directVideoUrl: String = "",
-    val downloadUrl: String = ""
+    val downloadUrl: String = "",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = ""
 ) {
     fun effectiveStreamUrl(): String = directVideoUrl.trim().ifBlank { downloadUrl.trim() }
 
@@ -36,7 +38,9 @@ object EpisodeDirectLinksCodec {
                 val link = when (rawVal) {
                     is Map<*, *> -> EpisodeDirectLink(
                         directVideoUrl = (rawVal["directVideoUrl"] as? String)?.trim().orEmpty(),
-                        downloadUrl = (rawVal["downloadUrl"] as? String)?.trim().orEmpty()
+                        downloadUrl = (rawVal["downloadUrl"] as? String)?.trim().orEmpty(),
+                        subtitleUrl = (rawVal["subtitleUrl"] as? String)?.trim().orEmpty(),
+                        subtitleLabel = (rawVal["subtitleLabel"] as? String)?.trim().orEmpty()
                     )
                     is String -> {
                         val str = rawVal.trim()
@@ -58,10 +62,17 @@ object EpisodeDirectLinksCodec {
         map.forEach { (rawKey, link) ->
             val key = normalizeKey(rawKey) ?: return@forEach
             if (link.directVideoUrl.isBlank() && link.downloadUrl.isBlank()) return@forEach
-            encoded[key] = linkedMapOf(
+            val entry = linkedMapOf(
                 "directVideoUrl" to link.directVideoUrl.trim(),
                 "downloadUrl" to link.downloadUrl.trim()
             )
+            if (link.subtitleUrl.isNotBlank()) {
+                entry["subtitleUrl"] = link.subtitleUrl.trim()
+            }
+            if (link.subtitleLabel.isNotBlank()) {
+                entry["subtitleLabel"] = link.subtitleLabel.trim()
+            }
+            encoded[key] = entry
         }
         return if (encoded.isEmpty()) "" else mapAdapter.toJson(encoded)
     }
@@ -124,7 +135,9 @@ data class EpisodeInfo(
     val stillPath: String = "",
     val airDate: String = "",
     val directVideoUrl: String = "",
-    val downloadUrl: String = ""
+    val downloadUrl: String = "",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = ""
 ) {
     val fullStillUrl: String
         get() = when {
@@ -168,7 +181,9 @@ data class MediaItem(
     val popularity: Double = 0.0,
     val directVideoUrl: String = "",
     val downloadUrl: String = "",
-    val episodeLinksJson: String = ""
+    val episodeLinksJson: String = "",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = ""
 ) {
     val fullPosterUrl: String
         get() = when {
@@ -252,17 +267,24 @@ data class MediaItem(
         if (ep != null && ep.hasAnyDirectLink()) {
             return EpisodeDirectLink(
                 directVideoUrl = ep.directVideoUrl.trim(),
-                downloadUrl = ep.downloadUrl.trim()
+                downloadUrl = ep.downloadUrl.trim(),
+                subtitleUrl = ep.subtitleUrl.trim().ifBlank { subtitleUrl.trim() },
+                subtitleLabel = ep.subtitleLabel.trim().ifBlank { subtitleLabel.trim() }
             )
         }
         val mapped = EpisodeDirectLinksCodec.decodeJson(episodeLinksJson)[EpisodeDirectLinksCodec.keyFor(season, episode)]
         if (mapped != null && mapped.hasAnyLink()) {
-            return mapped
+            return mapped.copy(
+                subtitleUrl = mapped.subtitleUrl.trim().ifBlank { subtitleUrl.trim() },
+                subtitleLabel = mapped.subtitleLabel.trim().ifBlank { subtitleLabel.trim() }
+            )
         }
         if (!mediaType.equals("tv", ignoreCase = true)) {
             return EpisodeDirectLink(
                 directVideoUrl = directVideoUrl.trim(),
-                downloadUrl = downloadUrl.trim()
+                downloadUrl = downloadUrl.trim(),
+                subtitleUrl = subtitleUrl.trim(),
+                subtitleLabel = subtitleLabel.trim()
             )
         }
         return EpisodeDirectLink()
@@ -350,7 +372,9 @@ fun CustomMediaEntity.toMediaItem(): MediaItem {
         episodesPerSeason = episodesPerSeason,
         directVideoUrl = directVideoUrl,
         downloadUrl = downloadUrl,
-        episodeLinksJson = episodeLinksJson
+        episodeLinksJson = episodeLinksJson,
+        subtitleUrl = subtitleUrl,
+        subtitleLabel = subtitleLabel
     )
 }
 
@@ -410,6 +434,8 @@ fun MediaItem.mergeWithCatalog(catalogMatch: MediaItem?): MediaItem {
         episodesPerSeason = if (catalogMatch.seasons.isNotEmpty()) catalogMatch.episodesPerSeason else episodesPerSeason,
         directVideoUrl = catalogMatch.directVideoUrl.ifBlank { directVideoUrl },
         downloadUrl = catalogMatch.downloadUrl.ifBlank { downloadUrl },
-        episodeLinksJson = catalogMatch.episodeLinksJson.ifBlank { episodeLinksJson }
+        episodeLinksJson = catalogMatch.episodeLinksJson.ifBlank { episodeLinksJson },
+        subtitleUrl = catalogMatch.subtitleUrl.ifBlank { subtitleUrl },
+        subtitleLabel = catalogMatch.subtitleLabel.ifBlank { subtitleLabel }
     )
 }

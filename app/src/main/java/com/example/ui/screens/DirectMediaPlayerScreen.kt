@@ -106,6 +106,7 @@ import com.example.ui.player.LongPressSpeedController
 import com.example.ui.player.LongPressSpeedPill
 import com.example.ui.player.PlayerLockOverlay
 import com.example.ui.player.SeriesUpNextCard
+import com.example.ui.player.SidecarSubtitleResolver
 import com.example.ui.player.SwipeAxis
 import com.example.ui.player.SwipeGestureMath
 import com.example.ui.player.VerticalAdjustmentPill
@@ -297,7 +298,7 @@ fun DirectMediaPlayerScreen(
         }
     }
 
-    val exoPlayer = remember(sourceUrl, reloadKey) {
+    val exoPlayer = remember(sourceUrl, isLocalFile, reloadKey) {
         val headers = buildMap {
             downloadEntity?.refererHeader?.takeIf { it.isNotBlank() }?.let { put("Referer", it) }
             downloadEntity?.cookieHeader?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
@@ -333,6 +334,21 @@ fun DirectMediaPlayerScreen(
                         )
                     )
                 if (isHls) itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
+                if (isLocalFile) {
+                    SidecarSubtitleResolver.findSidecarSubtitle(
+                        videoPathOrUri = sourceUrl,
+                        fallbackPath = downloadEntity?.localFilePath.orEmpty()
+                    )?.let { sidecar ->
+                        itemBuilder.setSubtitleConfigurations(
+                            listOf(
+                                SidecarSubtitleResolver.buildSubtitleConfiguration(
+                                    sidecar = sidecar,
+                                    subtitleLabel = downloadEntity?.subtitleLabel
+                                )
+                            )
+                        )
+                    }
+                }
                 setMediaItem(itemBuilder.build())
                 playbackParameters = PlaybackParameters(baseSpeed)
                 playWhenReady = true

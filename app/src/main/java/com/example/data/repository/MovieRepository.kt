@@ -1683,7 +1683,9 @@ class MovieRepository(
         episode: Int = 1,
         episodeTitle: String = "",
         directUrl: String,
-        wifiOnly: Boolean = false
+        wifiOnly: Boolean = false,
+        subtitleUrl: String = "",
+        subtitleLabel: String = ""
     ): Result<DownloadEntity> {
         val engine = downloadEngine ?: return Result.failure(
             IllegalStateException("Download service requires an Android application context.")
@@ -1694,7 +1696,9 @@ class MovieRepository(
             episode = episode,
             episodeTitle = episodeTitle,
             directUrl = directUrl,
-            wifiOnly = wifiOnly
+            wifiOnly = wifiOnly,
+            subtitleUrl = subtitleUrl,
+            subtitleLabel = subtitleLabel
         )
     }
 

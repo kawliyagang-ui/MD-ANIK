@@ -64,6 +64,8 @@ data class CustomMediaEntity(
     val directVideoUrl: String = "",
     val downloadUrl: String = "",
     val episodeLinksJson: String = "",
+    val subtitleUrl: String = "",
+    val subtitleLabel: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
