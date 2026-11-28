@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
@@ -94,6 +95,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.local.DownloadPreferences
 import com.example.data.local.NotificationPreferences
@@ -106,6 +108,12 @@ import com.example.ui.components.CineDialogEntryBox
 import com.example.ui.components.CineEase
 import com.example.ui.components.RedButton
 import com.example.ui.components.cinePressScale
+import com.example.ui.player.SubtitleBackground
+import com.example.ui.player.SubtitleEdgeStyle
+import com.example.ui.player.SubtitlePosition
+import com.example.ui.player.SubtitleStyleStore
+import com.example.ui.player.SubtitleTextColor
+import com.example.ui.player.SubtitleTextSize
 import com.example.ui.theme.AccentColorOption
 import com.example.ui.theme.CinetraTheme
 import com.example.ui.theme.DarkThemePalette
@@ -150,6 +158,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     val colors = CinetraTheme.colors
     val bottomClearance = CinetraTheme.bottomBarClearance
+    val subtitleStyleStore = remember(context) { SubtitleStyleStore.get(context) }
+    val subtitleStyle by subtitleStyleStore.state.collectAsStateWithLifecycle()
 
     var hasNotifPermission by remember {
         mutableStateOf(EpisodeNotificationHelper.hasNotificationPermission(context))
@@ -728,6 +738,194 @@ fun SettingsScreen(
                                 color = colors.border,
                                 modifier = Modifier.padding(vertical = 2.dp)
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Subtitle Style Customization Card
+        item(key = "settings_subtitle_style_card", contentType = "settings_card") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.border, MaterialTheme.shapes.medium)
+                    .testTag("settings_subtitle_style_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.ClosedCaption,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Subtitle Style",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = colors.textPrimary
+                            )
+                            Text(
+                                text = "Customize subtitles for streaming & downloaded videos in the direct player.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textMuted
+                            )
+                        }
+                    }
+
+                    // 1. Text Size
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Text Size",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SubtitleTextSize.entries.forEach { sizeOption ->
+                                CategoryPill(
+                                    label = sizeOption.label,
+                                    selected = subtitleStyle.textSize == sizeOption,
+                                    onClick = { subtitleStyleStore.save(subtitleStyle.copy(textSize = sizeOption)) },
+                                    modifier = Modifier.testTag("settings_sub_size_${sizeOption.storageKey}")
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Text Colour
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Text Colour (${subtitleStyle.textColor.label})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SubtitleTextColor.entries.forEach { colorOption ->
+                                val isSelected = subtitleStyle.textColor == colorOption
+                                val checkTint = if (colorOption == SubtitleTextColor.WHITE ||
+                                    colorOption == SubtitleTextColor.YELLOW ||
+                                    colorOption == SubtitleTextColor.CYAN ||
+                                    colorOption == SubtitleTextColor.GREEN
+                                ) Color.Black else Color.White
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .minimumInteractiveComponentSize()
+                                        .clip(CircleShape)
+                                        .background(Color(colorOption.argb))
+                                        .border(
+                                            width = if (isSelected) 3.dp else 1.dp,
+                                            color = if (isSelected) colors.primary else colors.border,
+                                            shape = CircleShape
+                                        )
+                                        .clickable {
+                                            subtitleStyleStore.save(subtitleStyle.copy(textColor = colorOption))
+                                        }
+                                        .testTag("settings_sub_color_${colorOption.storageKey}"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = colorOption.label,
+                                            tint = checkTint,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Background
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Background",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SubtitleBackground.entries.forEach { bgOption ->
+                                CategoryPill(
+                                    label = bgOption.label,
+                                    selected = subtitleStyle.background == bgOption,
+                                    onClick = { subtitleStyleStore.save(subtitleStyle.copy(background = bgOption)) },
+                                    modifier = Modifier.testTag("settings_sub_bg_${bgOption.storageKey}")
+                                )
+                            }
+                        }
+                    }
+
+                    // 4. Edge / Outline
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Edge / Outline",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SubtitleEdgeStyle.entries.forEach { edgeOption ->
+                                CategoryPill(
+                                    label = edgeOption.label,
+                                    selected = subtitleStyle.edgeStyle == edgeOption,
+                                    onClick = { subtitleStyleStore.save(subtitleStyle.copy(edgeStyle = edgeOption)) },
+                                    modifier = Modifier.testTag("settings_sub_edge_${edgeOption.storageKey}")
+                                )
+                            }
+                        }
+                    }
+
+                    // 5. Position
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Position",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.textSecondary
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SubtitlePosition.entries.forEach { posOption ->
+                                CategoryPill(
+                                    label = posOption.label,
+                                    selected = subtitleStyle.position == posOption,
+                                    onClick = { subtitleStyleStore.save(subtitleStyle.copy(position = posOption)) },
+                                    modifier = Modifier.testTag("settings_sub_pos_${posOption.storageKey}")
+                                )
+                            }
                         }
                     }
                 }

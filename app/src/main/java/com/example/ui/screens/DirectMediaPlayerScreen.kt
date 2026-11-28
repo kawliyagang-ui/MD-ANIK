@@ -63,6 +63,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.toRect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
@@ -107,6 +108,8 @@ import com.example.ui.player.LongPressSpeedPill
 import com.example.ui.player.PlayerLockOverlay
 import com.example.ui.player.SeriesUpNextCard
 import com.example.ui.player.SidecarSubtitleResolver
+import com.example.ui.player.SubtitleStyleMapper
+import com.example.ui.player.SubtitleStyleStore
 import com.example.ui.player.SwipeAxis
 import com.example.ui.player.SwipeGestureMath
 import com.example.ui.player.VerticalAdjustmentPill
@@ -184,6 +187,9 @@ fun DirectMediaPlayerScreen(
     val ownerToken = remember { UUID.randomUUID().toString() }
     val playPauseFocusRequester = remember { FocusRequester() }
     var hasFocusInControls by remember { mutableStateOf(false) }
+    val subtitleStyleStore = remember(context) { SubtitleStyleStore.get(context) }
+    val subtitleStyle by subtitleStyleStore.state.collectAsStateWithLifecycle()
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
 
     val initialOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -763,6 +769,10 @@ fun DirectMediaPlayerScreen(
             else -> Modifier.fillMaxSize()
         }
 
+        LaunchedEffect(playerViewRef, subtitleStyle) {
+            playerViewRef?.let { SubtitleStyleMapper.applyToPlayerView(it, subtitleStyle) }
+        }
+
         AndroidView(
             modifier = videoContainerModifier,
             factory = { ctx ->
@@ -776,10 +786,13 @@ fun DirectMediaPlayerScreen(
                     isFocusable = false
                     keepScreenOn = isPlaying
                     resizeMode = aspectRatio.toResizeMode()
+                    SubtitleStyleMapper.applyToPlayerView(this, subtitleStyle)
                     player = exoPlayer
+                    playerViewRef = this
                 }
             },
             update = { view ->
+                if (playerViewRef !== view) playerViewRef = view
                 if (view.player !== exoPlayer) view.player = exoPlayer
                 if (view.keepScreenOn != isPlaying) view.keepScreenOn = isPlaying
                 val targetResize = aspectRatio.toResizeMode()
@@ -1352,6 +1365,11 @@ fun DirectMediaPlayerScreen(
                         .setOverrideForType(TrackSelectionOverride(choice.group.mediaTrackGroup, choice.trackIndex))
                         .build()
                     trackRevision++
+                },
+                subtitleStyle = subtitleStyle,
+                onUpdateSubtitleStyle = { updated ->
+                    controlInteractionTick++
+                    subtitleStyleStore.save(updated)
                 }
             )
         }

@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,7 +98,9 @@ fun DirectPlayerSheetsHost(
     onSelectAudioTrack: (DirectTrackChoice) -> Unit,
     onDisableSubtitles: () -> Unit,
     onSelectSubtitleTrack: (DirectTrackChoice) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    subtitleStyle: SubtitleStylePrefs = SubtitleStylePrefs(),
+    onUpdateSubtitleStyle: (SubtitleStylePrefs) -> Unit = {}
 ) {
     val visible = activeSheet != DirectPlayerActiveSheet.NONE
     val firstOptionFocusRequester = remember { FocusRequester() }
@@ -162,6 +166,13 @@ fun DirectPlayerSheetsHost(
 
                 DirectPlayerActiveSheet.SUBTITLES -> {
                     DirectPlayerSheetContainer(title = "Subtitles (CC)") {
+                        SubtitleStyleSheetSection(
+                            style = subtitleStyle,
+                            onUpdate = onUpdateSubtitleStyle
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                        Spacer(modifier = Modifier.height(6.dp))
                         DirectSheetOptionRow(
                             label = "Off",
                             selected = areSubtitlesDisabled || subtitleTrackChoices.none { it.isSelected },
@@ -396,5 +407,172 @@ private fun DirectSheetOptionRow(
                 modifier = Modifier.size(18.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun SubtitleStyleSheetSection(
+    style: SubtitleStylePrefs,
+    onUpdate: (SubtitleStylePrefs) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag("sheet_subtitle_style_section"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Subtitle Style",
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        SubtitleStyleChipGroup(label = "Text Size") {
+            SubtitleTextSize.entries.forEach { option ->
+                SubtitleSheetStyleChip(
+                    label = option.label,
+                    selected = style.textSize == option,
+                    testTag = "sheet_sub_size_${option.storageKey}",
+                    onClick = { onUpdate(style.copy(textSize = option)) }
+                )
+            }
+        }
+
+        SubtitleStyleChipGroup(label = "Text Colour") {
+            SubtitleTextColor.entries.forEach { option ->
+                SubtitleSheetStyleChip(
+                    label = option.label,
+                    selected = style.textColor == option,
+                    swatchColor = Color(option.argb),
+                    testTag = "sheet_sub_color_${option.storageKey}",
+                    onClick = { onUpdate(style.copy(textColor = option)) }
+                )
+            }
+        }
+
+        SubtitleStyleChipGroup(label = "Background") {
+            SubtitleBackground.entries.forEach { option ->
+                SubtitleSheetStyleChip(
+                    label = option.label,
+                    selected = style.background == option,
+                    swatchColor = if (option == SubtitleBackground.NONE) null else Color(option.argb),
+                    testTag = "sheet_sub_bg_${option.storageKey}",
+                    onClick = { onUpdate(style.copy(background = option)) }
+                )
+            }
+        }
+
+        SubtitleStyleChipGroup(label = "Edge / Outline") {
+            SubtitleEdgeStyle.entries.forEach { option ->
+                SubtitleSheetStyleChip(
+                    label = option.label,
+                    selected = style.edgeStyle == option,
+                    testTag = "sheet_sub_edge_${option.storageKey}",
+                    onClick = { onUpdate(style.copy(edgeStyle = option)) }
+                )
+            }
+        }
+
+        SubtitleStyleChipGroup(label = "Position") {
+            SubtitlePosition.entries.forEach { option ->
+                SubtitleSheetStyleChip(
+                    label = option.label,
+                    selected = style.position == option,
+                    testTag = "sheet_sub_pos_${option.storageKey}",
+                    onClick = { onUpdate(style.copy(position = option)) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleStyleChipGroup(
+    label: String,
+    content: @Composable () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.62f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SubtitleSheetStyleChip(
+    label: String,
+    selected: Boolean,
+    testTag: String,
+    swatchColor: Color? = null,
+    onClick: () -> Unit
+) {
+    val colors = CineTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clip(CircleShape)
+            .background(
+                when {
+                    selected -> colors.primary
+                    isFocused -> colors.primary.copy(alpha = 0.28f)
+                    else -> Color.White.copy(alpha = 0.08f)
+                }
+            )
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = when {
+                    isFocused -> Color.White
+                    selected -> colors.primary
+                    else -> Color.White.copy(alpha = 0.14f)
+                },
+                shape = CircleShape
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .clickable(
+                interactionSource = interaction,
+                indication = ripple(bounded = true),
+                onClick = onClick
+            )
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (swatchColor != null) {
+            Box(
+                modifier = Modifier
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(swatchColor)
+                    .border(1.dp, Color.White.copy(alpha = 0.48f), CircleShape)
+            )
+        }
+        Text(
+            text = label,
+            color = if (selected) colors.onPrimary else Color.White.copy(alpha = 0.88f),
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1
+        )
     }
 }
